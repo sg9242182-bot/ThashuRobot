@@ -36,11 +36,19 @@ void loop() {
         if (tof.isValid(sensors[i])) {
             Serial.print(tof.getDistanceMm(sensors[i]));
             Serial.print(" mm");
+
             if (tof.isObstacleDetected(sensors[i])) {
                 Serial.print(" [OBSTACLE]");
             }
+
+            const uint8_t status = tof.getRangeStatus(sensors[i]);
+            if (status != 0) {
+                Serial.print(" [STATUS ");
+                Serial.print(status);
+                Serial.print("]");
+            }
         } else {
-            Serial.print("INVALID");
+            Serial.print("INVALID [OUT OF RANGE]");
         }
 
         if (i + 1 < ToFManager::SENSOR_COUNT) {

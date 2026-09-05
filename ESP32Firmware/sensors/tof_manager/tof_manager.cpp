@@ -6,6 +6,7 @@
 namespace {
 constexpr uint8_t XSHUT_PINS[ToFManager::SENSOR_COUNT] = {4, 16, 17};
 constexpr uint8_t I2C_ADDRESSES[ToFManager::SENSOR_COUNT] = {0x30, 0x31, 0x32};
+constexpr uint8_t OUT_OF_RANGE_STATUS = 4;
 }
 
 bool ToFManager::begin() {
@@ -17,6 +18,7 @@ bool ToFManager::begin() {
         valid[i] = false;
         obstacleDetected[i] = false;
         distanceMm[i] = 0;
+        rangeStatus[i] = 255;
     }
     delay(STARTUP_DELAY_MS);
 
@@ -58,15 +60,13 @@ void ToFManager::update() {
     for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
         VL53L0X_RangingMeasurementData_t measurement;
         sensors[i].rangingTest(&measurement, false);
+        rangeStatus[i] = measurement.RangeStatus;
+        distanceMm[i] = measurement.RangeMilliMeter;
 
-        if (measurement.RangeStatus == 0) {
-            distanceMm[i] = measurement.RangeMilliMeter;
-            valid[i] = true;
-            obstacleDetected[i] = distanceMm[i] <= static_cast<uint16_t>(OBSTACLE_DISTANCE_CM) * 10U;
-        } else {
-            valid[i] = false;
-            obstacleDetected[i] = false;
-        }
+        // For this hardware validation, only status 4 is treated as out of range.
+        valid[i] = measurement.RangeStatus != OUT_OF_RANGE_STATUS;
+        obstacleDetected[i] = valid[i] &&
+            distanceMm[i] <= static_cast<uint16_t>(OBSTACLE_DISTANCE_CM) * 10U;
     }
 }
 
@@ -87,4 +87,9 @@ bool ToFManager::isValid(SensorId sensor) const {
 bool ToFManager::isObstacleDetected(SensorId sensor) const {
     const uint8_t index = static_cast<uint8_t>(sensor);
     return index < SENSOR_COUNT && obstacleDetected[index];
+}
+
+uint8_t ToFManager::getRangeStatus(SensorId sensor) const {
+    const uint8_t index = static_cast<uint8_t>(sensor);
+    return index < SENSOR_COUNT ? rangeStatus[index] : 255;
 }
