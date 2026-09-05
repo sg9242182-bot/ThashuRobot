@@ -1,0 +1,94 @@
+#include "tof_manager.h"
+
+#include <Arduino.h>
+#include <Wire.h>
+
+bool ToFManager::begin() {
+    Wire.begin(SDA_PIN, SCL_PIN);
+
+    // All sensors start disabled because they share the default I2C address.
+    for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
+        pinMode(XSHUT_PINS[i], OUTPUT);
+        digitalWrite(XSHUT_PINS[i], LOW);
+        valid[i] = false;
+        obstacleDetected[i] = false;
+        distanceMm[i] = 0;
+    }
+    delay(STARTUP_DELAY_MS);
+
+    // Enable and assign a unique address to each sensor sequentially.
+    for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
+        if (!initializeSensor(static_cast<SensorId>(i))) {
+            return false;
+        }
+    }
+
+    lastMeasurementTime = millis();
+    return true;
+}
+
+bool ToFManager::initializeSensor(SensorId sensor) {
+    const uint8_t index = static_cast<uint8_t>(sensor);
+
+    digitalWrite(XSHUT_PINS[index], HIGH);
+    delay(STARTUP_DELAY_MS);
+
+    if (!sensors[index].begin(0x29, false, &Wire)) {
+        return false;
+    }
+
+    sensors[index].setAddress(I2C_ADDRESSES[index]);
+    delay(STARTUP_DELAY_MS);
+
+    return true;
+}
+
+void ToFManager::update() {
+    const unsigned long now = millis();
+    if (now - lastMeasurementTime < MEASUREMENT_INTERVAL_MS) {
+        return;
+    }
+    lastMeasurementTime = now;
+
+    for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
+        VL53L0X_RangingMeasurementData_t measurement;
+        sensors[i].rangingTest(&measurement, false);
+
+        if (measurement.RangeStatus == 0) {
+            distanceMm[i] = measurement.RangeMilliMeter;
+            valid[i] = true;
+            obstacleDetected[i] = distanceMm[i] <= OBSTACLE_DISTANCE_MM;
+        } else {
+            valid[i] = false;
+            obstacleDetected[i] = false;
+        }
+    }
+}
+
+uint16_t ToFManager::getDistanceMm(SensorId sensor) const {
+    const uint8_t index = static_cast<uint8_t>(sensor);
+    if (index >= SENSOR_COUNT) {
+        return 0;
+    }
+    return distanceMm[index];
+}
+
+float ToFManager::getDistanceCm(SensorId sensor) const {
+    return static_cast<float>(getDistanceMm(sensor)) / 10.0f;
+}
+
+bool ToFManager::isValid(SensorId sensor) const {
+    const uint8_t index = static_cast<uint8_t>(sensor);
+    if (index >= SENSOR_COUNT) {
+        return false;
+    }
+    return valid[index];
+}
+
+bool ToFManager::isObstacleDetected(SensorId sensor) const {
+    const uint8_t index = static_cast<uint8_t>(sensor);
+    if (index >= SENSOR_COUNT) {
+        return false;
+    }
+    return obstacleDetected[index];
+}
