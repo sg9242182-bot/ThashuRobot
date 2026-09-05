@@ -17,7 +17,7 @@ void printHelp() {
     Serial.println("  blink");
 }
 
-bool handleCommand(String command) {
+void handleCommand(String command) {
     command.trim();
     command.toLowerCase();
 
@@ -45,23 +45,20 @@ bool handleCommand(String command) {
         eyes.setExpression(EyeManager::BLINK);
     } else if (command == "help") {
         printHelp();
-        return true;
+        return;
     } else {
         Serial.println("Unknown command. Type 'help'.");
-        return false;
+        return;
     }
 
     Serial.print("Expression: ");
     Serial.println(command);
-    return true;
 }
 
 void setup() {
     Serial.begin(115200);
     delay(100);
 
-    // Both OLEDs share SDA=21 and SCL=22.
-    // The displays must have different I2C addresses.
     if (!eyes.begin(0x3C, 0x3D)) {
         Serial.println("EyeManager initialization failed.");
         while (true) {
@@ -69,7 +66,6 @@ void setup() {
         }
     }
 
-    // Robot starts in stable idle. No automatic expression cycling.
     Serial.println("EyeManager ready. Starting in IDLE.");
     printHelp();
 }
@@ -78,7 +74,6 @@ void loop() {
     eyes.update();
 
     if (Serial.available()) {
-        const String command = Serial.readStringUntil('\n');
-        handleCommand(command);
+        handleCommand(Serial.readStringUntil('\n'));
     }
 }
