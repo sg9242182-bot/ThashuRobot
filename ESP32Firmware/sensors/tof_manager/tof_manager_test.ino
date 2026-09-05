@@ -2,6 +2,11 @@
 
 ToFManager tof;
 
+namespace {
+constexpr unsigned long PRINT_INTERVAL_MS = 100;
+unsigned long lastPrintTime = 0;
+}
+
 void setup() {
     Serial.begin(115200);
     delay(500);
@@ -19,7 +24,15 @@ void setup() {
 }
 
 void loop() {
+    // Keep sensor polling continuous and non-blocking.
     tof.update();
+
+    // Limit serial output without blocking the sensor update loop.
+    const unsigned long now = millis();
+    if (now - lastPrintTime < PRINT_INTERVAL_MS) {
+        return;
+    }
+    lastPrintTime = now;
 
     const ToFManager::SensorId sensors[] = {
         ToFManager::FRONT_LEFT,
