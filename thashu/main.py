@@ -13,6 +13,8 @@ from voice.text_to_speech import speak
 from voice.sound_player   import play
 from core.brain           import Brain
 from core.attention       import AttentionSystem
+from core.state           import RuntimeState, RuntimeStateMachine
+from core.event_bus       import EventBus
 from vision.vision_core   import VisionCore
 from hardware.eyes        import Eyes
 
@@ -31,11 +33,11 @@ BLOCK_SIZE         = 5460
 # ── Shutdown Button ───────────────────────────────────────────────────────────
 BUTTON_PIN = 17
 
-# ── States ────────────────────────────────────────────────────────────────────
-IDLE      = "IDLE"
-LISTENING = "LISTENING"
 
 # ── Boot ──────────────────────────────────────────────────────────────────────
+runtime   = RuntimeStateMachine()
+event_bus = EventBus()
+
 brain  = Brain()
 audio  = AudioManager(sample_rate=SAMPLE_RATE, blocksize=BLOCK_SIZE)
 wake = WakeWordEngine(
@@ -47,6 +49,10 @@ vad    = VoiceActivityDetector()
 attn   = AttentionSystem()
 vision = VisionCore()
 eyes   = Eyes()
+event_bus.subscribe(
+    "RUNTIME_STATE_CHANGED",
+    vision.on_runtime_state_changed,
+)
 
 
 # ── Shutdown Button Monitor ───────────────────────────────────────────────────
@@ -146,6 +152,20 @@ def safe_play(path: str):
     audio.resume()
     time.sleep(0.15)
 
+def transition_runtime(target_state):
+    previous, current = runtime.transition_to(target_state)
+
+    event_bus.publish(
+        "RUNTIME_STATE_CHANGED",
+        {
+            "from": previous.value,
+            "to": current.value,
+        },
+    )
+
+    print(f"[STATE] {previous.value} -> {current.value}")
+
+    return current
 
 # ── Main loop ──────────────────────────────────────────────────────────────────
 def main():
@@ -164,6 +184,7 @@ def main():
     shutdown_thread.start()
 
     # ── Startup sound ───────────────────────────────────────────────────────
+
     wake.lock()
 
     audio.pause()
@@ -182,7 +203,7 @@ def main():
 
     eyes.idle()
 
-    state = IDLE
+
 
     while True:
         chunk = audio.read()
@@ -197,9 +218,9 @@ def main():
         attn.update(vis["faces"], is_speech_now)
 
         # ── IDLE: watch for wake word ─────────────────────────────────────
-        if state == IDLE:
+        if runtime.current == RuntimeState.IDLE:
             if wake.process(chunk):
-                state = LISTENING
+                transition_runtime(RuntimeState.WAKE_DETECTED)
 
                 print("[SYSTEM] ═══════════════════════════")
                 print("[SYSTEM] 👂  LISTENING...")
@@ -211,7 +232,7 @@ def main():
                 safe_play(SOUND_YES)
 
                 wake.unlock()
-
+                transition_runtime(RuntimeState.LISTENING)
                 # ── Collect command ──────────────────────────────────────
                 
                 interaction_start = time.time()
@@ -234,7 +255,8 @@ def main():
 
                     wake.unlock()
 
-                    state = IDLE
+                    transition_runtime(RuntimeState.RETURN_TO_IDLE)
+                    transition_runtime(RuntimeState.IDLE)
                     continue
 
                 # ── Transcribe ───────────────────────────────────────────
@@ -243,6 +265,9 @@ def main():
                 # stream running during that time fills and overflows the queue.
                 wake.lock()
                 audio.pause()
+
+                transition_runtime(RuntimeState.THINKING)
+                eyes.thinking()
 
                 stt_start = time.time()
 
@@ -266,12 +291,13 @@ def main():
                     audio.resume()
                     wake.unlock()
 
-                    state = IDLE
+                    transition_runtime(RuntimeState.RETURN_TO_IDLE)
+                    transition_runtime(RuntimeState.IDLE)
                     continue
 
                 # ── Brain + Speak ────────────────────────────────────────
                 # Already paused and locked from before transcribe.
-                eyes.thinking()
+
 
                 print("[SYSTEM] 🧠  THINKING...")
 
@@ -286,6 +312,8 @@ def main():
                     print(f"[SYSTEM] 💬  THASHU: {response}")
 
                     eyes.happy()
+
+                    transition_runtime(RuntimeState.SPEAKING)
 
                     tts_start = time.time()
 
@@ -312,7 +340,8 @@ def main():
 
                 print("[SYSTEM] ── Back to idle, say 'Hey Thashu'")
 
-                state = IDLE
+                transition_runtime(RuntimeState.RETURN_TO_IDLE)
+                transition_runtime(RuntimeState.IDLE)
 
 
 if __name__ == "__main__":

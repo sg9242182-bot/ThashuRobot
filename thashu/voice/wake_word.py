@@ -128,6 +128,7 @@ class WakeWordEngine:
         self.cooldown          = cooldown
         self.consecutive_hits  = consecutive_hits
         self._hit_streak       = 0
+        self._recent_speech_chunks = 0  # Tracks recent speech frames to sync VAD with Wake Word score timing
 
         oww_kwargs = {}
         if _HAVE_LOCAL_SUPPORT_MODELS:
@@ -178,6 +179,7 @@ class WakeWordEngine:
         """
         self.last_detected = time.time()
         self._hit_streak = 0
+        self._recent_speech_chunks = 0
         self.lock_event.clear()
 
     # ── Detection ────────────────────────────────────────────────────────────
@@ -237,13 +239,21 @@ class WakeWordEngine:
             # sustained tonal false triggers.
             speech_like = self._looks_like_speech(audio16)
 
+            # Maintain a 5-chunk (~500ms) hangover so VAD stays true while openWakeWord catches up
+            if speech_like:
+                self._recent_speech_chunks = 5
+            else:
+                self._recent_speech_chunks = max(0, self._recent_speech_chunks - 1)
+
+            recent_speech = self._recent_speech_chunks > 0
+
         except Exception as e:
             print(f"[WAKE] Error in process: {e}")
             return False
 
-        print(f"[WAKE] score={score:.3f} speech_like={speech_like}")
+        print(f"[WAKE] score={score:.3f} speech_like={speech_like} recent_speech={recent_speech}")
 
-        if score >= self.threshold and speech_like:
+        if score >= self.threshold and recent_speech:
             self._hit_streak += 1
         else:
             self._hit_streak = 0

@@ -302,51 +302,51 @@ Phase 1 completion: Do not mark complete until all acceptance criteria pass.
 
 Phase 2 — Runtime Supervisor \& State Machine
 
-Status: NOT STARTED
+Status: Runtime supervisor/state machine integrated and verified
 
 Target states:
 
-\[ ] IDLE
+\[x] IDLE
 
-\[ ] WAKE\_DETECTED
+\[x] WAKE\_DETECTED
 
-\[ ] LISTENING
+\[x] LISTENING
 
-\[ ] THINKING
+\[x] THINKING
 
-\[ ] SPEAKING
+\[x] SPEAKING
 
-\[ ] RETURN\_TO\_IDLE
+\[x] RETURN\_TO\_IDLE
 
 Tasks:
 
-\[ ] Inspect existing `core/state.py`.
+\[x] Inspect existing `core/state.py`.
 
-\[ ] Inspect existing `core/event\_bus.py`.
+\[x] Inspect existing `core/event\_bus.py`.
 
-\[ ] Reuse suitable existing architecture.
+\[x] Reuse suitable existing architecture.
 
-\[ ] Define state ownership.
+\[x] Define state ownership.
 
-\[ ] Define state transitions.
+\[x] Define state transitions.
 
-\[ ] Define subsystem behavior per state.
+\[x] Define subsystem behavior per state.
 
 \[ ] Keep hardware safety active in every state.
 
-\[ ] Prevent motor following during conversation.
+\[x] Prevent motor following during conversation.
 
-\[ ] Prevent duplicate hardware ownership.
+\[x] Prevent duplicate hardware ownership.
 
 Acceptance:
 
-\[ ] State transitions are deterministic.
+\[x] State transitions are deterministic.
 
-\[ ] No subsystem can silently bypass the supervisor.
+\[x] No subsystem can silently bypass the supervisor.
 
 \[ ] Safety remains active in all states.
 
-\[ ] Existing voice behavior remains functional.
+\[x] Existing voice behavior remains functional.
 
 \---
 

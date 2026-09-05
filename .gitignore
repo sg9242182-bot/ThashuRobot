@@ -1,0 +1,15 @@
+# Python generated files
+__pycache__/
+*.py[cod]
+
+# Local virtual environments
+venv/
+.venv/
+venv_wake/
+
+# Local AI models
+models/
+
+# Local test/runtime artifacts
+.pytest_cache/
+.mypy_cache/
