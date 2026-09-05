@@ -3,11 +3,13 @@
 #include <Wire.h>
 
 namespace {
-constexpr int16_t EYE_CENTER_X = 64;
-constexpr int16_t EYE_CENTER_Y = 34;
-constexpr int16_t EYE_RADIUS_X = 38;
-constexpr int16_t EYE_RADIUS_Y = 25;
-constexpr int16_t PUPIL_RADIUS = 10;
+constexpr int16_t CENTER_X = 64;
+constexpr int16_t CENTER_Y = 34;
+constexpr int16_t EYE_LEFT = 25;
+constexpr int16_t EYE_RIGHT = 103;
+constexpr int16_t EYE_TOP = 13;
+constexpr int16_t EYE_BOTTOM = 54;
+constexpr int16_t PUPIL_RADIUS = 7;
 }
 
 EyeManager::EyeManager()
@@ -33,6 +35,7 @@ bool EyeManager::begin(uint8_t leftAddress, uint8_t rightAddress) {
     rightDisplay.display();
 
     ready = true;
+    expression = IDLE;
     animationFrame = 0;
     lastFrameTime = millis();
     render();
@@ -50,8 +53,13 @@ void EyeManager::update() {
     }
 
     lastFrameTime = now;
-    animationFrame++;
-    render();
+
+    // Only BLINK has an animation sequence. All other expressions remain
+    // stable until a new serial/application command calls setExpression().
+    if (expression == BLINK) {
+        animationFrame++;
+        render();
+    }
 }
 
 void EyeManager::setExpression(Expression newExpression) {
@@ -85,124 +93,179 @@ void EyeManager::render() {
 
 void EyeManager::drawExpression(Adafruit_SSD1306& display, bool leftEye) {
     switch (expression) {
+        case IDLE:
+            drawIdleEye(display);
+            break;
+
         case HAPPY:
-            drawClosedEye(display, true);
+            drawHappyEye(display);
             break;
 
         case SAD:
-            drawOpenEye(display, 0, 2);
-            drawBrow(display, 31, 15, 59, 22);
+            drawSadEye(display);
             break;
 
         case ANGRY:
-            drawOpenEye(display, 0, 1);
-            if (leftEye) {
-                drawBrow(display, 28, 14, 60, 25);
-            } else {
-                drawBrow(display, 68, 25, 100, 14);
-            }
+            drawAngryEye(display, leftEye);
             break;
 
         case CURIOUS:
-            drawOpenEye(display, leftEye ? 5 : -5, -2);
-            display.drawLine(32, 13, 56, 10, SSD1306_WHITE);
+            drawCuriousEye(display, leftEye);
             break;
 
         case SLEEPY:
-            display.fillRoundRect(24, 29, 80, 16, 8, SSD1306_WHITE);
-            display.fillRect(24, 29, 80, 8, SSD1306_BLACK);
-            if (!leftEye) {
-                display.setTextSize(1);
-                display.setTextColor(SSD1306_WHITE);
-                display.setCursor(92, 8);
-                display.print("z");
-                display.setCursor(101, 2);
-                display.print("z");
-            }
+            drawSleepyEye(display);
             break;
 
         case WINK:
-            if (leftEye) {
-                drawClosedEye(display, true);
-            } else {
-                drawOpenEye(display, 0, 0);
-            }
+            drawWinkEye(display, leftEye);
             break;
 
         case SURPRISED:
-            display.fillCircle(EYE_CENTER_X, EYE_CENTER_Y, 22, SSD1306_WHITE);
-            display.fillCircle(EYE_CENTER_X, EYE_CENTER_Y, 9, SSD1306_BLACK);
+            drawSurprisedEye(display);
             break;
 
         case CONFUSED:
-            drawOpenEye(display, leftEye ? 3 : -3, 0);
-            if (leftEye) {
-                drawBrow(display, 30, 15, 58, 11);
-            } else {
-                drawBrow(display, 70, 11, 98, 16);
-            }
+            drawConfusedEye(display, leftEye);
             break;
 
         case LOVE:
             drawHeart(display);
             break;
 
-        case BLINK: {
-            const uint8_t phase = animationFrame % 8;
-            if (phase == 0 || phase == 7) {
-                drawOpenEye(display, 0, 0);
-            } else if (phase == 1 || phase == 6) {
-                drawOpenEye(display, 0, 0, 10);
-            } else {
-                drawClosedEye(display, false);
-            }
+        case BLINK:
+            drawBlinkEye(display);
             break;
-        }
 
         default:
-            drawOpenEye(display, 0, 0);
+            drawIdleEye(display);
             break;
     }
 }
 
-void EyeManager::drawOpenEye(Adafruit_SSD1306& display,
-                             int16_t pupilOffsetX,
-                             int16_t pupilOffsetY,
-                             uint8_t openness) {
-    const int16_t radiusY = EYE_RADIUS_Y - openness;
-    display.fillRoundRect(EYE_CENTER_X - EYE_RADIUS_X,
-                          EYE_CENTER_Y - radiusY,
-                          EYE_RADIUS_X * 2,
-                          radiusY * 2,
-                          18,
-                          SSD1306_WHITE);
-
-    display.fillCircle(EYE_CENTER_X + pupilOffsetX,
-                       EYE_CENTER_Y + pupilOffsetY,
-                       PUPIL_RADIUS,
-                       SSD1306_BLACK);
+void EyeManager::drawIdleEye(Adafruit_SSD1306& display) {
+    // Soft, slightly rounded almond rather than a rectangle or circular eye.
+    display.drawLine(32, 26, 45, 18, SSD1306_WHITE);
+    display.drawLine(45, 18, 64, 15, SSD1306_WHITE);
+    display.drawLine(64, 15, 83, 18, SSD1306_WHITE);
+    display.drawLine(83, 18, 96, 26, SSD1306_WHITE);
+    display.drawLine(32, 42, 45, 50, SSD1306_WHITE);
+    display.drawLine(45, 50, 64, 53, SSD1306_WHITE);
+    display.drawLine(64, 53, 83, 50, SSD1306_WHITE);
+    display.drawLine(83, 50, 96, 42, SSD1306_WHITE);
+    display.fillCircle(CENTER_X, CENTER_Y, PUPIL_RADIUS, SSD1306_WHITE);
+    display.fillCircle(CENTER_X, CENTER_Y, 3, SSD1306_BLACK);
 }
 
-void EyeManager::drawClosedEye(Adafruit_SSD1306& display, bool happyCurve) {
-    if (happyCurve) {
-        display.drawCircle(EYE_CENTER_X, 42, 23, SSD1306_WHITE);
-        display.fillRect(36, 42, 56, 22, SSD1306_BLACK);
+void EyeManager::drawHappyEye(Adafruit_SSD1306& display) {
+    // Thick upward-curving closed eye, matching the reference's cute style.
+    drawThickLine(display, 30, 39, 42, 27, 4);
+    drawThickLine(display, 42, 27, 55, 22, 4);
+    drawThickLine(display, 55, 22, 64, 21, 4);
+    drawThickLine(display, 64, 21, 73, 22, 4);
+    drawThickLine(display, 73, 22, 86, 27, 4);
+    drawThickLine(display, 86, 27, 98, 39, 4);
+}
+
+void EyeManager::drawSadEye(Adafruit_SSD1306& display) {
+    // Drooping upper lid with a small expressive pupil, not a generic oval.
+    drawThickLine(display, 30, 24, 45, 30, 3);
+    drawThickLine(display, 45, 30, 64, 34, 3);
+    drawThickLine(display, 64, 34, 83, 30, 3);
+    drawThickLine(display, 83, 30, 98, 24, 3);
+    display.fillCircle(64, 39, 6, SSD1306_WHITE);
+    drawBrow(display, 34, 15, 58, 23, 3);
+}
+
+void EyeManager::drawAngryEye(Adafruit_SSD1306& display, bool leftEye) {
+    // Strong slanted upper lid; the two eyes mirror each other.
+    if (leftEye) {
+        drawThickLine(display, 27, 19, 99, 34, 5);
+        display.fillCircle(64, 40, 7, SSD1306_WHITE);
     } else {
-        display.drawLine(28, 36, 100, 36, SSD1306_WHITE);
+        drawThickLine(display, 101, 19, 29, 34, 5);
+        display.fillCircle(64, 40, 7, SSD1306_WHITE);
     }
+}
+
+void EyeManager::drawCuriousEye(Adafruit_SSD1306& display, bool leftEye) {
+    // Large asymmetric-looking eye with the pupil shifted inward.
+    display.drawCircle(CENTER_X, 34, 19, SSD1306_WHITE);
+    display.drawCircle(CENTER_X, 34, 20, SSD1306_WHITE);
+    display.fillCircle(leftEye ? 58 : 70, 35, 7, SSD1306_WHITE);
+    display.fillCircle(leftEye ? 58 : 70, 35, 3, SSD1306_BLACK);
+    drawBrow(display, leftEye ? 35 : 51, 14, leftEye ? 60 : 94, 10, 3);
+}
+
+void EyeManager::drawSleepyEye(Adafruit_SSD1306& display) {
+    drawThickLine(display, 30, 32, 45, 29, 4);
+    drawThickLine(display, 45, 29, 64, 30, 4);
+    drawThickLine(display, 64, 30, 83, 29, 4);
+    drawThickLine(display, 83, 29, 98, 32, 4);
+}
+
+void EyeManager::drawWinkEye(Adafruit_SSD1306& display, bool leftEye) {
+    if (leftEye) {
+        drawHappyEye(display);
+        return;
+    }
+
+    display.drawCircle(CENTER_X, CENTER_Y, 18, SSD1306_WHITE);
+    display.fillCircle(CENTER_X, CENTER_Y, 7, SSD1306_BLACK);
+    display.fillCircle(CENTER_X - 3, CENTER_Y - 3, 3, SSD1306_WHITE);
+}
+
+void EyeManager::drawSurprisedEye(Adafruit_SSD1306& display) {
+    // Vertical surprised eye, avoiding the plain round pupil design.
+    display.fillRoundRect(46, 11, 36, 46, 15, SSD1306_WHITE);
+    display.fillRoundRect(57, 20, 14, 28, 7, SSD1306_BLACK);
+}
+
+void EyeManager::drawConfusedEye(Adafruit_SSD1306& display, bool leftEye) {
+    display.drawCircle(CENTER_X, 36, 16, SSD1306_WHITE);
+    display.fillCircle(leftEye ? 60 : 68, 35, 6, SSD1306_BLACK);
+    drawBrow(display, leftEye ? 34 : 70, leftEye ? 12 : 17,
+              leftEye ? 58 : 96, leftEye ? 17 : 12, 3);
 }
 
 void EyeManager::drawHeart(Adafruit_SSD1306& display) {
-    display.fillCircle(54, 30, 12, SSD1306_WHITE);
-    display.fillCircle(74, 30, 12, SSD1306_WHITE);
-    display.fillTriangle(42, 34, 86, 34, 64, 55, SSD1306_WHITE);
+    display.fillCircle(54, 29, 11, SSD1306_WHITE);
+    display.fillCircle(74, 29, 11, SSD1306_WHITE);
+    display.fillTriangle(43, 34, 85, 34, 64, 55, SSD1306_WHITE);
+}
+
+void EyeManager::drawBlinkEye(Adafruit_SSD1306& display) {
+    // 8-frame close/open sequence. It only advances while BLINK is selected.
+    const uint8_t phase = animationFrame % 8;
+
+    if (phase == 0 || phase == 7) {
+        drawIdleEye(display);
+    } else if (phase == 1 || phase == 6) {
+        drawThickLine(display, 30, 34, 98, 34, 4);
+    } else if (phase == 2 || phase == 5) {
+        drawThickLine(display, 32, 32, 96, 32, 4);
+    } else {
+        drawThickLine(display, 34, 30, 94, 30, 4);
+    }
+}
+
+void EyeManager::drawThickLine(Adafruit_SSD1306& display,
+                               int16_t x0,
+                               int16_t y0,
+                               int16_t x1,
+                               int16_t y1,
+                               uint8_t thickness) {
+    const int16_t offset = thickness / 2;
+    for (int16_t i = -offset; i <= offset; ++i) {
+        display.drawLine(x0, y0 + i, x1, y1 + i, SSD1306_WHITE);
+    }
 }
 
 void EyeManager::drawBrow(Adafruit_SSD1306& display,
                           int16_t x0,
                           int16_t y0,
                           int16_t x1,
-                          int16_t y1) {
-    display.drawLine(x0, y0, x1, y1, SSD1306_WHITE);
-    display.drawLine(x0, y0 + 1, x1, y1 + 1, SSD1306_WHITE);
+                          int16_t y1,
+                          uint8_t thickness) {
+    drawThickLine(display, x0, y0, x1, y1, thickness);
 }
