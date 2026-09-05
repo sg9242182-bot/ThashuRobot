@@ -40,7 +40,10 @@ bool ToFManager::initializeSensor(SensorId sensor, uint8_t xshutPin, uint8_t add
         return false;
     }
 
-    sensors[index].setAddress(address);
+    if (!sensors[index].setAddress(address)) {
+        return false;
+    }
+
     delay(STARTUP_DELAY_MS);
     return true;
 }
