@@ -5,10 +5,9 @@
 
 class EyeManager {
 public:
-    EyeManager();
-
     enum Expression : uint8_t {
-        HAPPY = 0,
+        IDLE = 0,
+        HAPPY,
         SAD,
         ANGRY,
         CURIOUS,
@@ -39,16 +38,27 @@ private:
     Adafruit_SSD1306 rightDisplay;
 
     bool ready = false;
-    Expression expression = HAPPY;
+    Expression expression = IDLE;
     uint8_t animationFrame = 0;
     unsigned long lastFrameTime = 0;
 
     void render();
     void drawExpression(Adafruit_SSD1306& display, bool leftEye);
-    void drawOpenEye(Adafruit_SSD1306& display, int16_t pupilOffsetX, int16_t pupilOffsetY,
-                     uint8_t openness = 0);
-    void drawClosedEye(Adafruit_SSD1306& display, bool happyCurve);
+
+    void drawIdleEye(Adafruit_SSD1306& display);
+    void drawHappyEye(Adafruit_SSD1306& display);
+    void drawSadEye(Adafruit_SSD1306& display);
+    void drawAngryEye(Adafruit_SSD1306& display, bool leftEye);
+    void drawCuriousEye(Adafruit_SSD1306& display, bool leftEye);
+    void drawSleepyEye(Adafruit_SSD1306& display);
+    void drawWinkEye(Adafruit_SSD1306& display, bool leftEye);
+    void drawSurprisedEye(Adafruit_SSD1306& display);
+    void drawConfusedEye(Adafruit_SSD1306& display, bool leftEye);
     void drawHeart(Adafruit_SSD1306& display);
+    void drawBlinkEye(Adafruit_SSD1306& display);
+
+    void drawThickLine(Adafruit_SSD1306& display, int16_t x0, int16_t y0,
+                       int16_t x1, int16_t y1, uint8_t thickness);
     void drawBrow(Adafruit_SSD1306& display, int16_t x0, int16_t y0,
-                  int16_t x1, int16_t y1);
+                  int16_t x1, int16_t y1, uint8_t thickness = 3);
 };
