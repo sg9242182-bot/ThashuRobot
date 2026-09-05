@@ -33,8 +33,6 @@ private:
     static constexpr uint8_t HEIGHT = 64;
     static constexpr uint8_t SDA_PIN = 21;
     static constexpr uint8_t SCL_PIN = 22;
-
-    // Expression changes interpolate instead of replacing the eye instantly.
     static constexpr uint16_t TRANSITION_MS = 220;
     static constexpr uint16_t FRAME_MS = 25;
     static constexpr uint16_t BLINK_FRAME_MS = 30;
@@ -60,11 +58,9 @@ private:
     Expression currentExpression = IDLE;
     Expression targetExpression = IDLE;
     Expression blinkReturnExpression = IDLE;
-
     Pose currentPose{};
     Pose startPose{};
     Pose targetPose{};
-
     bool transitioning = false;
     bool blinkActive = false;
     uint8_t blinkFrame = 0;
@@ -78,8 +74,6 @@ private:
     void render();
     void renderEye(Adafruit_SSD1306& display, bool leftEye, const Pose& pose);
     void renderBlink(Adafruit_SSD1306& display, bool leftEye);
-
-    // Base eye is always the same character. Expressions deform/add to it.
     void drawBaseEye(Adafruit_SSD1306& display, const Pose& pose);
     void drawPupil(Adafruit_SSD1306& display, const Pose& pose);
     void drawLids(Adafruit_SSD1306& display, const Pose& pose, bool leftEye);
@@ -91,4 +85,7 @@ private:
     void eraseLid(Adafruit_SSD1306& display, int16_t cx, int16_t cy,
                   int16_t halfWidth, int16_t halfHeight, float amount,
                   bool upper, bool leftEye);
+
+    void drawThickLine(Adafruit_SSD1306& display, int16_t x0, int16_t y0,
+                       int16_t x1, int16_t y1, uint8_t thickness);
 };
