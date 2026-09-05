@@ -41,33 +41,28 @@ void loop() {
     };
 
     const char* names[] = {"LEFT", "CENTER", "RIGHT"};
+    bool obstacleDetected = false;
 
     for (uint8_t i = 0; i < ToFManager::SENSOR_COUNT; ++i) {
-        Serial.print(names[i]);
-        Serial.print(": ");
-
-        if (tof.hasReading(sensors[i])) {
-            Serial.print(tof.getDistanceMm(sensors[i]));
-            Serial.print(" mm");
-
-            if (tof.isObstacleDetected(sensors[i])) {
-                Serial.print(" [OBSTACLE]");
-            }
-
-            const uint8_t status = tof.getRangeStatus(sensors[i]);
-            if (status != 0) {
-                Serial.print(" [STATUS ");
-                Serial.print(status);
-                Serial.print("]");
-            }
-        } else {
-            Serial.print("INVALID [OUT OF RANGE]");
-        }
-
-        if (i + 1 < ToFManager::SENSOR_COUNT) {
-            Serial.print(" | ");
+        if (tof.isObstacleDetected(sensors[i])) {
+            obstacleDetected = true;
+            break;
         }
     }
 
-    Serial.println();
+    // Stay completely silent when no obstacle is detected.
+    if (!obstacleDetected) {
+        return;
+    }
+
+    for (uint8_t i = 0; i < ToFManager::SENSOR_COUNT; ++i) {
+        if (!tof.isObstacleDetected(sensors[i])) {
+            continue;
+        }
+
+        Serial.print(names[i]);
+        Serial.print(": ");
+        Serial.print(tof.getDistanceMm(sensors[i]));
+        Serial.println(" mm [OBSTACLE]");
+    }
 }
