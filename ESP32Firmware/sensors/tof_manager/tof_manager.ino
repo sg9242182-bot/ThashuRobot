@@ -33,7 +33,7 @@ void loop() {
         Serial.print(names[i]);
         Serial.print(": ");
 
-        if (tof.isValid(sensors[i])) {
+        if (tof.hasReading(sensors[i])) {
             Serial.print(tof.getDistanceMm(sensors[i]));
             Serial.print(" mm");
 
@@ -57,5 +57,4 @@ void loop() {
     }
 
     Serial.println();
-    delay(100);
 }
