@@ -3,10 +3,14 @@
 #include <Arduino.h>
 #include <Wire.h>
 
+namespace {
+constexpr uint8_t XSHUT_PINS[ToFManager::SENSOR_COUNT] = {4, 16, 17};
+constexpr uint8_t I2C_ADDRESSES[ToFManager::SENSOR_COUNT] = {0x30, 0x31, 0x32};
+}
+
 bool ToFManager::begin() {
     Wire.begin(SDA_PIN, SCL_PIN);
 
-    // All sensors start disabled because they share the default I2C address.
     for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
         pinMode(XSHUT_PINS[i], OUTPUT);
         digitalWrite(XSHUT_PINS[i], LOW);
@@ -16,9 +20,8 @@ bool ToFManager::begin() {
     }
     delay(STARTUP_DELAY_MS);
 
-    // Enable and assign a unique address to each sensor sequentially.
     for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
-        if (!initializeSensor(static_cast<SensorId>(i))) {
+        if (!initializeSensor(static_cast<SensorId>(i), XSHUT_PINS[i], I2C_ADDRESSES[i])) {
             return false;
         }
     }
@@ -27,19 +30,18 @@ bool ToFManager::begin() {
     return true;
 }
 
-bool ToFManager::initializeSensor(SensorId sensor) {
+bool ToFManager::initializeSensor(SensorId sensor, uint8_t xshutPin, uint8_t address) {
     const uint8_t index = static_cast<uint8_t>(sensor);
 
-    digitalWrite(XSHUT_PINS[index], HIGH);
+    digitalWrite(xshutPin, HIGH);
     delay(STARTUP_DELAY_MS);
 
     if (!sensors[index].begin(0x29, false, &Wire)) {
         return false;
     }
 
-    sensors[index].setAddress(I2C_ADDRESSES[index]);
+    sensors[index].setAddress(address);
     delay(STARTUP_DELAY_MS);
-
     return true;
 }
 
@@ -57,7 +59,7 @@ void ToFManager::update() {
         if (measurement.RangeStatus == 0) {
             distanceMm[i] = measurement.RangeMilliMeter;
             valid[i] = true;
-            obstacleDetected[i] = distanceMm[i] <= OBSTACLE_DISTANCE_MM;
+            obstacleDetected[i] = distanceMm[i] <= static_cast<uint16_t>(OBSTACLE_DISTANCE_CM) * 10U;
         } else {
             valid[i] = false;
             obstacleDetected[i] = false;
@@ -67,10 +69,7 @@ void ToFManager::update() {
 
 uint16_t ToFManager::getDistanceMm(SensorId sensor) const {
     const uint8_t index = static_cast<uint8_t>(sensor);
-    if (index >= SENSOR_COUNT) {
-        return 0;
-    }
-    return distanceMm[index];
+    return index < SENSOR_COUNT ? distanceMm[index] : 0;
 }
 
 float ToFManager::getDistanceCm(SensorId sensor) const {
@@ -79,16 +78,10 @@ float ToFManager::getDistanceCm(SensorId sensor) const {
 
 bool ToFManager::isValid(SensorId sensor) const {
     const uint8_t index = static_cast<uint8_t>(sensor);
-    if (index >= SENSOR_COUNT) {
-        return false;
-    }
-    return valid[index];
+    return index < SENSOR_COUNT && valid[index];
 }
 
 bool ToFManager::isObstacleDetected(SensorId sensor) const {
     const uint8_t index = static_cast<uint8_t>(sensor);
-    if (index >= SENSOR_COUNT) {
-        return false;
-    }
-    return obstacleDetected[index];
+    return index < SENSOR_COUNT && obstacleDetected[index];
 }
