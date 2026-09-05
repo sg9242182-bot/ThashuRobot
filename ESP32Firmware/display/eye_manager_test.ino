@@ -2,24 +2,59 @@
 
 EyeManager eyes;
 
-const EyeManager::Expression EXPRESSIONS[] = {
-    EyeManager::HAPPY,
-    EyeManager::SAD,
-    EyeManager::ANGRY,
-    EyeManager::CURIOUS,
-    EyeManager::SLEEPY,
-    EyeManager::WINK,
-    EyeManager::SURPRISED,
-    EyeManager::CONFUSED,
-    EyeManager::LOVE,
-    EyeManager::BLINK,
-};
+void printHelp() {
+    Serial.println("Commands:");
+    Serial.println("  idle");
+    Serial.println("  happy");
+    Serial.println("  sad");
+    Serial.println("  angry");
+    Serial.println("  curious");
+    Serial.println("  sleepy");
+    Serial.println("  wink");
+    Serial.println("  surprised");
+    Serial.println("  confused");
+    Serial.println("  love");
+    Serial.println("  blink");
+}
 
-constexpr uint8_t EXPRESSION_COUNT = sizeof(EXPRESSIONS) / sizeof(EXPRESSIONS[0]);
-constexpr unsigned long EXPRESSION_HOLD_MS = 2000;
+bool handleCommand(String command) {
+    command.trim();
+    command.toLowerCase();
 
-unsigned long lastExpressionChange = 0;
-uint8_t expressionIndex = 0;
+    if (command == "idle") {
+        eyes.setExpression(EyeManager::IDLE);
+    } else if (command == "happy") {
+        eyes.setExpression(EyeManager::HAPPY);
+    } else if (command == "sad") {
+        eyes.setExpression(EyeManager::SAD);
+    } else if (command == "angry") {
+        eyes.setExpression(EyeManager::ANGRY);
+    } else if (command == "curious") {
+        eyes.setExpression(EyeManager::CURIOUS);
+    } else if (command == "sleepy") {
+        eyes.setExpression(EyeManager::SLEEPY);
+    } else if (command == "wink") {
+        eyes.setExpression(EyeManager::WINK);
+    } else if (command == "surprised") {
+        eyes.setExpression(EyeManager::SURPRISED);
+    } else if (command == "confused") {
+        eyes.setExpression(EyeManager::CONFUSED);
+    } else if (command == "love") {
+        eyes.setExpression(EyeManager::LOVE);
+    } else if (command == "blink") {
+        eyes.setExpression(EyeManager::BLINK);
+    } else if (command == "help") {
+        printHelp();
+        return true;
+    } else {
+        Serial.println("Unknown command. Type 'help'.");
+        return false;
+    }
+
+    Serial.print("Expression: ");
+    Serial.println(command);
+    return true;
+}
 
 void setup() {
     Serial.begin(115200);
@@ -34,18 +69,16 @@ void setup() {
         }
     }
 
-    Serial.println("EyeManager ready.");
-    eyes.setExpression(EXPRESSIONS[expressionIndex]);
-    lastExpressionChange = millis();
+    // Robot starts in stable idle. No automatic expression cycling.
+    Serial.println("EyeManager ready. Starting in IDLE.");
+    printHelp();
 }
 
 void loop() {
     eyes.update();
 
-    const unsigned long now = millis();
-    if (now - lastExpressionChange >= EXPRESSION_HOLD_MS) {
-        lastExpressionChange = now;
-        expressionIndex = (expressionIndex + 1) % EXPRESSION_COUNT;
-        eyes.setExpression(EXPRESSIONS[expressionIndex]);
+    if (Serial.available()) {
+        const String command = Serial.readStringUntil('\n');
+        handleCommand(command);
     }
 }
