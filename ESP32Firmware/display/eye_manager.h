@@ -5,6 +5,8 @@
 
 class EyeManager {
 public:
+    EyeManager();
+
     enum Expression : uint8_t {
         HAPPY = 0,
         SAD,
