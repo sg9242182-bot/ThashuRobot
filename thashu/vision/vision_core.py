@@ -9,7 +9,7 @@ from vision.tracker          import CentroidTracker
 from vision.follow_logic     import FollowLogic
 from hardware.servo_tracking import ServoTracker
 from hardware.motors         import MotorController
-from hardware.eyes           import Eyes
+
 
 
 class VisionCore:
@@ -25,7 +25,7 @@ class VisionCore:
         self.follow     = FollowLogic(frame_w=640, frame_h=480)
         self.servo      = ServoTracker()
         self.motors     = MotorController()
-        self.eyes       = Eyes()
+
 
         self._thread  = None
         self._running = False
@@ -34,8 +34,20 @@ class VisionCore:
         self.current_faces  = []
         self.current_names  = {}
         self.person_present = False
+        self._following_enabled = True
 
         print("[VISION] Initialized")
+
+    def on_runtime_state_changed(self, payload):
+        """Enable autonomous following only when runtime is IDLE."""
+        if not payload or "to" not in payload:
+            return
+
+        self._following_enabled = payload["to"] == "IDLE"
+
+        if not self._following_enabled:
+            self.motors.stop()
+            self.servo.center()
 
     def start(self):
         self.camera.start()
@@ -119,22 +131,20 @@ class VisionCore:
                 self.current_faces  = faces
                 self.person_present = len(faces) > 0
 
-            if faces:
-                self.eyes.alert()
-            else:
-                self.eyes.idle()
+            if self._following_enabled:
+                target = self.follow.select_target(faces)
 
-            target = self.follow.select_target(faces)
+                if target:
+                    cx, cy = target
+                    self.servo.update(cx, cy, 640, 480)
 
-            if target:
-                cx, cy = target
-                self.servo.update(cx, cy, 640, 480)
-
-                direction = self.follow.should_move_motors(cx, cy)
-                if direction == "LEFT":
-                    self.motors.left(speed=150)
-                elif direction == "RIGHT":
-                    self.motors.right(speed=150)
+                    direction = self.follow.should_move_motors(cx, cy)
+                    if direction == "LEFT":
+                        self.motors.left(speed=150)
+                    elif direction == "RIGHT":
+                        self.motors.right(speed=150)
+                    else:
+                        self.motors.stop()
                 else:
                     self.motors.stop()
             else:
