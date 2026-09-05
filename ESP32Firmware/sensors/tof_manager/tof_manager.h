@@ -23,12 +23,9 @@ public:
 private:
     static constexpr uint8_t SDA_PIN = 21;
     static constexpr uint8_t SCL_PIN = 22;
-    static constexpr uint8_t XSHUT_PINS[SENSOR_COUNT] = {4, 16, 17};
-    static constexpr uint8_t I2C_ADDRESSES[SENSOR_COUNT] = {0x30, 0x31, 0x32};
-
+    static constexpr uint8_t OBSTACLE_DISTANCE_CM = 30;
     static constexpr unsigned long STARTUP_DELAY_MS = 10;
     static constexpr unsigned long MEASUREMENT_INTERVAL_MS = 60;
-    static constexpr uint16_t OBSTACLE_DISTANCE_MM = 300;
 
     Adafruit_VL53L0X sensors[SENSOR_COUNT];
     uint16_t distanceMm[SENSOR_COUNT] = {0, 0, 0};
@@ -36,5 +33,5 @@ private:
     bool obstacleDetected[SENSOR_COUNT] = {false, false, false};
     unsigned long lastMeasurementTime = 0;
 
-    bool initializeSensor(SensorId sensor);
+    bool initializeSensor(SensorId sensor, uint8_t xshutPin, uint8_t address);
 };
