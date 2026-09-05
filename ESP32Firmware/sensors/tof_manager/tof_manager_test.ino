@@ -1,0 +1,53 @@
+#include "tof_manager.h"
+
+ToFManager tof;
+
+void setup() {
+    Serial.begin(115200);
+    delay(500);
+
+    Serial.println("THASHU 3x VL53L0X TEST");
+
+    if (!tof.begin()) {
+        Serial.println("TOF_INIT_FAILED");
+        while (true) {
+            delay(1000);
+        }
+    }
+
+    Serial.println("TOF_INIT_OK");
+}
+
+void loop() {
+    tof.update();
+
+    const ToFManager::SensorId sensors[] = {
+        ToFManager::FRONT_LEFT,
+        ToFManager::FRONT_CENTER,
+        ToFManager::FRONT_RIGHT,
+    };
+
+    const char* names[] = {"LEFT", "CENTER", "RIGHT"};
+
+    for (uint8_t i = 0; i < ToFManager::SENSOR_COUNT; ++i) {
+        Serial.print(names[i]);
+        Serial.print(": ");
+
+        if (tof.isValid(sensors[i])) {
+            Serial.print(tof.getDistanceMm(sensors[i]));
+            Serial.print(" mm");
+            if (tof.isObstacleDetected(sensors[i])) {
+                Serial.print(" [OBSTACLE]");
+            }
+        } else {
+            Serial.print("INVALID");
+        }
+
+        if (i + 1 < ToFManager::SENSOR_COUNT) {
+            Serial.print(" | ");
+        }
+    }
+
+    Serial.println();
+    delay(100);
+}
