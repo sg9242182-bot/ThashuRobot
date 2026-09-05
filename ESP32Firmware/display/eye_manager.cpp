@@ -84,9 +84,6 @@ void EyeManager::render() {
 }
 
 void EyeManager::drawExpression(Adafruit_SSD1306& display, bool leftEye) {
-    const bool winkLeft = leftEye;
-    const bool winkRight = !leftEye;
-
     switch (expression) {
         case HAPPY:
             drawClosedEye(display, true);
@@ -125,7 +122,7 @@ void EyeManager::drawExpression(Adafruit_SSD1306& display, bool leftEye) {
             break;
 
         case WINK:
-            if (winkLeft) {
+            if (leftEye) {
                 drawClosedEye(display, true);
             } else {
                 drawOpenEye(display, 0, 0);
@@ -188,8 +185,8 @@ void EyeManager::drawOpenEye(Adafruit_SSD1306& display,
 
 void EyeManager::drawClosedEye(Adafruit_SSD1306& display, bool happyCurve) {
     if (happyCurve) {
-        display.drawArc(EYE_CENTER_X, EYE_CENTER_Y + 7, 31, 18, 200, 340, SSD1306_WHITE);
-        display.drawLine(48, 51, 80, 51, SSD1306_WHITE);
+        display.drawCircle(EYE_CENTER_X, 42, 23, SSD1306_WHITE);
+        display.fillRect(36, 42, 56, 22, SSD1306_BLACK);
     } else {
         display.drawLine(28, 36, 100, 36, SSD1306_WHITE);
     }
