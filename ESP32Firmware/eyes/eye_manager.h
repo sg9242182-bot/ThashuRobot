@@ -67,6 +67,7 @@ class EyeManager {
     bool          _blinkActive;
     unsigned long _blinkStartMs;
     unsigned long _blinkDurationMs;
+    bool          _renderDirty;
 
     EyeParams computeExpressionParams(Expression expr);
     EyeParams getInterpolatedParams(unsigned long now);
