@@ -44,16 +44,16 @@ class EyeManager {
     EyeManager();
 
     void begin();
-    void update(); 
+    void update();
 
     void setExpression(Expression expr);
     void triggerBlink();
 
-    void handleCommand(const String &cmd);
+    void handleCommand(const char *cmd);
     void printHelp();
 
   private:
-    // Only ONE display object is needed; both physical OLEDs listen to 0x3C!
+    // Both physical OLEDs intentionally share 0x3C and display the same symmetric eye.
     Adafruit_SSD1306 _display;
 
     EyeParams _currentParams;
