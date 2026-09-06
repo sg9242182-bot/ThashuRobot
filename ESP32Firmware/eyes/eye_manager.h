@@ -1,91 +1,80 @@
-#pragma once
+#ifndef EYE_MANAGER_H
+#define EYE_MANAGER_H
 
 #include <Arduino.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
+// Shared I2C Pins matching THASHU_ESP32_PIN_ALLOCATION.md
+#define OLED_SDA_PIN      21
+#define OLED_SCL_PIN      22
+#define OLED_ADDR         0x3C
+
+#define OLED_WIDTH        128
+#define OLED_HEIGHT       64
+#define OLED_RESET_PIN    -1
+
+enum Expression {
+  EXPR_IDLE = 0,
+  EXPR_HAPPY,
+  EXPR_SAD,
+  EXPR_ANGRY,
+  EXPR_CURIOUS,
+  EXPR_SLEEPY,
+  EXPR_SURPRISED,
+  EXPR_LOVE,
+  EXPR_COUNT
+};
+
+// Symmetrical pose parameters
+struct EyeParams {
+  float w;          // Eye width
+  float h;          // Eye height
+  float cy;         // Vertical center offset
+  float corner;     // Corner radius of the eye block
+  float topCut;     // Top eyelid downward cut
+  float botCut;     // Bottom eyelid upward cut
+  float smileCurve; // Curved smile mask amount (0.0 to 1.0)
+  float heartScale; // Heart shape amount (0.0 to 1.0)
+};
+
 class EyeManager {
-public:
+  public:
     EyeManager();
 
-    enum Expression : uint8_t {
-        IDLE = 0,
-        HAPPY,
-        SAD,
-        ANGRY,
-        CURIOUS,
-        SLEEPY,
-        WINK,
-        SURPRISED,
-        CONFUSED,
-        LOVE,
-        BLINK,
-        EXPRESSION_COUNT
-    };
+    void begin();
+    void update(); 
 
-    bool begin(uint8_t leftAddress = 0x3C, uint8_t rightAddress = 0x3D);
-    void update();
-    void setExpression(Expression expression);
-    Expression getExpression() const;
-    bool isReady() const;
+    void setExpression(Expression expr);
+    void triggerBlink();
 
-private:
-    static constexpr uint8_t WIDTH = 128;
-    static constexpr uint8_t HEIGHT = 64;
-    static constexpr uint8_t SDA_PIN = 21;
-    static constexpr uint8_t SCL_PIN = 22;
-    static constexpr uint16_t TRANSITION_MS = 220;
-    static constexpr uint16_t FRAME_MS = 25;
-    static constexpr uint16_t BLINK_FRAME_MS = 30;
+    void handleCommand(const String &cmd);
+    void printHelp();
 
-    struct Pose {
-        float openness;
-        float width;
-        float height;
-        float pupilX;
-        float pupilY;
-        float pupilWidth;
-        float pupilHeight;
-        float upperLid;
-        float lowerLid;
-        float brow;
-        float browTilt;
-    };
+  private:
+    // Only ONE display object is needed; both physical OLEDs listen to 0x3C!
+    Adafruit_SSD1306 _display;
 
-    Adafruit_SSD1306 leftDisplay;
-    Adafruit_SSD1306 rightDisplay;
+    EyeParams _currentParams;
+    EyeParams _fromParams;
+    EyeParams _toParams;
 
-    bool ready = false;
-    Expression currentExpression = IDLE;
-    Expression targetExpression = IDLE;
-    Expression blinkReturnExpression = IDLE;
-    Pose currentPose{};
-    Pose startPose{};
-    Pose targetPose{};
-    bool transitioning = false;
-    bool blinkActive = false;
-    uint8_t blinkFrame = 0;
-    unsigned long transitionStart = 0;
-    unsigned long lastFrame = 0;
+    unsigned long _transitionStartMs;
+    unsigned long _transitionDurationMs;
+    Expression    _currentTarget;
 
-    Pose poseFor(Expression expression) const;
-    static Pose interpolate(const Pose& a, const Pose& b, float t);
-    static float easeInOut(float t);
+    bool          _blinkActive;
+    unsigned long _blinkStartMs;
+    unsigned long _blinkDurationMs;
 
-    void render();
-    void renderEye(Adafruit_SSD1306& display, bool leftEye, const Pose& pose);
-    void renderBlink(Adafruit_SSD1306& display, bool leftEye);
-    void drawBaseEye(Adafruit_SSD1306& display, const Pose& pose);
-    void drawPupil(Adafruit_SSD1306& display, const Pose& pose);
-    void drawLids(Adafruit_SSD1306& display, const Pose& pose, bool leftEye);
-    void drawBrow(Adafruit_SSD1306& display, const Pose& pose, bool leftEye);
-    void drawLoveMark(Adafruit_SSD1306& display);
+    EyeParams computeExpressionParams(Expression expr);
+    EyeParams getInterpolatedParams(unsigned long now);
+    float     getBlinkAmount(unsigned long now);
+    void      renderFrame(const EyeParams &p, float blinkAmt);
+    void      drawHeart(int16_t cx, int16_t cy, float scale);
 
-    void fillOrganicEye(Adafruit_SSD1306& display, int16_t cx, int16_t cy,
-                        int16_t halfWidth, int16_t halfHeight, float openness);
-    void eraseLid(Adafruit_SSD1306& display, int16_t cx, int16_t cy,
-                  int16_t halfWidth, int16_t halfHeight, float amount,
-                  bool upper, bool leftEye);
-
-    void drawThickLine(Adafruit_SSD1306& display, int16_t x0, int16_t y0,
-                       int16_t x1, int16_t y1, uint8_t thickness);
+    static float easeInOutCubic(float t);
 };
+
+#endif // EYE_MANAGER_H
