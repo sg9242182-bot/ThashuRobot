@@ -8,7 +8,8 @@ EyeManager::EyeManager()
   _currentTarget(EXPR_IDLE),
   _blinkActive(false),
   _blinkStartMs(0),
-  _blinkDurationMs(200) {
+  _blinkDurationMs(200),
+  _renderDirty(true) {
 
   _currentParams = computeExpressionParams(EXPR_IDLE);
   _fromParams    = _currentParams;
@@ -24,46 +25,54 @@ void EyeManager::begin() {
   _display.display();
 
   renderFrame(_currentParams, 0.0f);
+  _renderDirty = false;
 }
 
 void EyeManager::update() {
   static unsigned long lastFrameMs = 0;
-  unsigned long now = millis();
+  const unsigned long now = millis();
 
   const bool transitionActive = (now - _transitionStartMs) < _transitionDurationMs;
-  const bool blinkActive = _blinkActive;
+  const bool blinkWasActive = _blinkActive;
 
-  // Once the expression and blink are both settled, the OLED already contains
-  // the correct frame. Do not repeatedly retransmit the same framebuffer.
-  if (!transitionActive && !blinkActive) return;
+  // If nothing is animating and the last requested frame is already on the OLED,
+  // do not retransmit the framebuffer. This keeps the shared I2C bus available.
+  if (!transitionActive && !blinkWasActive && !_renderDirty) return;
 
-  // ~35 FPS cap during active animation, leaving the shared I2C bus available
-  // for the ToF sensors between OLED frame transfers.
-  if (now - lastFrameMs < 28) return;
+  // ~35 FPS cap during active animation. A dirty settled frame is allowed through
+  // so the exact target pose is always committed after a transition completes.
+  if ((now - lastFrameMs < 28) && (transitionActive || blinkWasActive)) return;
   lastFrameMs = now;
 
   EyeParams p = getInterpolatedParams(now);
-  float blinkAmt = getBlinkAmount(now);
+  const float blinkAmt = getBlinkAmount(now);
 
   renderFrame(p, blinkAmt);
 
-  // A blink can finish during getBlinkAmount(). The final open frame is rendered
-  // above; subsequent update() calls return immediately once the transition is done.
+  // If getBlinkAmount() completed the blink during this frame, this render is the
+  // final open frame. If the expression transition also finished, the target pose
+  // is now committed and the module can remain idle until the next command.
+  const bool transitionStillActive = (now - _transitionStartMs) < _transitionDurationMs;
+  if (!transitionStillActive && !_blinkActive) {
+    _renderDirty = false;
+  }
 }
 
 void EyeManager::setExpression(Expression expr) {
-  unsigned long now = millis();
+  const unsigned long now = millis();
   _fromParams = getInterpolatedParams(now);
   _toParams   = computeExpressionParams(expr);
   _transitionStartMs = now;
   _transitionDurationMs = 250;
   _currentTarget = expr;
+  _renderDirty = true;
 }
 
 void EyeManager::triggerBlink() {
   if (_blinkActive) return;
   _blinkActive = true;
   _blinkStartMs = millis();
+  _renderDirty = true;
 }
 
 void EyeManager::handleCommand(const char *cmdIn) {
@@ -87,15 +96,15 @@ void EyeManager::handleCommand(const char *cmdIn) {
 
   if (i == 0) return;
 
-  if (strcmp(cmd, "idle") == 0)          setExpression(EXPR_IDLE);
-  else if (strcmp(cmd, "happy") == 0)    setExpression(EXPR_HAPPY);
-  else if (strcmp(cmd, "sad") == 0)      setExpression(EXPR_SAD);
-  else if (strcmp(cmd, "angry") == 0)    setExpression(EXPR_ANGRY);
-  else if (strcmp(cmd, "curious") == 0)  setExpression(EXPR_CURIOUS);
-  else if (strcmp(cmd, "sleepy") == 0)   setExpression(EXPR_SLEEPY);
+  if (strcmp(cmd, "idle") == 0)           setExpression(EXPR_IDLE);
+  else if (strcmp(cmd, "happy") == 0)     setExpression(EXPR_HAPPY);
+  else if (strcmp(cmd, "sad") == 0)       setExpression(EXPR_SAD);
+  else if (strcmp(cmd, "angry") == 0)     setExpression(EXPR_ANGRY);
+  else if (strcmp(cmd, "curious") == 0)   setExpression(EXPR_CURIOUS);
+  else if (strcmp(cmd, "sleepy") == 0)    setExpression(EXPR_SLEEPY);
   else if (strcmp(cmd, "surprised") == 0) setExpression(EXPR_SURPRISED);
-  else if (strcmp(cmd, "love") == 0)     setExpression(EXPR_LOVE);
-  else if (strcmp(cmd, "blink") == 0)    triggerBlink();
+  else if (strcmp(cmd, "love") == 0)      setExpression(EXPR_LOVE);
+  else if (strcmp(cmd, "blink") == 0)     triggerBlink();
   else printHelp();
 }
 
