@@ -9,7 +9,7 @@ EyeManager::EyeManager()
   _blinkActive(false),
   _blinkStartMs(0),
   _blinkDurationMs(200) {
-  
+
   _currentParams = computeExpressionParams(EXPR_IDLE);
   _fromParams    = _currentParams;
   _toParams      = _currentParams;
@@ -17,7 +17,7 @@ EyeManager::EyeManager()
 
 void EyeManager::begin() {
   Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
-  Wire.setClock(400000); 
+  Wire.setClock(400000);
 
   _display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR);
   _display.clearDisplay();
@@ -30,14 +30,25 @@ void EyeManager::update() {
   static unsigned long lastFrameMs = 0;
   unsigned long now = millis();
 
-  // ~35 FPS cap: silky smooth morphs while leaving the I2C bus open for ToF sensors
-  if (now - lastFrameMs < 28) return; 
+  const bool transitionActive = (now - _transitionStartMs) < _transitionDurationMs;
+  const bool blinkActive = _blinkActive;
+
+  // Once the expression and blink are both settled, the OLED already contains
+  // the correct frame. Do not repeatedly retransmit the same framebuffer.
+  if (!transitionActive && !blinkActive) return;
+
+  // ~35 FPS cap during active animation, leaving the shared I2C bus available
+  // for the ToF sensors between OLED frame transfers.
+  if (now - lastFrameMs < 28) return;
   lastFrameMs = now;
 
   EyeParams p = getInterpolatedParams(now);
   float blinkAmt = getBlinkAmount(now);
 
   renderFrame(p, blinkAmt);
+
+  // A blink can finish during getBlinkAmount(). The final open frame is rendered
+  // above; subsequent update() calls return immediately once the transition is done.
 }
 
 void EyeManager::setExpression(Expression expr) {
@@ -45,7 +56,7 @@ void EyeManager::setExpression(Expression expr) {
   _fromParams = getInterpolatedParams(now);
   _toParams   = computeExpressionParams(expr);
   _transitionStartMs = now;
-  _transitionDurationMs = 250; // Smooth 250ms morph
+  _transitionDurationMs = 250;
   _currentTarget = expr;
 }
 
@@ -55,21 +66,36 @@ void EyeManager::triggerBlink() {
   _blinkStartMs = millis();
 }
 
-void EyeManager::handleCommand(const String &cmdIn) {
-  String cmd = cmdIn;
-  cmd.trim();
-  cmd.toLowerCase();
+void EyeManager::handleCommand(const char *cmdIn) {
+  if (cmdIn == nullptr) return;
 
-  if (cmd.length() == 0) return;
-  else if (cmd == "idle")      setExpression(EXPR_IDLE);
-  else if (cmd == "happy")     setExpression(EXPR_HAPPY);
-  else if (cmd == "sad")       setExpression(EXPR_SAD);
-  else if (cmd == "angry")     setExpression(EXPR_ANGRY);
-  else if (cmd == "curious")   setExpression(EXPR_CURIOUS);
-  else if (cmd == "sleepy")    setExpression(EXPR_SLEEPY);
-  else if (cmd == "surprised") setExpression(EXPR_SURPRISED);
-  else if (cmd == "love")      setExpression(EXPR_LOVE);
-  else if (cmd == "blink")     triggerBlink();
+  char cmd[20];
+  size_t i = 0;
+
+  // Copy, trim leading whitespace, and lowercase without allocating a String.
+  while (*cmdIn == ' ' || *cmdIn == '\t') ++cmdIn;
+  while (*cmdIn != '\0' && *cmdIn != ' ' && *cmdIn != '\t' && *cmdIn != '\r' && *cmdIn != '\n') {
+    if (i < sizeof(cmd) - 1) {
+      char c = *cmdIn++;
+      if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+      cmd[i++] = c;
+    } else {
+      return;
+    }
+  }
+  cmd[i] = '\0';
+
+  if (i == 0) return;
+
+  if (strcmp(cmd, "idle") == 0)          setExpression(EXPR_IDLE);
+  else if (strcmp(cmd, "happy") == 0)    setExpression(EXPR_HAPPY);
+  else if (strcmp(cmd, "sad") == 0)      setExpression(EXPR_SAD);
+  else if (strcmp(cmd, "angry") == 0)    setExpression(EXPR_ANGRY);
+  else if (strcmp(cmd, "curious") == 0)  setExpression(EXPR_CURIOUS);
+  else if (strcmp(cmd, "sleepy") == 0)   setExpression(EXPR_SLEEPY);
+  else if (strcmp(cmd, "surprised") == 0) setExpression(EXPR_SURPRISED);
+  else if (strcmp(cmd, "love") == 0)     setExpression(EXPR_LOVE);
+  else if (strcmp(cmd, "blink") == 0)    triggerBlink();
   else printHelp();
 }
 
@@ -82,8 +108,7 @@ void EyeManager::printHelp() {
 // ---------------------------------------------------------
 EyeParams EyeManager::computeExpressionParams(Expression expr) {
   EyeParams p;
-  
-  // Base Eye defaults
+
   p.w          = 60.0f;
   p.h          = 46.0f;
   p.cy         = 32.0f;
@@ -101,31 +126,30 @@ EyeParams EyeManager::computeExpressionParams(Expression expr) {
       p.w = 64.0f;
       p.h = 44.0f;
       p.cy = 30.0f;
-      p.smileCurve = 1.0f; // Carves upward into a smiling arch
+      p.smileCurve = 1.0f;
       break;
 
     case EXPR_SAD:
       p.w = 52.0f;
       p.h = 32.0f;
-      p.cy = 38.0f;        // Drooped down
+      p.cy = 38.0f;
       p.corner = 10.0f;
-      p.topCut = 6.0f;     // Soft, sad droopy brow
+      p.topCut = 6.0f;
       break;
 
     case EXPR_ANGRY:
-      // Intense, focused battle glare
       p.w = 64.0f;
-      p.h = 24.0f;         // Narrowed slit
+      p.h = 24.0f;
       p.cy = 34.0f;
-      p.corner = 4.0f;     // Sharp angular edges
-      p.topCut = 4.0f;     // Flat, firm brow pressed down
+      p.corner = 4.0f;
+      p.topCut = 4.0f;
       p.botCut = 2.0f;
       break;
 
     case EXPR_CURIOUS:
       p.w = 52.0f;
-      p.h = 54.0f;         // Taller, perked-up eye
-      p.cy = 27.0f;        // Shifted upwards
+      p.h = 54.0f;
+      p.cy = 27.0f;
       p.corner = 20.0f;
       break;
 
@@ -147,6 +171,9 @@ EyeParams EyeManager::computeExpressionParams(Expression expr) {
     case EXPR_LOVE:
       p.heartScale = 1.0f;
       p.cy = 30.0f;
+      break;
+
+    case EXPR_COUNT:
       break;
   }
   return p;
@@ -179,7 +206,7 @@ float EyeManager::getBlinkAmount(unsigned long now) {
   if (!_blinkActive) return 0.0f;
   unsigned long elapsed = now - _blinkStartMs;
   if (elapsed >= _blinkDurationMs) {
-    _blinkActive = false; 
+    _blinkActive = false;
     return 0.0f;
   }
   float t = (float)elapsed / (float)_blinkDurationMs;
@@ -195,7 +222,6 @@ void EyeManager::renderFrame(const EyeParams &p, float blinkAmt) {
   const int16_t cx = 64;
   int16_t cy = round(p.cy);
 
-  // If morphing into LOVE, draw the heart
   if (p.heartScale > 0.05f) {
     float currentScale = p.heartScale * (1.0f - blinkAmt * 0.9f);
     drawHeart(cx, cy, currentScale);
@@ -203,7 +229,6 @@ void EyeManager::renderFrame(const EyeParams &p, float blinkAmt) {
     return;
   }
 
-  // 1. Calculate height squashed by blink
   float renderH = p.h * (1.0f - blinkAmt * 0.95f);
   if (renderH < 2.0f) renderH = 2.0f;
 
@@ -214,22 +239,18 @@ void EyeManager::renderFrame(const EyeParams &p, float blinkAmt) {
   int16_t rc = round(p.corner);
   if (rc > rh / 2) rc = rh / 2;
 
-  // 2. Base white eye body
   _display.fillRoundRect(rx, ry, rw, rh, rc, SSD1306_WHITE);
 
-  // 3. Top lid cut (flat brow)
   if (p.topCut > 0.5f && blinkAmt < 0.5f) {
     int16_t cutH = round(p.topCut);
     _display.fillRect(0, ry - 5, 128, cutH + 5, SSD1306_BLACK);
   }
 
-  // 4. Bottom lid cut
   if (p.botCut > 0.5f && blinkAmt < 0.5f) {
     int16_t cutH = round(p.botCut);
     _display.fillRect(0, ry + rh - cutH, 128, cutH + 5, SSD1306_BLACK);
   }
 
-  // 5. Smiling bottom curve (Happy arch)
   if (p.smileCurve > 0.05f) {
     float smileY = (cy + renderH / 2.0f) - (20.0f * p.smileCurve);
     smileY += (cy - smileY) * blinkAmt;
