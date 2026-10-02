@@ -13,7 +13,9 @@ public:
 
 private:
     static constexpr uint8_t TRIG_PIN = 2;
-    static constexpr uint8_t ECHO_PIN = 36;
+    // GPIO12 is proposed for ECHO to free GPIO36 for one wheel encoder.
+    // Keep the existing voltage divider and verify GPIO12 is LOW at reset.
+    static constexpr uint8_t ECHO_PIN = 12;
 
     static constexpr unsigned long MEASUREMENT_INTERVAL_MS = 60;
     static constexpr unsigned long ECHO_TIMEOUT_US = 25000;

@@ -19,6 +19,7 @@ public:
     float getDistanceCm(SensorId sensor) const;
     bool hasReading(SensorId sensor) const;
     bool isValid(SensorId sensor) const;
+    bool isFresh(SensorId sensor) const;
     bool isObstacleDetected(SensorId sensor) const;
     uint8_t getRangeStatus(SensorId sensor) const;
 
@@ -28,6 +29,7 @@ private:
     static constexpr uint8_t OBSTACLE_DISTANCE_CM = 30;
     static constexpr unsigned long STARTUP_DELAY_MS = 10;
     static constexpr uint16_t CONTINUOUS_PERIOD_MS = 50;
+    static constexpr unsigned long READING_MAX_AGE_MS = 150;
 
     Adafruit_VL53L0X sensors[SENSOR_COUNT];
     uint16_t distanceMm[SENSOR_COUNT] = {0, 0, 0};
@@ -35,6 +37,7 @@ private:
     bool hasData[SENSOR_COUNT] = {false, false, false};
     bool valid[SENSOR_COUNT] = {false, false, false};
     bool obstacleDetected[SENSOR_COUNT] = {false, false, false};
+    unsigned long lastReadingTime[SENSOR_COUNT] = {0, 0, 0};
 
     bool initializeSensor(SensorId sensor, uint8_t xshutPin, uint8_t address);
 };

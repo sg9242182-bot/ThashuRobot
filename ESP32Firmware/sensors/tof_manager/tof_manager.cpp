@@ -20,6 +20,7 @@ bool ToFManager::begin() {
         obstacleDetected[i] = false;
         distanceMm[i] = 0;
         rangeStatus[i] = 255;
+        lastReadingTime[i] = 0;
     }
     delay(STARTUP_DELAY_MS);
 
@@ -67,6 +68,7 @@ void ToFManager::update() {
         const uint8_t status = sensors[i].readRangeStatus();
 
         rangeStatus[i] = status;
+        lastReadingTime[i] = millis();
 
         // Adafruit returns 0xFFFF for the out-of-range/phase-failure case.
         if (status == OUT_OF_RANGE_STATUS || measuredDistance == 0xFFFFU) {
@@ -106,6 +108,12 @@ bool ToFManager::hasReading(SensorId sensor) const {
 bool ToFManager::isValid(SensorId sensor) const {
     const uint8_t index = static_cast<uint8_t>(sensor);
     return index < SENSOR_COUNT && valid[index];
+}
+
+bool ToFManager::isFresh(SensorId sensor) const {
+    const uint8_t index = static_cast<uint8_t>(sensor);
+    return index < SENSOR_COUNT && hasData[index] &&
+        (millis() - lastReadingTime[index] <= READING_MAX_AGE_MS);
 }
 
 bool ToFManager::isObstacleDetected(SensorId sensor) const {

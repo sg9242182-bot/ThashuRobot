@@ -208,7 +208,7 @@ Phase 0 Acceptance
 
 Phase 1 — Hardware Abstraction \& ESP32 Migration
 
-Status: CURRENT — NOT STARTED
+Status: CURRENT — IN PROGRESS
 
 Existing Files to Inspect First
 
@@ -234,6 +234,8 @@ Hardware Mapping
 
 \[x] Map current motor implementation to 2 × DRV8833.
 
+\[ ] Validate proposed encoder/driver GPIO map on hardware: share DRV8833 EEP/nSLEEP at GPIO32; share ULT/nFAULT at GPIO34 only after confirming 3.3 V open-drain wiring; HC-89 DO inputs GPIO33/35/36/39; move HC-SR04 ECHO to GPIO12 through the existing divider. Pass per-wheel pulse, driver sleep/fault, ultrasonic, STOP/ToF-stop, and 10-cycle cold-boot checks recorded in THASHU_ESP32_PIN_ALLOCATION.md.
+
 \[x] Map current eye implementation to 2 × 0.96-inch OLEDs.
 
 \[x] Map three VL53LDK sensors: left/center/right.
@@ -252,9 +254,9 @@ ESP32 Communication
 
 \[ ] Define reliable Pi ↔ ESP32 command/telemetry responsibilities.
 
-\[ ] Define motor command handling.
+\[x] Define motor command handling.
 
-\[ ] Define high-priority STOP behavior.
+\[x] Define high-priority STOP behavior.
 
 \[ ] Define sensor telemetry.
 
@@ -276,7 +278,7 @@ Safety
 
 \[ ] Unsafe movement commands are rejected at hardware level.
 
-\[ ] Stale/lost Pi commands cannot leave motors running indefinitely.
+\[x] Stale/lost Pi commands cannot leave motors running indefinitely.
 
 Phase 1 Acceptance Criteria
 
@@ -297,6 +299,8 @@ Phase 1 Acceptance Criteria
 \[ ] Existing required robot functionality is preserved.
 
 Phase 1 completion: Do not mark complete until all acceptance criteria pass.
+
+Motor subsystem implementation note (2026-10-02): `ESP32Firmware/motors/motor_manager.cpp`, `ESP32Firmware/motors/motor_manager.h`, `ESP32Firmware/motors/motor_manager.ino`, and `ESP32Firmware/sensors/tof_manager/tof_manager.cpp` / `.h` implement DRV8833 output control, STOP, a 500 ms Pi watchdog, fresh/valid front-ToF gating, and four rising-edge encoder counters on the proposed GPIO33/35/36/39 map. The USB-serial bench query `CMD|n|ENCODERS` returns `ENC|n|count1|count2|count3|count4`. The HC-SR04 ECHO definition is moved to proposed GPIO12. Host syntax checks pass; a real ESP32 toolchain/build, wheel-channel mapping, shared driver fault/sleep electrical behavior, current/thermal limits, cold-boot behavior, and physical acceptance remain unverified. Do not mark Phase 1 complete.
 
 \---
 
@@ -843,6 +847,3 @@ Phase 10	—	—
 Phase 11	—	—
 
 Phase 12	—	—
-
-
-
