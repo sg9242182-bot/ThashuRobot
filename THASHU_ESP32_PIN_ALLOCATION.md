@@ -42,7 +42,8 @@
 | 35 | Encoder 2 DO (proposed) | IN/interrupt | HC-89 on motor 2 |
 | 36 | HC-SR04 ECHO (restored baseline; retain divider) | IN | HC-SR04 |
 | 39 | Encoder 3 DO (proposed) | IN/interrupt | HC-89 on motor 3 |
-| 15 | Encoder 4 DO (proposed; boot-log strap only) | IN/interrupt | HC-89 on motor 4 |\n| 32 | Shared driver EEP/nSLEEP (proposed) | OUT | Both DRV8833 modules |
+
+| 32 | Shared driver EEP/nSLEEP (proposed) | OUT | Both DRV8833 modules |
 | 34 | Shared driver ULT/nFAULT (proposed) | IN | Both DRV8833 modules; 3.3 V pull-up required |
 
 ## I2C bus
