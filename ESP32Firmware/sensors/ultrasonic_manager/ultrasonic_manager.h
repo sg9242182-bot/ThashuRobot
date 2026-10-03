@@ -13,9 +13,10 @@ public:
 
 private:
     static constexpr uint8_t TRIG_PIN = 2;
-    // GPIO12 is proposed for ECHO to free GPIO36 for one wheel encoder.
-    // Keep the existing voltage divider and verify GPIO12 is LOW at reset.
-    static constexpr uint8_t ECHO_PIN = 12;
+    // GPIO12 caused boot trouble when HC-SR04 ECHO was connected during reset.
+    // Restore the tested baseline pin; keep the encoder disconnected on GPIO36
+    // while using this standalone ultrasonic test sketch.
+    static constexpr uint8_t ECHO_PIN = 36;
 
     static constexpr unsigned long MEASUREMENT_INTERVAL_MS = 60;
     static constexpr unsigned long ECHO_TIMEOUT_US = 25000;
