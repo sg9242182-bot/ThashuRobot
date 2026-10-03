@@ -234,7 +234,7 @@ Hardware Mapping
 
 \[x] Map current motor implementation to 2 × DRV8833.
 
-\[ ] Resolve and validate the integrated encoder/driver GPIO map. GPIO12 was tested for HC-SR04 ECHO and failed cold boot; ultrasonic ECHO is restored to GPIO36. Do not approve the provisional encoder GPIO36 assignment until a boot-safe fourth encoder input is found. Verify shared driver sleep/fault wiring and pass pulse, ultrasonic, STOP/ToF-stop, and cold-boot checks recorded in THASHU_ESP32_PIN_ALLOCATION.md.
+\[ ] Validate the integrated encoder/driver GPIO map. The candidate encoder inputs are GPIO33/35/39/15 (motors 1–4); GPIO36 remains HC-SR04 ECHO, and the tilt-servo signal is provisionally moved from GPIO15 to strap pin GPIO12. GPIO12 previously failed as ECHO at cold boot, so confirm it remains low during reset with the servo attached and pass 10 cold boots before finalizing this assignment. Verify shared driver sleep/fault wiring and pass pulse, ultrasonic, STOP/ToF-stop, and cold-boot checks recorded in THASHU_ESP32_PIN_ALLOCATION.md.
 
 \[x] Map current eye implementation to 2 × 0.96-inch OLEDs.
 
@@ -300,7 +300,7 @@ Phase 1 Acceptance Criteria
 
 Phase 1 completion: Do not mark complete until all acceptance criteria pass.
 
-Motor subsystem implementation note (2026-10-02): `ESP32Firmware/motors/motor_manager.cpp`, `ESP32Firmware/motors/motor_manager.h`, `ESP32Firmware/motors/motor_manager.ino`, and `ESP32Firmware/sensors/tof_manager/tof_manager.cpp` / `.h` implement DRV8833 output control, STOP, a 500 ms Pi watchdog, fresh/valid front-ToF gating, and four rising-edge encoder counters on the proposed GPIO33/35/36/39 map. The USB-serial bench query `CMD|n|ENCODERS` returns `ENC|n|count1|count2|count3|count4`. The HC-SR04 ECHO test pin has been restored to GPIO36 after GPIO12 caused a cold-boot failure; the fourth integrated encoder input remains unresolved. Host syntax checks pass; a real ESP32 toolchain/build, wheel-channel mapping, shared driver fault/sleep electrical behavior, current/thermal limits, cold-boot behavior, and physical acceptance remain unverified. Do not mark Phase 1 complete.
+Motor subsystem implementation note (2026-10-02; pin candidate updated 2026-10-03): `ESP32Firmware/motors/motor_manager.cpp`, `ESP32Firmware/motors/motor_manager.h`, `ESP32Firmware/motors/motor_manager.ino`, and `ESP32Firmware/sensors/tof_manager/tof_manager.cpp` / `.h` implement DRV8833 output control, STOP, a 500 ms Pi watchdog, fresh/valid front-ToF gating, and four rising-edge encoder counters. Candidate encoder mapping is GPIO33/35/39/15 for motors 1–4; GPIO36 remains HC-SR04 ECHO. `ESP32Firmware/servomanager/servo_manager.cpp` provisionally moves TILT from GPIO15 to GPIO12 to free GPIO15. GPIO12 previously caused cold-boot failure when used for ECHO, so its use for the servo remains conditional on confirming low reset level and passing 10 cold boots with the servo attached. The USB-serial bench query `CMD|n|ENCODERS` returns `ENC|n|count1|count2|count3|count4`. Host syntax checks from the earlier source state do not validate these latest pin edits. A real ESP32 toolchain/build, wheel-channel mapping, shared driver fault/sleep electrical behavior, current/thermal limits, cold-boot behavior, and physical acceptance remain unverified. Do not mark Phase 1 complete.
 
 \---
 
