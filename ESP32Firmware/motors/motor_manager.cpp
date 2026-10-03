@@ -9,7 +9,7 @@ constexpr uint8_t IN1_PINS[4] = {13, 27, 25, 19};
 constexpr uint8_t IN2_PINS[4] = {14, 26, 23, 18};
 constexpr uint8_t SLEEP_PIN = 32;
 constexpr uint8_t FAULT_PIN = 34;
-constexpr uint8_t ENCODER_PINS[4] = {33, 35, 36, 39};
+constexpr uint8_t ENCODER_PINS[4] = {33, 35, 39, 15};
 constexpr ToFManager::SensorId FRONT_SENSORS[ToFManager::SENSOR_COUNT] = {
     ToFManager::FRONT_LEFT,
     ToFManager::FRONT_CENTER,
