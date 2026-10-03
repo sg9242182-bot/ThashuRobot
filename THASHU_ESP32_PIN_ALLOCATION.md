@@ -26,7 +26,7 @@
 | 5 | Camera PAN servo signal | OUT | MG90S |
 | 13 | DRV8833 #1 IN1 | OUT | Motor driver |
 | 14 | DRV8833 #1 IN2 | OUT | Motor driver |
-| 15 | Camera TILT servo signal | OUT | MG90S |
+| 15 | Encoder 4 DO (proposed; boot-log strap only) | IN/interrupt | HC-89 on motor 4 |
 | 16 | Front-center ToF X | OUT | VL53LDK |
 | 17 | Front-right ToF X | OUT | VL53LDK |
 | 18 | DRV8833 #2 IN4 | OUT | Motor driver |
@@ -72,13 +72,13 @@ The proposed complete map is:
 - Tie both `EEP` / `nSLEEP` module inputs to GPIO32. Keep GPIO33 for encoder 1.
 - Tie both `ULT` / `nFAULT` module outputs to GPIO34 only after verifying the module pull-up is absent or to 3.3 V. Add one external pull-up to 3.3 V if needed. Keep GPIO35 for encoder 2.
 - The integrated firmware now proposes encoder DO inputs GPIO33, GPIO35, GPIO39, and GPIO15 (motors 1–4 respectively); GPIO36 remains reserved for HC-SR04 ECHO. GPIO15 is a boot strap that controls ROM boot-message output when low; verify the HC-89 output does not prevent application boot. Power HC-89 boards at 3.3 V and connect grounds together. The tilt-servo signal is provisionally moved from GPIO15 to GPIO12 to free GPIO15. GPIO12 is a flash-voltage strap: its use is conditional on confirming it remains low during reset with the servo connected and passing repeated cold boots.
-- Bench result (2026-10-03): HC-SR04 ECHO on GPIO12 allowed operation only when connected after boot; with ECHO connected during power-on, boot produced serial garbage/repeated output and did not start normally. This is consistent with GPIO12 being sampled high and selecting 1.8 V flash power on this 3.3 V-flash ESP32-WROOM board. Withdraw GPIO12 as an ECHO candidate. Restore HC-SR04 ECHO to GPIO36 through its existing divider for the standalone ultrasonic test. That conflicts with the provisional encoder-3 assignment, so the fourth encoder pin remains unresolved.
+- Bench result (2026-10-03): HC-SR04 ECHO on GPIO12 allowed operation only when connected after boot; with ECHO connected during power-on, boot produced serial garbage/repeated output and did not start normally. This is consistent with GPIO12 being sampled high and selecting 1.8 V flash power on this 3.3 V-flash ESP32-WROOM board. Withdraw GPIO12 as an ECHO candidate. Restore HC-SR04 ECHO to GPIO36 through its existing divider for the standalone ultrasonic test. GPIO36's encoder conflict is resolved by moving encoder 3 to GPIO39; encoder 4 is assigned to GPIO15. The GPIO12 tilt-servo reassignment remains provisional pending reset-level and repeated cold-boot tests.
 
 HC-89 sensors provide one pulse output each. They count rotation but do not report direction, and the listing gives no pulses-per-revolution value. Determine effective counts per wheel revolution experimentally before using encoder counts for distance or closed-loop control.
 
 ## Freeze rule
 
-Restore the baseline HC-SR04 ECHO assignment at GPIO36. The GPIO12 ECHO proposal is withdrawn after the cold-boot failure. GPIO36 is shared by the provisional encoder map in the motor sketch, so do not connect an encoder to GPIO36 while running the standalone ultrasonic sketch. The candidate four-encoder map is assigned in firmware, but it is not approved as final until encoder pulses, GPIO15 startup behavior, GPIO12 tilt-servo reset behavior, and the shared driver/safety checks pass. Do not close the mapping checklist item until pulse-count, fault, sleep, ultrasonic, and cold-boot checks pass.
+Restore the baseline HC-SR04 ECHO assignment at GPIO36. The GPIO12 ECHO proposal is withdrawn after the cold-boot failure. GPIO36 is reserved for HC-SR04 ECHO; the integrated encoder map uses GPIO33/35/39/15. Do not connect any encoder to GPIO36. The candidate four-encoder map is assigned in firmware, but it is not approved as final until encoder pulses, GPIO15 startup behavior, GPIO12 tilt-servo reset behavior, and the shared driver/safety checks pass. Do not close the mapping checklist item until pulse-count, fault, sleep, ultrasonic, and cold-boot checks pass.
 
 ## DRV8833 driver 1
 
@@ -124,7 +124,8 @@ Servo control will use ESP32 hardware PWM with software rate/position limiting f
 - [ ] Connect one sensor at a time to its proposed GPIO and verify one counter increments for that wheel only. Rotate slowly by hand and compare counts per full wheel revolution; repeat in both directions (counts should increase in both directions because these are single-channel sensors).
 - [ ] With motor power disconnected, measure each module ULT/nFAULT pin and its pull-up rail. Confirm both are open-drain-compatible and no pin is pulled above 3.3 V before combining them on GPIO34.
 - [ ] Verify each EEP/nSLEEP input is a logic input and both modules enter sleep when GPIO32 is low and wake when it is high.
-- [ ] With HC-SR04 ECHO on GPIO36 through the existing divider, perform at least 10 cold boots and verify ultrasonic readings. Do not connect HC-89 encoder 3 to GPIO36 during this standalone test. GPIO12 must remain disconnected from ECHO.
+- [ ] With HC-SR04 ECHO on GPIO36 through the existing divider, perform at least 10 cold boots and verify ultrasonic readings. Keep all encoder outputs off GPIO36; GPIO12 must remain disconnected from ECHO.
+- [ ] With the tilt servo signal moved to GPIO12, verify GPIO12 stays low during reset and pass at least 10 cold boots with the servo attached; then verify tilt movement. Confirm GPIO15 encoder output levels do not prevent normal application boot (ROM boot text may be suppressed when GPIO15 is low).
 - [ ] Run each wheel separately at low duty, confirm the matching encoder counter changes, test STOP, and confirm all motors remain stopped after STOP and on a ToF safety stop.
 - [ ] Repeat a short all-wheel low-speed run; check for missed counts, false counts from motor noise, driver faults, and ESP32 resets.
 
