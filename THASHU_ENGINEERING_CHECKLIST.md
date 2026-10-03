@@ -234,7 +234,7 @@ Hardware Mapping
 
 \[x] Map current motor implementation to 2 × DRV8833.
 
-\[ ] Validate proposed encoder/driver GPIO map on hardware: share DRV8833 EEP/nSLEEP at GPIO32; share ULT/nFAULT at GPIO34 only after confirming 3.3 V open-drain wiring; HC-89 DO inputs GPIO33/35/36/39; move HC-SR04 ECHO to GPIO12 through the existing divider. Pass per-wheel pulse, driver sleep/fault, ultrasonic, STOP/ToF-stop, and 10-cycle cold-boot checks recorded in THASHU_ESP32_PIN_ALLOCATION.md.
+\[ ] Resolve and validate the integrated encoder/driver GPIO map. GPIO12 was tested for HC-SR04 ECHO and failed cold boot; ultrasonic ECHO is restored to GPIO36. Do not approve the provisional encoder GPIO36 assignment until a boot-safe fourth encoder input is found. Verify shared driver sleep/fault wiring and pass pulse, ultrasonic, STOP/ToF-stop, and cold-boot checks recorded in THASHU_ESP32_PIN_ALLOCATION.md.
 
 \[x] Map current eye implementation to 2 × 0.96-inch OLEDs.
 
