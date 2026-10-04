@@ -117,6 +117,12 @@ Servo control will use ESP32 hardware PWM with software rate/position limiting f
 - GPIO36 → ECHO (restored baseline; existing voltage divider remains)
 - Existing voltage divider remains on ECHO before the ESP32 input.
 
+## PlatformIO motor/encoder test build
+
+Open the repository root in VS Code so PlatformIO reads the root `platformio.ini`. Select environment `esp32-motor-encoder`, then run Build. The environment compiles the existing motor sketch and ToF implementation from their current folders; it does not duplicate or relocate source files. Upload the same environment to the ESP32 and open Serial Monitor at 115200 baud. The three front ToF sensors must be connected and initialize successfully for this firmware to report `EVENT|0|READY`.
+
+CLI equivalents from the repository root are `pio run -e esp32-motor-encoder`, `pio run -e esp32-motor-encoder -t upload`, and `pio device monitor -b 115200`. This configuration has not yet been built with the user's local PlatformIO toolchain.
+
 ## Encoder and driver-sharing bench acceptance
 
 - [ ] Open the USB serial monitor at 115200 baud with the Pi disconnected. Send `CMD|1|ENCODERS` followed by a newline; expect `ENC|1|0|0|0|0` after boot. Rotate only wheel 1 by hand and repeat with sequence 2; only the first count should increase. Repeat for wheels 2–4. Counts use rising edges, so calibrate counts per wheel revolution and do not infer direction.
