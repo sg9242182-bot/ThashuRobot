@@ -2,7 +2,7 @@
 
 **Project:** Thashu — Intelligent Self-Reliant Robot  
 **Phase:** Phase 1 — Hardware Abstraction & ESP32 Migration  
-**Status:** Candidate four-encoder map assigned; GPIO12 tilt-servo reset behavior and full map still require bench validation
+**Status:** GPIO12 tilt servo reported working; reset test and four-encoder map validation remain
 **MCU:** ESP32-WROOM-32, 38-pin NodeMCU  
 **Expansion:** Purple ESP32 38-pin expansion board
 
@@ -42,7 +42,6 @@
 | 35 | Encoder 2 DO (proposed) | IN/interrupt | HC-89 on motor 2 |
 | 36 | HC-SR04 ECHO (restored baseline; retain divider) | IN | HC-SR04 |
 | 39 | Encoder 3 DO (proposed) | IN/interrupt | HC-89 on motor 3 |
-
 | 32 | Shared driver EEP/nSLEEP (proposed) | OUT | Both DRV8833 modules |
 | 34 | Shared driver ULT/nFAULT (proposed) | IN | Both DRV8833 modules; 3.3 V pull-up required |
 
@@ -154,4 +153,4 @@ The following tests passed on GPIO15 before reassignment and do not validate GPI
 - [x] Movement test passed on GPIO15
 - [x] Repeated cold-boot test passed on GPIO15
 
-GPIO12 validation is pending: with the tilt servo connected, confirm GPIO12 remains low during reset and pass at least 10 cold boots before treating this assignment as final.
+User report (2026-10-04): tilt servo operates correctly with its signal on GPIO12. Functional movement is confirmed; reset-level measurement and 10 cold boots with the servo attached are still pending before treating this assignment as final.
