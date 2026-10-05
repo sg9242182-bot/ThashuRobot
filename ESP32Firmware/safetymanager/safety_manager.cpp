@@ -65,4 +65,8 @@ bool SafetyManager::driverFaulted() const {
     return digitalRead(DRIVER_FAULT_PIN) == LOW;
 }
 
+void SafetyManager::setActiveMotion(Motion motion, uint8_t speed) {
+    activeMotion = speed == 0 ? STOPPED : motion;
+}
+
 bool SafetyManager::ready() const { return initialized; }
