@@ -117,18 +117,6 @@ Servo control will use ESP32 hardware PWM with software rate/position limiting f
 - GPIO36 → ECHO (restored baseline; existing voltage divider remains)
 - Existing voltage divider remains on ECHO before the ESP32 input.
 
-## Arduino IDE integrated motor/encoder test build
-
-The HC-89 sensors have already been tested individually. This sketch is for checking their signals on the assigned ESP32 pins while running the existing MotorManager and ToFManager firmware.
-
-1. In Arduino IDE, install **Adafruit VL53L0X** through Library Manager.
-2. Open `ESP32Firmware/ArduinoMotorEncoderTest/ArduinoMotorEncoderTest.ino`. Keep the downloaded repository folder structure intact; the sketch includes the existing motor and ToF source files by relative path.
-3. Select **ESP32 Dev Module** and the ESP32 port. Verify first, then upload.
-4. Connect the three front ToF sensors so startup can complete. With the Pi disconnected and motor power off, open Serial Monitor at 115200 baud and select Newline. Wait for `EVENT|0|READY`.
-5. Send `CMD|1|ENCODERS`, rotate one wheel by hand, and send the query again. Only that wheel's count should increase.
-
-This Arduino IDE wrapper reuses the existing source files without copying them. Its compile and hardware behavior still require user verification. The PlatformIO environment remains in the repository as an alternate build path.
-
 ## Encoder and driver-sharing bench acceptance
 
 - [ ] Open the USB serial monitor at 115200 baud with the Pi disconnected. Send `CMD|1|ENCODERS` followed by a newline; expect `ENC|1|0|0|0|0` after boot. Rotate only wheel 1 by hand and repeat with sequence 2; only the first count should increase. Repeat for wheels 2–4. Counts use rising edges, so calibrate counts per wheel revolution and do not infer direction.
