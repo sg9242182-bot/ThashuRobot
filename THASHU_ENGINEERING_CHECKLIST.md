@@ -847,3 +847,6 @@ Phase 10	—	—
 Phase 11	—	—
 
 Phase 12	—	—
+
+
+Integrated ESP32 runtime note (2026-10-05): Added `ESP32Firmware/ThashuController/ThashuController.ino` as the Arduino IDE entry point, with `src/*_adapter.cpp` files that compile the existing motor, ToF, rear-ultrasonic, eye, and servo manager implementations without copying or deleting them. The runtime routes the frozen serial protocol's motor/STOP/heartbeat, semantic eyes, PAN_TILT servo, encoder query, and 20 Hz sensor telemetry; it gates forward/turning commands on fresh clear front ToF and reverse/turning commands on valid clear rear ultrasonic readings, and stops an active reverse/turn on rear invalid/obstacle. Arduino documents that the primary .ino must match the sketch folder and that sketch src/ is recursively compiled (https://docs.arduino.cc/arduino-cli/sketch-specification). Local Arduino CLI/IDE binaries are not available in this environment, so no compile/upload was performed. Keep all Phase 1 communication, safety, and acceptance boxes open until build and physical acceptance checks pass. Additional limitations: EyeManager.begin() cannot report OLED init failure; driver fault electrical pull-up, GPIO12 cold boot, motor channel/wheel mapping, current/thermal limits, integrated sensor reliability, and physical STOP remain unverified.
