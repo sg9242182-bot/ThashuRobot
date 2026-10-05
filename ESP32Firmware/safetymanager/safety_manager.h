@@ -15,6 +15,7 @@ public:
     void update();
     void notePiFrame();
     bool allowMotion(Motion motion, uint8_t speed) const;
+    void setActiveMotion(Motion motion, uint8_t speed);
     bool driverFaulted() const;
     bool ready() const;
 
