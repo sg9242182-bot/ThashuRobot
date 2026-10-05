@@ -16,7 +16,6 @@ bool parseLong(const char* text, long& value) {
 void CommunicationManager::begin(MotorManager& motorManager, SafetyManager& safetyManager,
                                   EyeManager& eyeManager, ServoManager& servoManager, ToFManager& tofManager, UltrasonicManager& rearUltrasonic) {
     motors = &motorManager; safety = &safetyManager; eyes = &eyeManager; servos = &servoManager; tof = &tofManager; rear = &rearUltrasonic;
-    Serial.println("EVENT|0|BOOT");
     Serial.println("EVENT|0|READY");
 }
 
@@ -133,11 +132,12 @@ void CommunicationManager::sendTelemetry() {
         else Serial.print("NA");
     }
     Serial.print("|US_REAR|");
-    if (rear->isValid()) Serial.print((long)(rear->getDistanceCm() * 10.0f));
+    if (rear->isFresh() && rear->isValid()) Serial.print((long)(rear->getDistanceCm() * 10.0f));
     else Serial.print("NA");
     Serial.println();
 }
 
 void CommunicationManager::update() {
     readCommands();
+    sendTelemetry();
 }
