@@ -14,8 +14,8 @@ bool parseLong(const char* text, long& value) {
 }
 
 void CommunicationManager::begin(MotorManager& motorManager, SafetyManager& safetyManager,
-                                  EyeManager& eyeManager, ServoManager& servoManager) {
-    motors = &motorManager; safety = &safetyManager; eyes = &eyeManager; servos = &servoManager;
+                                  EyeManager& eyeManager, ServoManager& servoManager, ToFManager& tofManager, UltrasonicManager& rearUltrasonic) {
+    motors = &motorManager; safety = &safetyManager; eyes = &eyeManager; servos = &servoManager; tof = &tofManager; rear = &rearUltrasonic;
     Serial.println("EVENT|0|BOOT");
     Serial.println("EVENT|0|READY");
 }
@@ -87,12 +87,10 @@ void CommunicationManager::handle(char* line) {
         else { acknowledge(sequence, "ERROR|INVALID_ARGUMENT"); return; }
         acknowledge(sequence, "OK"); return;
     }
-    if (!strcmp(field[2], "SERVO") && count == 5 && !strcmp(field[3],"PAN_TILT")) {
+    if (!strcmp(field[2], "SERVO") && count == 6 && !strcmp(field[3],"PAN_TILT")) {
         long pan, tilt;
         if (!parseLong(field[4], pan)) { acknowledge(sequence, "ERROR|INVALID_ARGUMENT"); return; }
-        // Legacy Pi payload has four frame fields after CMD: PAN_TILT, PAN, TILT.
-        char* tiltText = strtok_r(nullptr, "|", &save);
-        if (!parseLong(tiltText, tilt) || pan < 0 || pan > 180 || tilt < 0 || tilt > 180) {
+        if (!parseLong(field[5], tilt) || pan < 0 || pan > 180 || tilt < 0 || tilt > 180) {
             acknowledge(sequence, "ERROR|OUT_OF_RANGE"); return;
         }
         servos->track(pan, tilt); acknowledge(sequence, "OK"); return;
@@ -126,8 +124,18 @@ void CommunicationManager::readCommands() {
 void CommunicationManager::sendTelemetry() {
     if (millis() - lastTelemetryMs < 50) return;
     lastTelemetryMs = millis();
-    const ToFManager& tof = *reinterpret_cast<ToFManager*>(nullptr);
-    (void)tof;
+    Serial.print("TEL|0|SENSORS");
+    const ToFManager::SensorId ids[] = {ToFManager::FRONT_LEFT, ToFManager::FRONT_CENTER, ToFManager::FRONT_RIGHT};
+    const char* labels[] = {"|TOF_L|", "|TOF_C|", "|TOF_R|"};
+    for (uint8_t i = 0; i < 3; ++i) {
+        Serial.print(labels[i]);
+        if (tof->isFresh(ids[i]) && tof->isValid(ids[i])) Serial.print(tof->getDistanceMm(ids[i]));
+        else Serial.print("NA");
+    }
+    Serial.print("|US_REAR|");
+    if (rear->isValid()) Serial.print((long)(rear->getDistanceCm() * 10.0f));
+    else Serial.print("NA");
+    Serial.println();
 }
 
 void CommunicationManager::update() {
