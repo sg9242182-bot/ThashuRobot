@@ -26,6 +26,7 @@ bool MotorManager::begin() {
     attachInterrupt(digitalPinToInterrupt(ENCODER_PINS[2]), encoder2ISR, RISING);
     attachInterrupt(digitalPinToInterrupt(ENCODER_PINS[3]), encoder3ISR, RISING);
     stop();
+    initialized = true;
     return true;
 }
 
@@ -47,6 +48,8 @@ void MotorManager::stop() {
     }
     digitalWrite(SLEEP_PIN, LOW);
 }
+
+bool MotorManager::isReady() const { return initialized; }
 
 uint32_t MotorManager::encoderCount(uint8_t motor) const {
     return motor < MOTOR_COUNT ? encoderCounts[motor] : 0;
