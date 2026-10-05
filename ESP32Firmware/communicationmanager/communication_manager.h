@@ -4,11 +4,13 @@
 #include "../safetymanager/safety_manager.h"
 #include "../eyes/eye_manager.h"
 #include "../servomanager/servo_manager.h"
+#include "../sensors/tof_manager/tof_manager.h"
+#include "../sensors/ultrasonic_manager/ultrasonic_manager.h""
 
 // Owns the USB serial protocol and routes Pi requests to hardware/safety managers.
 class CommunicationManager {
 public:
-    void begin(MotorManager& motors, SafetyManager& safety, EyeManager& eyes, ServoManager& servos);
+    void begin(MotorManager& motors, SafetyManager& safety, EyeManager& eyes, ServoManager& servos, ToFManager& tof, UltrasonicManager& rear);
     void update();
     void reportFault(const char* subsystem, const char* detail);
 
@@ -18,6 +20,8 @@ private:
     SafetyManager* safety = nullptr;
     EyeManager* eyes = nullptr;
     ServoManager* servos = nullptr;
+    ToFManager* tof = nullptr;
+    UltrasonicManager* rear = nullptr;
     char commandBuffer[COMMAND_BUFFER_SIZE] = {};
     size_t commandLength = 0;
     bool discardingCommand = false;
