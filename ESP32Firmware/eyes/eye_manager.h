@@ -43,7 +43,8 @@ class EyeManager {
   public:
     EyeManager();
 
-    void begin();
+    bool begin();
+    bool isReady() const;
     void update();
 
     void setExpression(Expression expr);
@@ -68,6 +69,7 @@ class EyeManager {
     unsigned long _blinkStartMs;
     unsigned long _blinkDurationMs;
     bool          _renderDirty;
+    bool          _ready = false;
 
     EyeParams computeExpressionParams(Expression expr);
     EyeParams getInterpolatedParams(unsigned long now);
