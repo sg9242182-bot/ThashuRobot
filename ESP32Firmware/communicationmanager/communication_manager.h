@@ -5,7 +5,7 @@
 #include "../eyes/eye_manager.h"
 #include "../servomanager/servo_manager.h"
 #include "../sensors/tof_manager/tof_manager.h"
-#include "../sensors/ultrasonic_manager/ultrasonic_manager.h""
+#include "../sensors/ultrasonic_manager/ultrasonic_manager.h"
 
 // Owns the USB serial protocol and routes Pi requests to hardware/safety managers.
 class CommunicationManager {
