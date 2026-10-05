@@ -9,6 +9,7 @@ public:
 
     float getDistanceCm() const;
     bool isValid() const;
+    bool isFresh() const;
     bool isObstacleDetected() const;
 
 private:
@@ -29,6 +30,7 @@ private:
 
     unsigned long lastMeasurementTime = 0;
     unsigned long measurementStartTime = 0;
+    unsigned long lastReadingTime = 0;
 
     volatile unsigned long echoStartTime = 0;
     volatile unsigned long echoDuration = 0;
