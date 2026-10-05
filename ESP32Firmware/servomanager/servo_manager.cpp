@@ -423,6 +423,11 @@ void ServoManager::stop()
     mode = MotionMode::STOP;
 }
 
+bool ServoManager::isReady() const
+{
+    return panServo.attached() && tiltServo.attached();
+}
+
 bool ServoManager::isMoving() const
 {
     return pan.moving ||
