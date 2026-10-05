@@ -36,7 +36,7 @@ bool SafetyManager::frontClear() const {
 }
 
 bool SafetyManager::rearClear() const {
-    return rear && rear->isValid() &&
+    return rear && rear->isFresh() && rear->isValid() &&
            !rear->isObstacleDetected();
 }
 
