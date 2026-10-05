@@ -121,7 +121,7 @@ Servo control will use ESP32 hardware PWM with software rate/position limiting f
 
 Open the repository root in VS Code so PlatformIO reads the root `platformio.ini`. Select environment `esp32-motor-encoder`, then run Build. The environment compiles `motors/platformio_main.cpp` (a small wrapper that includes the existing `motor_manager.ino`), `motor_manager.cpp`, and the existing ToF implementation from their current folders; it does not duplicate or relocate subsystem source files. Upload the same environment to the ESP32 and open Serial Monitor at 115200 baud. The three front ToF sensors must be connected and initialize successfully for this firmware to report `EVENT|0|READY`.
 
-CLI equivalents from the repository root are `pio run -e esp32-motor-encoder`, `pio run -e esp32-motor-encoder -t upload`, and `pio device monitor -b 115200`. The first local build compiled the motor and ToF C++ files but failed at link time because the nested `.ino` was omitted; the wrapper and source filter were added afterward. Re-run the build to verify the correction.
+CLI equivalents from the repository root are `pio run -e esp32-motor-encoder`, `pio run -e esp32-motor-encoder -t upload`, and `pio device monitor -b 115200`. The first local build compiled the motor and ToF C++ files but failed at link time because the nested `.ino` was omitted. A second build confirmed the wrapper is selected but could not find the `.ino` from PlatformIO's generated build directory, so the config now adds the original motors folder to the include path. Re-run the build to verify this correction.
 
 ## Encoder and driver-sharing bench acceptance
 
