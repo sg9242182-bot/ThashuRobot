@@ -5,13 +5,15 @@
 #include "../motors/motor_manager.h"
 #include "../sensors/tof_manager/tof_manager.h"
 #include "../sensors/ultrasonic_manager/ultrasonic_manager.h"
+#include "../eyes/eye_manager.h"
+#include "../servomanager/servo_manager.h"
 
 // Robot reflex layer: validates requested movement and forces STOP on hazards,
 // stale Pi traffic, or the shared active-low driver fault signal.
 class SafetyManager {
 public:
     enum Motion : uint8_t { STOPPED, FORWARD, REVERSE, TURNING };
-    bool begin(MotorManager& motors, ToFManager& frontTof, UltrasonicManager& rearUltrasonic);
+    bool begin(MotorManager& motors, ToFManager& frontTof, UltrasonicManager& rearUltrasonic, EyeManager& eyes, ServoManager& servos);
     void update();
     void notePiFrame();
     bool allowMotion(Motion motion, uint8_t speed) const;
@@ -26,6 +28,9 @@ private:
     MotorManager* motors = nullptr;
     ToFManager* tof = nullptr;
     UltrasonicManager* rear = nullptr;
+    EyeManager* eyes = nullptr;
+    ServoManager* servos = nullptr;
+    bool requiredHardwareReady() const;
     unsigned long lastPiFrameMs = 0;
     bool watchdogExpired = true;
     bool initialized = false;
