@@ -1,7 +1,7 @@
-#include "../../motors/motor_manager.h"
-#include "../../sensors/ultrasonic_manager/ultrasonic_manager.h"
-#include "../../eyes/eye_manager.h"
-#include "../../servomanager/servo_manager.h"
+#include "../motors/motor_manager.h"
+#include "../sensors/ultrasonic_manager/ultrasonic_manager.h"
+#include "../eyes/eye_manager.h"
+#include "../servomanager/servo_manager.h"
 
 #include <Arduino.h>
 #include <stdlib.h>
