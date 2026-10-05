@@ -9,24 +9,29 @@ EyeManager::EyeManager()
   _blinkActive(false),
   _blinkStartMs(0),
   _blinkDurationMs(200),
-  _renderDirty(true) {
+  _renderDirty(true),
+  _ready(false) {
 
   _currentParams = computeExpressionParams(EXPR_IDLE);
   _fromParams    = _currentParams;
   _toParams      = _currentParams;
 }
 
-void EyeManager::begin() {
+bool EyeManager::begin() {
   Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
   Wire.setClock(400000);
 
-  _display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR);
+  _ready = _display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR);
+  if (!_ready) return false;
   _display.clearDisplay();
   _display.display();
 
   renderFrame(_currentParams, 0.0f);
   _renderDirty = false;
+  return true;
 }
+
+bool EyeManager::isReady() const { return _ready; }
 
 void EyeManager::update() {
   static unsigned long lastFrameMs = 0;
