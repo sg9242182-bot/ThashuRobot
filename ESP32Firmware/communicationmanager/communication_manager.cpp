@@ -44,7 +44,6 @@ void CommunicationManager::handle(char* line) {
     if (!strcmp(field[2], "HEARTBEAT") && count == 3) {
         safety->notePiFrame(); acknowledge(sequence, "ALIVE"); return;
     }
-    safety->notePiFrame();
     if (!strcmp(field[2], "MOTOR") && count == 5) {
         long speed;
         if (!parseLong(field[4], speed) || speed < 0 || speed > 255) {
@@ -59,6 +58,7 @@ void CommunicationManager::handle(char* line) {
         }
         const SafetyManager::Motion motion = (left || right) ? SafetyManager::TURNING :
             (forward ? SafetyManager::FORWARD : SafetyManager::REVERSE);
+        safety->notePiFrame();
         if (!safety->allowMotion(motion, (uint8_t)speed)) {
             motors->stop(); safety->setActiveMotion(SafetyManager::STOPPED, 0);
             acknowledge(sequence, "ERROR|SAFETY_STOP"); return;
@@ -84,6 +84,7 @@ void CommunicationManager::handle(char* line) {
         else if (!strcmp(field[3],"ALERT")) eyes->setExpression(EXPR_ANGRY);
         else if (!strcmp(field[3],"SLEEP")) eyes->setExpression(EXPR_SLEEPY);
         else { acknowledge(sequence, "ERROR|INVALID_ARGUMENT"); return; }
+        safety->notePiFrame();
         acknowledge(sequence, "OK"); return;
     }
     if (!strcmp(field[2], "SERVO") && count == 6 && !strcmp(field[3],"PAN_TILT")) {
@@ -92,12 +93,12 @@ void CommunicationManager::handle(char* line) {
         if (!parseLong(field[5], tilt) || pan < 0 || pan > 180 || tilt < 0 || tilt > 180) {
             acknowledge(sequence, "ERROR|OUT_OF_RANGE"); return;
         }
-        servos->track(pan, tilt); acknowledge(sequence, "OK"); return;
+        safety->notePiFrame(); servos->track(pan, tilt); acknowledge(sequence, "OK"); return;
     }
     if (!strcmp(field[2], "ENCODERS") && count == 3) {
         Serial.print("ENC|"); Serial.print(sequence);
         for (uint8_t i = 0; i < 4; ++i) { Serial.print('|'); Serial.print(motors->encoderCount(i)); }
-        Serial.println(); return;
+        Serial.println(); safety->notePiFrame(); return;
     }
     acknowledge(sequence, "ERROR|INVALID_COMMAND");
 }
