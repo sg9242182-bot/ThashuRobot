@@ -30,6 +30,13 @@ bool number(const char *text, long &value) {
   value = strtol(text, &end, 10);
   return *end == '\0';
 }
+bool frontSafe() {
+  const ToFManager::SensorId ids[] = {ToFManager::FRONT_LEFT, ToFManager::FRONT_CENTER, ToFManager::FRONT_RIGHT};
+  for (uint8_t i = 0; i < 3; ++i) {
+    if (!frontTof.isFresh(ids[i]) || !frontTof.isValid(ids[i]) || frontTof.isObstacleDetected(ids[i])) return false;
+  }
+  return true;
+}
 void telemetry() {
   const unsigned long now = millis();
   if (now - lastTelemetryMs < 50) return;
@@ -71,13 +78,18 @@ void handle(char *line) {
     const bool right = !strcmp(f[3], "RIGHT");
     if (!forward && !backward && !left && !right) { ack(seq, "ERROR|INVALID_ARGUMENT"); return; }
     motors.notePiMessage();
-    if (backward && (!rearUltrasonic.isValid() || rearUltrasonic.isObstacleDetected())) {
+    const bool turning = left || right;
+    if (speed > 0 && (forward || turning) && !frontSafe()) {
       motors.stop(); reversing = false; ack(seq, "ERROR|SAFETY_STOP"); return;
     }
-    if (forward) { motors.setAll(speed); reversing = speed > 0; }
+    if (speed > 0 && (backward || turning) &&
+        (!rearUltrasonic.isValid() || rearUltrasonic.isObstacleDetected())) {
+      motors.stop(); reversing = false; ack(seq, "ERROR|SAFETY_STOP"); return;
+    }
+    if (forward) { motors.setAll(speed); reversing = false; }
     else if (backward) { motors.setAll(-speed); reversing = speed > 0; }
-    else if (left) { motors.setMotor(0,-speed); motors.setMotor(1,speed); motors.setMotor(2,-speed); motors.setMotor(3,speed); reversing = false; }
-    else { motors.setMotor(0,speed); motors.setMotor(1,-speed); motors.setMotor(2,speed); motors.setMotor(3,-speed); reversing = false; }
+    else if (left) { motors.setMotor(0,-speed); motors.setMotor(1,speed); motors.setMotor(2,-speed); motors.setMotor(3,speed); reversing = speed > 0; }
+    else { motors.setMotor(0,speed); motors.setMotor(1,-speed); motors.setMotor(2,speed); motors.setMotor(3,-speed); reversing = speed > 0; }
     ack(seq, motors.isFaulted() ? "ERROR|HARDWARE_FAULT" : "OK"); return;
   }
   if (!strcmp(f[2], "EYES") && n == 4) {
