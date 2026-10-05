@@ -12,11 +12,13 @@ public:
     void setAll(int16_t speed);
     void stop();
     uint32_t encoderCount(uint8_t motor) const;
+    bool isReady() const;
 
 private:
     static constexpr uint8_t MOTOR_COUNT = 4;
     static constexpr uint8_t MAX_SPEED = 255;
     static volatile uint32_t encoderCounts[MOTOR_COUNT];
+    bool initialized = false;
     void writeMotor(uint8_t motor, int16_t speed);
     static void IRAM_ATTR encoder0ISR();
     static void IRAM_ATTR encoder1ISR();
