@@ -23,13 +23,16 @@ void setup() {
         Serial.println("FAULT|0|MOTOR|INIT");
         while (true) { motors.stop(); delay(100); }
     }
-    eyes.begin();
+    if (!eyes.begin()) {
+        Serial.println("FAULT|0|OLED|INIT");
+        while (true) { motors.stop(); delay(100); }
+    }
     if (!servos.begin()) {
         Serial.println("FAULT|0|SERVO|INIT");
         while (true) { motors.stop(); delay(100); }
     }
     if (!safety.begin(motors, frontTof, rearUltrasonic, eyes, servos)) {
-        Serial.println("FAULT|0|SENSOR|INIT");
+        Serial.println("FAULT|0|SAFETY|SENSOR_INIT");
         while (true) { motors.stop(); delay(100); }
     }
     eyes.setExpression(EXPR_IDLE);
