@@ -28,7 +28,7 @@ void setup() {
         Serial.println("FAULT|0|SERVO|INIT");
         while (true) { motors.stop(); delay(100); }
     }
-    if (!safety.begin(motors, frontTof, rearUltrasonic)) {
+    if (!safety.begin(motors, frontTof, rearUltrasonic, eyes, servos)) {
         Serial.println("FAULT|0|SENSOR|INIT");
         while (true) { motors.stop(); delay(100); }
     }
