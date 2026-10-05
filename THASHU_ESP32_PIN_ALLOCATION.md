@@ -117,11 +117,17 @@ Servo control will use ESP32 hardware PWM with software rate/position limiting f
 - GPIO36 → ECHO (restored baseline; existing voltage divider remains)
 - Existing voltage divider remains on ECHO before the ESP32 input.
 
-## PlatformIO motor/encoder test build
+## Arduino IDE integrated motor/encoder test build
 
-Open the repository root in VS Code so PlatformIO reads the root `platformio.ini`. Select environment `esp32-motor-encoder`, then run Build. The environment compiles `motors/platformio_main.cpp` (a small wrapper that includes the existing `motor_manager.ino`), `motor_manager.cpp`, and the existing ToF implementation from their current folders; it does not duplicate or relocate subsystem source files. Upload the same environment to the ESP32 and open Serial Monitor at 115200 baud. The three front ToF sensors must be connected and initialize successfully for this firmware to report `EVENT|0|READY`.
+The HC-89 sensors have already been tested individually. This sketch is for checking their signals on the assigned ESP32 pins while running the existing MotorManager and ToFManager firmware.
 
-CLI equivalents from the repository root are `pio run -e esp32-motor-encoder`, `pio run -e esp32-motor-encoder -t upload`, and `pio device monitor -b 115200`. The first local build compiled the motor and ToF C++ files but failed at link time because the nested `.ino` was omitted. A second build confirmed the wrapper is selected but could not find the `.ino` from PlatformIO's generated build directory, so the config now adds the original motors folder to the include path. Re-run the build to verify this correction.
+1. In Arduino IDE, install **Adafruit VL53L0X** through Library Manager.
+2. Open `ESP32Firmware/ArduinoMotorEncoderTest/ArduinoMotorEncoderTest.ino`. Keep the downloaded repository folder structure intact; the sketch includes the existing motor and ToF source files by relative path.
+3. Select **ESP32 Dev Module** and the ESP32 port. Verify first, then upload.
+4. Connect the three front ToF sensors so startup can complete. With the Pi disconnected and motor power off, open Serial Monitor at 115200 baud and select Newline. Wait for `EVENT|0|READY`.
+5. Send `CMD|1|ENCODERS`, rotate one wheel by hand, and send the query again. Only that wheel's count should increase.
+
+This Arduino IDE wrapper reuses the existing source files without copying them. Its compile and hardware behavior still require user verification. The PlatformIO environment remains in the repository as an alternate build path.
 
 ## Encoder and driver-sharing bench acceptance
 
