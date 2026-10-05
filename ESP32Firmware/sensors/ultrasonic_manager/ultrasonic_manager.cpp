@@ -47,6 +47,7 @@ void UltrasonicManager::update() {
         if (measured > 0.0f) {
             distanceCm = measured;
             valid = true;
+            lastReadingTime = millis();
             obstacleDetected =
                 (distanceCm <= OBSTACLE_DISTANCE_CM);
         } else {
@@ -160,6 +161,10 @@ void IRAM_ATTR UltrasonicManager::echoISR() {
             instance->echoComplete = true;
         }
     }
+}
+
+bool UltrasonicManager::isFresh() const {
+    return lastReadingTime != 0 && millis() - lastReadingTime <= 200;
 }
 
 float UltrasonicManager::getDistanceCm() const {
