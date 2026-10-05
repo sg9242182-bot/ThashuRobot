@@ -36,6 +36,11 @@ bool EyeManager::isReady() const { return _ready; }
 void EyeManager::update() {
   static unsigned long lastFrameMs = 0;
   const unsigned long now = millis();
+  if (now - _lastHealthCheckMs >= 500) {
+    _lastHealthCheckMs = now;
+    Wire.beginTransmission(OLED_ADDR);
+    _ready = (Wire.endTransmission() == 0);
+  }
 
   const bool transitionActive = (now - _transitionStartMs) < _transitionDurationMs;
   const bool blinkWasActive = _blinkActive;
