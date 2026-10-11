@@ -6,7 +6,7 @@ namespace {
 constexpr uint8_t IN1_PINS[4] = {13, 27, 25, 19};
 constexpr uint8_t IN2_PINS[4] = {14, 26, 23, 18};
 constexpr uint8_t SLEEP_PIN = 32;
-constexpr uint8_t ENCODER_PINS[4] = {33, 35, 39, 15};
+constexpr uint8_t ENCODER_PINS[4] = {15, 35, 39, 33}; // Encoder IDs 1-4; attached to motors 4, 2, 3, 1.
 }
 
 volatile uint32_t MotorManager::encoderCounts[4] = {0, 0, 0, 0};
@@ -51,8 +51,8 @@ void MotorManager::stop() {
 
 bool MotorManager::isReady() const { return initialized; }
 
-uint32_t MotorManager::encoderCount(uint8_t motor) const {
-    return motor < MOTOR_COUNT ? encoderCounts[motor] : 0;
+uint32_t MotorManager::encoderCount(uint8_t encoderId) const {
+    return encoderId < MOTOR_COUNT ? encoderCounts[encoderId] : 0;
 }
 
 void MotorManager::writeMotor(uint8_t motor, int16_t speed) {
