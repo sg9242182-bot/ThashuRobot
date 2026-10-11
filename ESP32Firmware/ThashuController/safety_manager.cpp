@@ -53,15 +53,24 @@ bool SafetyManager::allowMotion(Motion motion, uint8_t speed) const {
 }
 
 void SafetyManager::update() {
-    if (!initialized || !motors) return;
+    if (!motors || !tof || !rear) return;
+
+    // Keep sensor sampling alive for telemetry and diagnostics even if another
+    // required device (such as the OLED or servos) is not healthy.
+    tof->update();
+    rear->update();
+
+    if (!initialized) {
+        motors->stop();
+        activeMotion = STOPPED;
+        return;
+    }
     if (!requiredHardwareReady()) {
         motors->stop();
         activeMotion = STOPPED;
         initialized = false;
         return;
     }
-    tof->update();
-    rear->update();
     if (millis() - lastPiFrameMs >= PI_WATCHDOG_MS) watchdogExpired = true;
     if (watchdogExpired || driverFaulted() ||
         (activeMotion != STOPPED &&
