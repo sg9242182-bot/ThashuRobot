@@ -1,4 +1,4 @@
-# THASHU ESP32 HARDWARE PIN ALLOCATION
+    `# THASHU ESP32 HARDWARE PIN ALLOCATION
 
 **Project:** Thashu — Intelligent Self-Reliant Robot  
 **Phase:** Phase 1 — Hardware Abstraction & ESP32 Migration  
@@ -26,7 +26,7 @@
 | 5 | Camera PAN servo signal | OUT | MG90S |
 | 13 | DRV8833 #1 IN1 | OUT | Motor driver |
 | 14 | DRV8833 #1 IN2 | OUT | Motor driver |
-| 15 | Encoder 4 DO (proposed; boot-log strap only) | IN/interrupt | HC-89 on motor 4 |
+| 15 | Encoder 1 DO (proposed; boot-log strap only) | IN/interrupt | HC-89 on motor 4 |
 | 16 | Front-center ToF X | OUT | VL53LDK |
 | 17 | Front-right ToF X | OUT | VL53LDK |
 | 18 | DRV8833 #2 IN4 | OUT | Motor driver |
@@ -38,7 +38,7 @@
 | 26 | DRV8833 #1 IN4 | OUT | Motor driver |
 | 27 | DRV8833 #1 IN3 | OUT | Motor driver |
 | 12 | Camera TILT servo signal (provisional; cold-boot validation required) | OUT after startup | MG90S |
-| 33 | Encoder 1 DO (provisional) | IN/interrupt | HC-89 on motor 1 |
+| 33 | Encoder 4~ DO (provisional) | IN/interrupt | HC-89 on motor 1 |
 | 35 | Encoder 2 DO (proposed) | IN/interrupt | HC-89 on motor 2 |
 | 36 | HC-SR04 ECHO (restored baseline; retain divider) | IN | HC-SR04 |
 | 39 | Encoder 3 DO (proposed) | IN/interrupt | HC-89 on motor 3 |

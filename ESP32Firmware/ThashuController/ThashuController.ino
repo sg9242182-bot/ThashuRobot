@@ -1,10 +1,10 @@
-#include "../motors/motor_manager.h"
-#include "../safetymanager/safety_manager.h"
-#include "../communicationmanager/communication_manager.h"
-#include "../sensors/tof_manager/tof_manager.h"
-#include "../sensors/ultrasonic_manager/ultrasonic_manager.h"
-#include "../eyes/eye_manager.h"
-#include "../servomanager/servo_manager.h"
+#include "motor_manager.h"
+#include "safety_manager.h"
+#include "communication_manager.h"
+#include "tof_manager.h"
+#include "ultrasonic_manager.h"
+#include "eye_manager.h"
+#include "servo_manager.h"
 
 #include <Arduino.h>
 
