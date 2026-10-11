@@ -97,7 +97,7 @@ void CommunicationManager::handle(char* line) {
     }
     if (!strcmp(field[2], "ENCODERS") && count == 3) {
         Serial.print("ENC|"); Serial.print(sequence);
-        for (uint8_t i = 0; i < 4; ++i) { Serial.print('|'); Serial.print(motors->encoderCount(i)); }
+        for (uint8_t encoderId = 0; encoderId < 4; ++encoderId) { Serial.print('|'); Serial.print(motors->encoderCount(encoderId)); }
         Serial.println(); safety->notePiFrame(); return;
     }
     acknowledge(sequence, "ERROR|INVALID_COMMAND");
