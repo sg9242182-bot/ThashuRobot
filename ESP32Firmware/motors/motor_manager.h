@@ -11,7 +11,7 @@ public:
     void setMotor(uint8_t motor, int16_t speed);
     void setAll(int16_t speed);
     void stop();
-    uint32_t encoderCount(uint8_t motor) const;
+    uint32_t encoderCount(uint8_t encoderId) const;
     bool isReady() const;
 
 private:
