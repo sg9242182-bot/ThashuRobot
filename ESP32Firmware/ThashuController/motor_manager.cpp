@@ -42,10 +42,13 @@ void MotorManager::setAll(int16_t speed) {
 }
 
 void MotorManager::stop() {
+    // Do not allocate LEDC channels just to establish the startup STOP state.
+    // ServoManager uses LEDC too; motor PWM is configured later in writeMotor().
     for (uint8_t motor = 0; motor < MOTOR_COUNT; ++motor) {
-        analogWrite(IN1_PINS[motor], 0);
-        analogWrite(IN2_PINS[motor], 0);
+        digitalWrite(IN1_PINS[motor], LOW);
+        digitalWrite(IN2_PINS[motor], LOW);
     }
+    // The DRV8833 sleep input is the hardware-level motor disable.
     digitalWrite(SLEEP_PIN, LOW);
 }
 
