@@ -42,11 +42,18 @@ void MotorManager::setAll(int16_t speed) {
 }
 
 void MotorManager::stop() {
-    // Do not allocate LEDC channels just to establish the startup STOP state.
-    // ServoManager uses LEDC too; motor PWM is configured later in writeMotor().
     for (uint8_t motor = 0; motor < MOTOR_COUNT; ++motor) {
-        digitalWrite(IN1_PINS[motor], LOW);
-        digitalWrite(IN2_PINS[motor], LOW);
+        if (pwmConfiguredMask[motor] & 0x01U) {
+            analogWrite(IN1_PINS[motor], 0);
+        } else {
+            digitalWrite(IN1_PINS[motor], LOW);
+        }
+
+        if (pwmConfiguredMask[motor] & 0x02U) {
+            analogWrite(IN2_PINS[motor], 0);
+        } else {
+            digitalWrite(IN2_PINS[motor], LOW);
+        }
     }
     // The DRV8833 sleep input is the hardware-level motor disable.
     digitalWrite(SLEEP_PIN, LOW);
@@ -60,16 +67,27 @@ uint32_t MotorManager::encoderCount(uint8_t encoderId) const {
 
 void MotorManager::writeMotor(uint8_t motor, int16_t speed) {
     if (speed == 0) {
-        analogWrite(IN1_PINS[motor], 0);
-        analogWrite(IN2_PINS[motor], 0);
+        if (pwmConfiguredMask[motor] & 0x01U) analogWrite(IN1_PINS[motor], 0);
+        else digitalWrite(IN1_PINS[motor], LOW);
+        if (pwmConfiguredMask[motor] & 0x02U) analogWrite(IN2_PINS[motor], 0);
+        else digitalWrite(IN2_PINS[motor], LOW);
         return;
     }
-    digitalWrite(SLEEP_PIN, HIGH);
+
     const uint8_t duty = static_cast<uint8_t>(speed < 0 ? -speed : speed);
+
+    // Clear both inputs before applying the selected direction. Mark them as
+    // LEDC-backed so future STOP calls clear PWM before disabling the driver.
     analogWrite(IN1_PINS[motor], 0);
+    pwmConfiguredMask[motor] |= 0x01U;
     analogWrite(IN2_PINS[motor], 0);
+    pwmConfiguredMask[motor] |= 0x02U;
+
     if (speed > 0) analogWrite(IN1_PINS[motor], duty);
     else analogWrite(IN2_PINS[motor], duty);
+
+    // Enable the bridge only after the requested input duty is configured.
+    digitalWrite(SLEEP_PIN, HIGH);
 }
 
 void IRAM_ATTR MotorManager::encoder0ISR() { ++encoderCounts[0]; }
