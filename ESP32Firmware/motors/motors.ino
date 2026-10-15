@@ -13,7 +13,7 @@ MotorManager motors;
 
 namespace {
 constexpr size_t COMMAND_BUFFER_SIZE = 80;
-constexpr int16_t TEST_SPEED_LIMIT = 80;
+constexpr int16_t TEST_SPEED_LIMIT = 255;
 constexpr uint32_t COMMAND_RUN_MS = 1000;
 
 char commandBuffer[COMMAND_BUFFER_SIZE];
@@ -162,7 +162,7 @@ void setup() {
     Serial.println("EVENT|0|READY|ISOLATED_MOTOR_TEST");
     Serial.println("INFO|CMD|n|MOTOR|M0..M3 or ALL|signed_speed");
     Serial.println("INFO|CMD|n|STOP or CMD|n|ENCODERS");
-    Serial.println("INFO|PWM limit +/-80; each drive command stops after 1 second");
+    Serial.println("INFO|PWM limit +/-255 (full duty); each drive command stops after 1 second");
 }
 
 void loop() {
