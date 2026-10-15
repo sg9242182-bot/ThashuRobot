@@ -1,3 +1,8 @@
+// Isolated bench test for the MotorManager module.
+// Open this folder as an Arduino sketch; motor_manager.cpp is compiled alongside it.
+// This sketch does not start ToF, safety, servo, or Pi communication modules.
+// Keep the robot's wheels lifted during testing.
+
 #include "motor_manager.h"
 
 #include <Arduino.h>
@@ -5,13 +10,22 @@
 #include <string.h>
 
 MotorManager motors;
-ToFManager frontTof;
 
 namespace {
-constexpr size_t COMMAND_BUFFER_SIZE = 128;
+constexpr size_t COMMAND_BUFFER_SIZE = 80;
+constexpr int16_t TEST_SPEED_LIMIT = 80;
+constexpr uint32_t COMMAND_RUN_MS = 1000;
+
 char commandBuffer[COMMAND_BUFFER_SIZE];
 size_t commandLength = 0;
 bool discardingCommand = false;
+bool driveActive = false;
+uint32_t stopDeadline = 0;
+
+void stopNow() {
+    motors.stop();
+    driveActive = false;
+}
 
 void acknowledge(long sequence, const char* result) {
     Serial.print("ACK|");
@@ -20,138 +34,98 @@ void acknowledge(long sequence, const char* result) {
     Serial.println(result);
 }
 
-bool frontSafe() {
-    const ToFManager::SensorId sensors[] = {
-        ToFManager::FRONT_LEFT,
-        ToFManager::FRONT_CENTER,
-        ToFManager::FRONT_RIGHT,
-    };
-    for (uint8_t i = 0; i < ToFManager::SENSOR_COUNT; ++i) {
-        if (!frontTof.isFresh(sensors[i]) || !frontTof.isValid(sensors[i]) ||
-            frontTof.isObstacleDetected(sensors[i])) {
-            return false;
-        }
-    }
-    return true;
+bool parseLong(const char* text, long& value) {
+    if (!text || !*text) return false;
+    char* end = nullptr;
+    value = strtol(text, &end, 10);
+    return end != text && *end == '\0';
 }
 
-bool parseSpeed(const char* text, int16_t& speed) {
-    if (text == nullptr || *text == '\0') {
-        return false;
+void printEncoders(long sequence) {
+    Serial.print("ENC|");
+    Serial.print(sequence);
+    for (uint8_t encoder = 0; encoder < 4; ++encoder) {
+        Serial.print('|');
+        Serial.print(motors.encoderCount(encoder));
     }
-    char* end = nullptr;
-    const long parsed = strtol(text, &end, 10);
-    if (*end != '\0' || parsed < 0 || parsed > 255) {
-        return false;
-    }
-    speed = static_cast<int16_t>(parsed);
-    return true;
+    Serial.println();
 }
 
 void handleCommand(char* line) {
     char* save = nullptr;
-    char* field[6] = {};
+    char* fields[6] = {};
     uint8_t count = 0;
     for (char* token = strtok_r(line, "|", &save);
-         token != nullptr && count < 6;
+         token && count < 6;
          token = strtok_r(nullptr, "|", &save)) {
-        field[count++] = token;
+        fields[count++] = token;
     }
 
-    if (count < 3 || strcmp(field[0], "CMD") != 0) {
-        return;
-    }
-    char* sequenceEnd = nullptr;
-    const long sequence = strtol(field[1], &sequenceEnd, 10);
-    if (*field[1] == '\0' || *sequenceEnd != '\0' || sequence < 0) {
+    long sequence = 0;
+    if (count < 3 || count > 5 || strcmp(fields[0], "CMD") != 0 ||
+        !parseLong(fields[1], sequence) || sequence < 0) {
+        stopNow();
+        Serial.println("ERROR|INVALID_COMMAND");
         return;
     }
 
-    const bool isStop = strcmp(field[2], "STOP") == 0;
-    const bool isHeartbeat = strcmp(field[2], "HEARTBEAT") == 0;
-    if (strcmp(field[2], "ENCODERS") == 0 && count == 3) {
-        Serial.print("ENC|");
-        Serial.print(sequence);
-        for (uint8_t motor = 0; motor < 4; ++motor) {
-            Serial.print('|');
-            Serial.print(motors.encoderCount(motor));
-        }
-        Serial.println();
-        return;
-    }
-    if (isStop) {
-        // Service STOP immediately and disable both bridges in hardware.
-        motors.notePiMessage();
-        motors.stop();
+    if (count == 3 && strcmp(fields[2], "STOP") == 0) {
+        stopNow();
         acknowledge(sequence, "OK");
         return;
     }
-    if (isHeartbeat && count == 3) {
-        motors.notePiMessage();
-        Serial.print("ACK|");
-        Serial.print(sequence);
-        Serial.println("|ALIVE");
+
+    if (count == 3 && strcmp(fields[2], "ENCODERS") == 0) {
+        printEncoders(sequence);
         return;
     }
 
-    if (strcmp(field[2], "MOTOR") != 0 || count != 5) {
+    if (count != 5 || strcmp(fields[2], "MOTOR") != 0) {
+        stopNow();
         acknowledge(sequence, "ERROR|INVALID_COMMAND");
         return;
     }
 
-    int16_t speed = 0;
-    if (!parseSpeed(field[4], speed)) {
+    long speed = 0;
+    if (!parseLong(fields[4], speed) ||
+        speed < -TEST_SPEED_LIMIT || speed > TEST_SPEED_LIMIT) {
+        stopNow();
         acknowledge(sequence, "ERROR|OUT_OF_RANGE");
         return;
     }
-    motors.notePiMessage();
 
-    const bool isForward = strcmp(field[3], "FORWARD") == 0;
-    const bool isTurn = strcmp(field[3], "LEFT") == 0 ||
-        strcmp(field[3], "RIGHT") == 0;
-    if ((isForward || isTurn) && !frontSafe()) {
-        motors.stop();
-        acknowledge(sequence, "ERROR|SAFETY_STOP");
-        return;
-    }
-
-    if (isForward) {
-        motors.setAll(speed);
-    } else if (strcmp(field[3], "BACKWARD") == 0) {
-        motors.setAll(-speed);
-    } else if (strcmp(field[3], "LEFT") == 0) {
-        // Motor indexes follow the frozen pin order. This differential-turn
-        // mapping assumes channels 1/2/3/4 are left/right/left/right wheels.
-        motors.setMotor(0, -speed);
-        motors.setMotor(1, speed);
-        motors.setMotor(2, -speed);
-        motors.setMotor(3, speed);
-    } else if (strcmp(field[3], "RIGHT") == 0) {
-        motors.setMotor(0, speed);
-        motors.setMotor(1, -speed);
-        motors.setMotor(2, speed);
-        motors.setMotor(3, -speed);
-    } else {
-        acknowledge(sequence, "ERROR|INVALID_ARGUMENT");
-        return;
-    }
-
-    if (motors.isFaulted()) {
-        acknowledge(sequence, "ERROR|HARDWARE_FAULT");
-    } else {
+    if (speed == 0) {
+        stopNow();
         acknowledge(sequence, "OK");
+        return;
     }
+
+    stopNow();
+    if (strcmp(fields[3], "ALL") == 0) {
+        motors.setAll(static_cast<int16_t>(speed));
+    } else if (fields[3][0] == 'M' &&
+               fields[3][1] >= '0' && fields[3][1] <= '3' &&
+               fields[3][2] == '\0') {
+        const uint8_t motor = static_cast<uint8_t>(fields[3][1] - '0');
+        motors.setMotor(motor, static_cast<int16_t>(speed));
+    } else {
+        acknowledge(sequence, "ERROR|INVALID_MOTOR");
+        return;
+    }
+
+    driveActive = true;
+    stopDeadline = millis() + COMMAND_RUN_MS;
+    acknowledge(sequence, "OK");
 }
 
 void readCommands() {
-    size_t bytesRead = 0;
-    while (Serial.available() > 0 && bytesRead < COMMAND_BUFFER_SIZE) {
-        ++bytesRead;
-        const char ch = static_cast<char>(Serial.read());
-        if (ch == '\n') {
+    while (Serial.available() > 0) {
+        const char c = static_cast<char>(Serial.read());
+        if (c == '\n') {
             if (!discardingCommand && commandLength > 0) {
                 commandBuffer[commandLength] = '\0';
-                if (commandLength > 0 && commandBuffer[commandLength - 1] == '\r') {
+                if (commandLength > 0 &&
+                    commandBuffer[commandLength - 1] == '\r') {
                     commandBuffer[commandLength - 1] = '\0';
                 }
                 handleCommand(commandBuffer);
@@ -160,29 +134,43 @@ void readCommands() {
             discardingCommand = false;
         } else if (!discardingCommand) {
             if (commandLength + 1 >= COMMAND_BUFFER_SIZE) {
+                stopNow();
                 commandLength = 0;
                 discardingCommand = true;
             } else {
-                commandBuffer[commandLength++] = ch;
+                commandBuffer[commandLength++] = c;
             }
         }
     }
 }
-}
+}  // namespace
 
 void setup() {
     Serial.begin(115200);
-    if (!motors.begin(frontTof)) {
-        Serial.println("FAULT|0|SENSOR|TOF_INIT");
+    delay(200);
+
+    if (!motors.begin()) {
+        stopNow();
+        Serial.println("FAULT|0|MOTOR|INIT");
         while (true) {
             motors.stop();
             delay(100);
         }
     }
-    Serial.println("EVENT|0|READY");
+
+    stopNow();
+    Serial.println("EVENT|0|READY|ISOLATED_MOTOR_TEST");
+    Serial.println("INFO|CMD|n|MOTOR|M0..M3 or ALL|signed_speed");
+    Serial.println("INFO|CMD|n|STOP or CMD|n|ENCODERS");
+    Serial.println("INFO|PWM limit +/-80; each drive command stops after 1 second");
 }
 
 void loop() {
-    motors.update();
     readCommands();
+
+    if (driveActive &&
+        static_cast<int32_t>(millis() - stopDeadline) >= 0) {
+        stopNow();
+        Serial.println("EVENT|0|STOP|COMMAND_TIMEOUT");
+    }
 }
