@@ -13,7 +13,7 @@ MotorManager motors;
 
 namespace {
 constexpr size_t COMMAND_BUFFER_SIZE = 80;
-constexpr int16_t TEST_SPEED_LIMIT_PERCENT = 80;
+constexpr int16_t TEST_SPEED_LIMIT = 80;
 constexpr uint32_t COMMAND_RUN_MS = 1000;
 
 char commandBuffer[COMMAND_BUFFER_SIZE];
@@ -86,30 +86,28 @@ void handleCommand(char* line) {
         return;
     }
 
-    long speedPercent = 0;
-    if (!parseLong(fields[4], speedPercent) ||
-        speedPercent < -TEST_SPEED_LIMIT_PERCENT ||
-        speedPercent > TEST_SPEED_LIMIT_PERCENT) {
+    long speed = 0;
+    if (!parseLong(fields[4], speed) ||
+        speed < -TEST_SPEED_LIMIT || speed > TEST_SPEED_LIMIT) {
         stopNow();
         acknowledge(sequence, "ERROR|OUT_OF_RANGE");
         return;
     }
 
-    if (speedPercent == 0) {
+    if (speed == 0) {
         stopNow();
         acknowledge(sequence, "OK");
         return;
     }
 
-    const int16_t pwm = static_cast<int16_t>((speedPercent * 255L) / 100L);
     stopNow();
     if (strcmp(fields[3], "ALL") == 0) {
-        motors.setAll(pwm);
+        motors.setAll(static_cast<int16_t>(speed));
     } else if (fields[3][0] == 'M' &&
                fields[3][1] >= '0' && fields[3][1] <= '3' &&
                fields[3][2] == '\0') {
         const uint8_t motor = static_cast<uint8_t>(fields[3][1] - '0');
-        motors.setMotor(motor, pwm);
+        motors.setMotor(motor, static_cast<int16_t>(speed));
     } else {
         acknowledge(sequence, "ERROR|INVALID_MOTOR");
         return;
@@ -162,9 +160,9 @@ void setup() {
 
     stopNow();
     Serial.println("EVENT|0|READY|ISOLATED_MOTOR_TEST");
-    Serial.println("INFO|CMD|n|MOTOR|M0..M3 or ALL|signed_speed_percent");
+    Serial.println("INFO|CMD|n|MOTOR|M0..M3 or ALL|signed_speed");
     Serial.println("INFO|CMD|n|STOP or CMD|n|ENCODERS");
-    Serial.println("INFO|Speed range +/-80%; each drive command stops after 1 second");
+    Serial.println("INFO|PWM limit +/-80; each drive command stops after 1 second");
 }
 
 void loop() {
