@@ -19,6 +19,8 @@ private:
     static constexpr uint8_t MAX_SPEED = 255;
     static volatile uint32_t encoderCounts[MOTOR_COUNT];
     bool initialized = false;
+    // Track which inputs have claimed LEDC so startup STOP avoids PWM allocation.
+    uint8_t pwmConfiguredMask[MOTOR_COUNT] = {0, 0, 0, 0};
     void writeMotor(uint8_t motor, int16_t speed);
     static void IRAM_ATTR encoder0ISR();
     static void IRAM_ATTR encoder1ISR();
