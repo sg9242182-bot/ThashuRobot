@@ -1,4 +1,5 @@
 #include "servo_manager.h"
+#include <Arduino.h>
 #include <ESP32Servo.h>
 #include <math.h>
 
@@ -266,6 +267,7 @@ static void updateTracking(
 
 bool ServoManager::begin()
 {
+    Serial.println("DBG|SERVO|BEGIN");
     // Explicit timer allocation is required
     // for our verified ESP32Servo setup.
 
@@ -292,9 +294,14 @@ bool ServoManager::begin()
         SERVO_MAX_US
     );
 
+    Serial.print("DBG|SERVO|ATTACH|PAN=");
+    Serial.print(panServo.attached() ? 1 : 0);
+    Serial.print("|TILT=");
+    Serial.println(tiltServo.attached() ? 1 : 0);
+
     if (!panServo.attached() ||
         !tiltServo.attached()) {
-
+        Serial.println("FAULT|0|SERVO|ATTACH");
         return false;
     }
 
@@ -311,6 +318,7 @@ bool ServoManager::begin()
 
     writePan(CENTER_ANGLE);
     writeTilt(CENTER_ANGLE);
+    Serial.println("DBG|SERVO|CENTER_CMD|PAN=90|TILT=90");
 
     mode = MotionMode::IDLE;
 
