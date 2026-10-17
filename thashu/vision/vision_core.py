@@ -1,9 +1,12 @@
+Failed to create stream fd: Operation not permitted
+Failed to create stream fd: Operation not permitted
+Failed to create stream fd: Operation not permitted
 import threading
 import time
 
 
 class VisionCore:
-    """Coordinates the single camera/vision worker and gates follow behavior by runtime state."""
+    """Owns camera perception only; hardware actuation belongs to other managers."""
 
     def __init__(
         self,
@@ -12,9 +15,6 @@ class VisionCore:
         recognizer=None,
         database=None,
         tracker=None,
-        follow=None,
-        servo=None,
-        motors=None,
     ):
         # Lazy imports let lifecycle behavior be tested without opening hardware
         # or loading vision models. Production still uses the existing modules.
@@ -36,29 +36,14 @@ class VisionCore:
         if tracker is None:
             from vision.tracker import CentroidTracker
             tracker = CentroidTracker(max_disappeared=20)
-        if follow is None:
-            from vision.follow_logic import FollowLogic
-            follow = FollowLogic(frame_w=640, frame_h=480)
-        if servo is None:
-            from hardware.servo_tracking import ServoTracker
-            servo = ServoTracker()
-        if motors is None:
-            from hardware.motors import MotorController
-            motors = MotorController()
-
         self.camera = camera
         self.detector = detector
         self.recognizer = recognizer
         self.database = database
         self.tracker = tracker
-        self.follow = follow
-        self.servo = servo
-        self.motors = motors
-
         self._thread = None
         self._running = False
         self._lifecycle_lock = threading.Lock()
-        self._actuation_lock = threading.Lock()
         self._lock = threading.Lock()
         self._processing_enabled = threading.Event()
         self._processing_enabled.set()  # Runtime starts in IDLE.
@@ -71,31 +56,25 @@ class VisionCore:
         print("[VISION] Initialized")
 
     def on_runtime_state_changed(self, payload):
-        """Run inference and autonomous following only in IDLE."""
+        """Run perception only in IDLE, pausing inference during voice/AI work."""
         if not isinstance(payload, dict) or "to" not in payload:
             return
 
         enable_processing = payload["to"] == "IDLE"
-        with self._actuation_lock:
-            was_enabled = self._processing_enabled.is_set()
-            if enable_processing:
-                if not was_enabled:
-                    with self._lock:
-                        self._tracker_reset_pending = True
-                self._processing_enabled.set()
-                return
+        was_enabled = self._processing_enabled.is_set()
+        if enable_processing:
+            if not was_enabled:
+                with self._lock:
+                    self._tracker_reset_pending = True
+            self._processing_enabled.set()
+            return
 
-            self._processing_enabled.clear()
-            if was_enabled:
-                # Serialize the stop with the vision worker's actuator writes.
-                self.motors.stop()
-                self.servo.center()
-
-            with self._lock:
-                self.current_faces = []
-                self.current_names.clear()
-                self.person_present = False
-                self._tracker_reset_pending = True
+        self._processing_enabled.clear()
+        with self._lock:
+            self.current_faces = []
+            self.current_names.clear()
+            self.person_present = False
+            self._tracker_reset_pending = True
 
     def start(self):
         """Start the camera and one vision worker; repeated starts are harmless."""
@@ -117,16 +96,13 @@ class VisionCore:
         return self
 
     def stop(self):
-        """Stop outputs and join the vision worker without leaving a duplicate thread."""
+        """Stop camera perception and join the worker without duplicating threads."""
         with self._lifecycle_lock:
             if not self._running and self._thread is None:
                 return
 
             self._running = False
-            with self._actuation_lock:
-                self._processing_enabled.clear()
-                self.motors.stop()
-                self.servo.center()
+            self._processing_enabled.clear()
             self.camera.stop()
             thread = self._thread
 
@@ -241,25 +217,5 @@ class VisionCore:
                     continue
                 self.current_faces = faces
                 self.person_present = bool(faces)
-
-            target = self.follow.select_target(faces)
-            if target:
-                cx, cy = target
-                direction = self.follow.should_move_motors(cx, cy)
-                with self._actuation_lock:
-                    if not self._processing_enabled.is_set():
-                        continue
-                    self.servo.update(cx, cy, 640, 480)
-                    if direction == "LEFT":
-                        self.motors.left(speed=150)
-                    elif direction == "RIGHT":
-                        self.motors.right(speed=150)
-                    else:
-                        self.motors.stop()
-            else:
-                with self._actuation_lock:
-                    if not self._processing_enabled.is_set():
-                        continue
-                    self.motors.stop()
 
             time.sleep(0.08)
