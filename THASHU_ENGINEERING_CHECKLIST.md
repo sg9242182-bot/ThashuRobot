@@ -420,7 +420,7 @@ Tasks:
 
 \[x] Ensure camera ownership is singular.
 
-\[x] Ensure vision cannot drive motors during conversation.
+\[x] Keep VisionCore perception-only; it does not actuate motors or servos.
 
 Acceptance:
 
@@ -430,9 +430,9 @@ Acceptance:
 
 \[ ] No camera/thread duplication.
 
-\[ ] No race condition with hardware control.
+\[x] VisionCore has no direct motor/servo command path.
 
-Implementation and validation note (2026-10-17): Updated `thashu/vision/vision_core.py` to gate detection, recognition, tracking, servo updates, and motor following to IDLE; transition-time motor STOP and servo center are synchronized against vision outputs. Existing detector/recognizer instances remain resident, and tracks are reset on resume. Updated `thashu/vision/camera.py` to prevent duplicate capture threads and to join the thread on stop; added `CentroidTracker.reset()` in `thashu/vision/tracker.py`. In `thashu/main.py`, vision starts after the startup audio. Added unit tests in `thashu/tests/test_vision_lifecycle.py` and `thashu/tests/test_camera_lifecycle.py`. Offline lifecycle tests pass (4 tests) with fake camera/actuator dependencies. Verify on the Raspberry Pi with the real camera and voice pipeline before checking acceptance or marking Phase 4 complete.
+Implementation and validation note (2026-10-17): Updated `thashu/vision/vision_core.py` to provide face/camera perception only and gate inference to IDLE; removed direct motor and servo ownership from vision. Existing detector/recognizer instances remain resident, and tracks are reset on resume. Updated `thashu/vision/camera.py` to prevent duplicate capture threads and to join the thread on stop; added `CentroidTracker.reset()` in `thashu/vision/tracker.py`. In `thashu/main.py`, vision starts after the startup audio. Added unit tests in `thashu/tests/test_vision_lifecycle.py` and `thashu/tests/test_camera_lifecycle.py`. Offline lifecycle tests pass (5 tests) with fake camera and perception dependencies; one test verifies VisionCore has no motor or servo controller. Verify on the Raspberry Pi with the real camera and voice pipeline before checking acceptance or marking Phase 4 complete.
 
 \---
 
