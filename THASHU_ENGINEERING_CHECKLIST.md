@@ -386,53 +386,55 @@ Acceptance:
 
 Phase 4 — Vision Lifecycle
 
-Status: NOT STARTED
+Status: IN PROGRESS — SOFTWARE IMPLEMENTATION AND MOCK TESTS COMPLETE; RASPBERRY PI VALIDATION PENDING
 
 Files to inspect/reuse:
 
-\[ ] `vision/vision\_core.py`
+\\[x] `vision/vision\\_core.py`
 
-\[ ] `vision/camera.py`
+\\[x] `vision/camera.py`
 
-\[ ] `vision/face\_detection.py`
+\\[x] `vision/face\\_detection.py`
 
-\[ ] `vision/face\_recognition.py`
+\\[x] `vision/face\\_recognition.py`
 
-\[ ] `vision/tracker.py`
+\\[x] `vision/tracker.py`
 
-\[ ] `vision/follow\_logic.py`
+\\[x] `vision/follow\\_logic.py`
 
-\[ ] `vision/auto\_capture.py`
+\\[x] `vision/auto\\_capture.py`
 
-\[ ] `vision/face\_database.py`
+\\[x] `vision/face\\_database.py`
 
 Tasks:
 
-\[ ] Keep expensive models resident where appropriate.
+\\[x] Keep expensive models resident where appropriate.
 
-\[ ] Pause vision processing during LISTENING.
+\\[x] Pause vision processing during LISTENING.
 
-\[ ] Pause vision processing during THINKING.
+\\[x] Pause vision processing during THINKING.
 
-\[ ] Pause vision processing during SPEAKING.
+\\[x] Pause vision processing during SPEAKING.
 
-\[ ] Resume vision cleanly after TTS.
+\\[x] Resume vision cleanly after TTS.
 
-\[ ] Ensure camera ownership is singular.
+\\[x] Ensure camera ownership is singular.
 
-\[ ] Ensure vision cannot drive motors during conversation.
+\\[x] Ensure vision cannot drive motors during conversation.
 
 Acceptance:
 
-\[ ] Vision processing genuinely stops during voice/AI processing.
+\\[ ] Vision processing genuinely stops during voice/AI processing.
 
-\[ ] Vision resumes without unnecessary model reloads.
+\\[ ] Vision resumes without unnecessary model reloads.
 
-\[ ] No camera/thread duplication.
+\\[ ] No camera/thread duplication.
 
-\[ ] No race condition with hardware control.
+\\[ ] No race condition with hardware control.
 
-\---
+Implementation and validation note (2026-10-17): Updated `thashu/vision/vision_core.py` to gate detection, recognition, tracking, servo updates, and motor following to IDLE; transition-time motor STOP and servo center are synchronized against vision outputs. Existing detector/recognizer instances remain resident, and tracks are reset on resume. Updated `thashu/vision/camera.py` to prevent duplicate capture threads and to join the thread on stop; added `CentroidTracker.reset()` in `thashu/vision/tracker.py`. In `thashu/main.py`, vision starts after the startup audio. Added unit tests in `thashu/tests/test_vision_lifecycle.py` and `thashu/tests/test_camera_lifecycle.py`. Offline lifecycle tests pass (4 tests) with fake camera/actuator dependencies. Verify on the Raspberry Pi with the real camera and voice pipeline before checking acceptance or marking Phase 4 complete.
+
+\\---
 
 Phase 5 — Person Recognition
 
