@@ -172,7 +172,6 @@ def main():
     print("[SYSTEM] Jarvis started")
 
     # Start systems
-    vision.start()
     audio.start()
 
     # ── Start shutdown button monitor ───────────────────────────────────────
@@ -202,6 +201,8 @@ def main():
     print("[SYSTEM] ── Ready. Say 'Hey Thashu'")
 
     eyes.idle()
+    # Start autonomous following only after the startup audio has finished.
+    vision.start()
 
 
 
