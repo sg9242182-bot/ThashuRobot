@@ -2,12 +2,19 @@
 
 import numpy as np
 
+
 class CentroidTracker:
     def __init__(self, max_disappeared=20):
         self.next_object_id = 0
         self.objects = {}
         self.disappeared = {}
         self.max_disappeared = max_disappeared
+
+    def reset(self):
+        """Discard tracks so IDs/names from before a vision pause cannot go stale."""
+        self.next_object_id = 0
+        self.objects.clear()
+        self.disappeared.clear()
 
     def register(self, centroid):
         self.objects[self.next_object_id] = centroid
