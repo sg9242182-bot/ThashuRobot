@@ -69,6 +69,8 @@ import webrtcvad
 from scipy.signal import resample_poly
 from openwakeword.model import Model
 
+from core.model_paths import model_path
+
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -91,10 +93,7 @@ _VAD_SPEECH_FRACTION = 0.4
 
 # Local copies of the shared openWakeWord support models, used only if
 # present — see module docstring for how to fetch them once.
-_OWW_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "models", "openwakeword",
-)
+_OWW_DIR = model_path("openwakeword")
 _MELSPEC_LOCAL   = os.path.join(_OWW_DIR, "melspectrogram.onnx")
 _EMBEDDING_LOCAL = os.path.join(_OWW_DIR, "embedding_model.onnx")
 _HAVE_LOCAL_SUPPORT_MODELS = os.path.isfile(_MELSPEC_LOCAL) and os.path.isfile(_EMBEDDING_LOCAL)
