@@ -1,8 +1,10 @@
 from llama_cpp import Llama
 import os
 
+from core.model_paths import model_path
+
 # ── Load once at import time ──────────────────────────────────────────────────
-_MODEL_PATH = os.path.expanduser("~/thashu/models/llm/qwen2.5-1.5b-q4_k_m.gguf")
+_MODEL_PATH = model_path("llm", "qwen2.5-1.5b-instruct-q4_k_m.gguf")
 
 _llm = Llama(
     model_path=_MODEL_PATH,
