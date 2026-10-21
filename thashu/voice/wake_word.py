@@ -3,16 +3,11 @@ wake_word.py — Thashu Voice Pipeline
 Wake word detection using openWakeWord's pretrained "hey jarvis" model.
 
 Key design decisions:
-- melspec_model_path/embedding_model_path point at local copies in
-  models/openwakeword/ *if present*, so Model() doesn't hit the network on
-  boot on a robot with no guaranteed internet at startup. If those two
-  files aren't there, we fall back to openWakeWord's own default behavior
-  (its bundled resource path, downloading on first use if needed) rather
-  than crashing — this project doesn't ship those files, so fresh checkouts
-  must not assume they exist. Run once with internet to fetch them locally:
-      python3 -c "from openwakeword.utils import download_models as d; d()"
-  then copy melspectrogram.onnx and embedding_model.onnx out of wherever
-  that prints into models/openwakeword/ for permanent offline use.
+- Local copies of the wake-word model and openWakeWord support models
+  live under the ignored project-local directory models/openwakeword/.
+  From the thashu/ directory, fetch them with:
+      python3 -c 'from openwakeword.utils import download_models; download_models(model_names=["hey_jarvis_v0.1"], target_directory="models/openwakeword")'
+  This keeps startup independent of network access after setup.
 - Resampling mirrors vad.py exactly (48 kHz -> 16 kHz via resample_poly,
   down=3), since openWakeWord's models are trained on 16 kHz audio.
 - predict() is called on every unlocked, off-cooldown chunk, gated or not.
