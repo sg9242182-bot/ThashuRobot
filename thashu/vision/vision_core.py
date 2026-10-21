@@ -1,6 +1,8 @@
 import threading
 import time
 
+from core.model_paths import model_path, project_path
+
 
 class VisionCore:
     """Owns camera perception only; hardware actuation belongs to other managers."""
@@ -20,16 +22,15 @@ class VisionCore:
             camera = Camera(src=0, width=640, height=480)
         if detector is None:
             from vision.face_detection import FaceDetector
-            detector = FaceDetector(
-                model_path="models/mobilenet_ssd/MobileNetSSD_deploy.caffemodel",
-                config_path="models/mobilenet_ssd/MobileNetSSD_deploy.prototxt",
-            )
+            # FaceDetector uses OpenCV's packaged Haar cascade; it has no local
+            # MobileNet model files to load.
+            detector = FaceDetector()
         if recognizer is None:
             from vision.face_recognition import FaceRecognizer
-            recognizer = FaceRecognizer("models/face/w600k_r50.onnx")
+            recognizer = FaceRecognizer(model_path("face", "w600k_r50.onnx"))
         if database is None:
             from vision.face_database import FaceDatabase
-            database = FaceDatabase("data/faces.json")
+            database = FaceDatabase(project_path("data", "faces.json"))
         if tracker is None:
             from vision.tracker import CentroidTracker
             tracker = CentroidTracker(max_disappeared=20)
