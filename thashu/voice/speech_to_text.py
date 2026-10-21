@@ -11,8 +11,12 @@ Key design decisions:
   hallucination risk in model selection comment.
 """
 
+import os
+
 import numpy as np
 from scipy.signal import resample_poly
+
+from core.model_paths import model_path
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -42,7 +46,13 @@ def _get_model():
     if _model is None:
         try:
             from faster_whisper import WhisperModel
-            _model = WhisperModel(MODEL_SIZE, compute_type=COMPUTE_TYPE)
+            whisper_model_dir = model_path("whisper")
+            os.makedirs(whisper_model_dir, exist_ok=True)
+            _model = WhisperModel(
+                MODEL_SIZE,
+                compute_type=COMPUTE_TYPE,
+                download_root=whisper_model_dir,
+            )
             print(f"[STT] Whisper {MODEL_SIZE!r} ({COMPUTE_TYPE}) loaded")
         except Exception as e:
             print(f"[STT] Failed to load Whisper model: {e}")
