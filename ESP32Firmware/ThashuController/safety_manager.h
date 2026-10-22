@@ -9,7 +9,7 @@
 #include "servo_manager.h"
 
 // Robot reflex layer: validates requested movement and forces STOP on hazards,
-// stale Pi traffic, or the shared active-low driver fault signal.
+// or stale Pi traffic.
 class SafetyManager {
 public:
     enum Motion : uint8_t { STOPPED, FORWARD, REVERSE, TURNING };
@@ -18,11 +18,9 @@ public:
     void notePiFrame();
     bool allowMotion(Motion motion, uint8_t speed) const;
     void setActiveMotion(Motion motion, uint8_t speed);
-    bool driverFaulted() const;
     bool ready() const;
 
 private:
-    static constexpr uint8_t DRIVER_FAULT_PIN = 34;
     static constexpr unsigned long PI_WATCHDOG_MS = 500;
     static constexpr unsigned long REAR_READING_MAX_AGE_MS = 200;
     MotorManager* motors = nullptr;
