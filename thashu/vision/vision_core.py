@@ -71,7 +71,9 @@ class VisionCore:
             return
 
         if was_enabled:
-            print(f"[VISION] Processing paused during {target_state}")
+            print(f"[VISION] Processing paused at {target_state}")
+        else:
+            print(f"[VISION] Processing remains paused during {target_state}")
         self._processing_enabled.clear()
         with self._lock:
             self.current_faces = []
