@@ -280,18 +280,19 @@ def main():
 
                 print(f"[SYSTEM] 🗣  YOU SAID: {text}")
 
-                # ── Whisper returned empty ───────────────────────────────
+                # ── Whisper returned no reliable transcript ────────────
                 if not text or not text.strip():
-                    # mic is already paused — play directly, not via safe_play
-                    # (safe_play would call audio.pause/resume internally and
-                    # unpause before wake.unlock, leaving the pipeline in a
-                    # wrong state)
+                    # The mic is paused and wake-word detection is locked while
+                    # TTS asks the user to repeat the unclear command.
+                    eyes.listening()
+                    transition_runtime(RuntimeState.SPEAKING)
                     speak("I don't understand, please say that again.")
 
                     time.sleep(0.8)
 
                     audio.resume()
                     wake.unlock()
+                    eyes.idle()
 
                     transition_runtime(RuntimeState.RETURN_TO_IDLE)
                     transition_runtime(RuntimeState.IDLE)
