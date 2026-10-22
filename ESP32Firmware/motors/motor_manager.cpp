@@ -5,15 +5,12 @@
 namespace {
 constexpr uint8_t IN1_PINS[4] = {13, 27, 25, 19};
 constexpr uint8_t IN2_PINS[4] = {14, 26, 23, 18};
-constexpr uint8_t SLEEP_PIN = 32;
 constexpr uint8_t ENCODER_PINS[4] = {15, 35, 39, 33}; // Encoder IDs 1-4; attached to motors 4, 2, 3, 1.
 }
 
 volatile uint32_t MotorManager::encoderCounts[4] = {0, 0, 0, 0};
 
 bool MotorManager::begin() {
-    pinMode(SLEEP_PIN, OUTPUT);
-    digitalWrite(SLEEP_PIN, LOW);
     for (uint8_t motor = 0; motor < MOTOR_COUNT; ++motor) {
         pinMode(IN1_PINS[motor], OUTPUT);
         pinMode(IN2_PINS[motor], OUTPUT);
@@ -46,7 +43,6 @@ void MotorManager::stop() {
         analogWrite(IN1_PINS[motor], 0);
         analogWrite(IN2_PINS[motor], 0);
     }
-    digitalWrite(SLEEP_PIN, LOW);
 }
 
 bool MotorManager::isReady() const { return initialized; }
@@ -61,7 +57,6 @@ void MotorManager::writeMotor(uint8_t motor, int16_t speed) {
         analogWrite(IN2_PINS[motor], 0);
         return;
     }
-    digitalWrite(SLEEP_PIN, HIGH);
     const uint8_t duty = static_cast<uint8_t>(speed < 0 ? -speed : speed);
     analogWrite(IN1_PINS[motor], 0);
     analogWrite(IN2_PINS[motor], 0);
