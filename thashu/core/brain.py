@@ -49,7 +49,7 @@ class Brain:
 
         # ===== STEP 1: BLOCK WEAK INPUT =====
         if len(text.split()) < 2:
-            return "Say that clearly."
+            return "I don't understand, please say that again."
 
         # ===== STEP 2: INTENT =====
         intent_data = self.intent_engine.detect(user_input)
