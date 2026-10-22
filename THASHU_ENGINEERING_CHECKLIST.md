@@ -386,7 +386,7 @@ Acceptance:
 
 Phase 4 — Vision Lifecycle
 
-Status: IN PROGRESS — SOFTWARE IMPLEMENTATION AND MOCK TESTS COMPLETE; RASPBERRY PI VALIDATION PENDING
+Status: COMPLETE — SOFTWARE, MOCK TESTS, AND RASPBERRY PI VALIDATION PASSED
 
 Files to inspect/reuse:
 
@@ -424,15 +424,15 @@ Tasks:
 
 Acceptance:
 
-\[ ] Vision processing genuinely stops during voice/AI processing.
+\[x] Vision processing genuinely stops during voice/AI processing.
 
-\[ ] Vision resumes without unnecessary model reloads.
+\[x] Vision resumes without unnecessary model reloads.
 
-\[ ] No camera/thread duplication.
+\[x] No camera/thread duplication.
 
 \[x] VisionCore has no direct motor/servo command path.
 
-Implementation and validation note (2026-10-17): Updated `thashu/vision/vision_core.py` to provide face/camera perception only and gate inference to IDLE; removed direct motor and servo ownership from vision. Existing detector/recognizer instances remain resident, and tracks are reset on resume. Updated `thashu/vision/camera.py` to prevent duplicate capture threads and to join the thread on stop; added `CentroidTracker.reset()` in `thashu/vision/tracker.py`. In `thashu/main.py`, vision starts after the startup audio. Added unit tests in `thashu/tests/test_vision_lifecycle.py` and `thashu/tests/test_camera_lifecycle.py`. Offline lifecycle tests pass (5 tests) with fake camera and perception dependencies; one test verifies VisionCore has no motor or servo controller. Verify on the Raspberry Pi with the real camera and voice pipeline before checking acceptance or marking Phase 4 complete.
+Implementation and validation note (2026-10-22): Software lifecycle implementation and offline lifecycle tests (5 tests) passed. The user verified on the Raspberry Pi that face detection pauses during voice interaction, resumes in IDLE with the camera and models retained, and continues working across repeated interaction cycles without duplicate camera workers. Phase 4 acceptance criteria are complete. Face identity registration and recognition behavior belong to Phase 5 and remain unstarted.
 
 \---
 
