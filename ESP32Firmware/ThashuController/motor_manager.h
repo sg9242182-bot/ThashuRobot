@@ -3,7 +3,7 @@
 #include <Arduino.h>
 #include <stdint.h>
 
-// Owns DRV8833 input pins and encoder pulse counts only.
+// Owns TA6586 direction/PWM input pins and encoder pulse counts only.
 // Safety decisions and Pi communication belong to their dedicated managers.
 class MotorManager {
 public:
