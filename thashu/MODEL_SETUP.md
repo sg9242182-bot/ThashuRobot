@@ -57,7 +57,7 @@ find "$THASHU_MODELS_DIR" -type f -printf '%p %s bytes\n' | sort
 | Face recognition | `face/w600k_r50.onnx` | InsightFace `buffalo_l.zip` |
 | Wake word | `openwakeword/hey_jarvis_v0.1.onnx` | openWakeWord downloader |
 | Wake word support | `openwakeword/melspectrogram.onnx`, `embedding_model.onnx` | Same openWakeWord download |
-| Local LLM | `llm/qwen2.5-1.5b-instruct-q4_k_m.gguf` | Official Qwen GGUF repository |
+| Local LLM | `llm/qwen2.5-0.5b-instruct-q4_k_m.gguf` | Official Qwen GGUF repository |
 | Piper voice | `piper/en_US-lessac-low.onnx` and matching `.onnx.json` | Piper voices repository |
 | Speech recognition | `whisper/` | faster-whisper downloads Whisper tiny on first initialization |
 
@@ -107,8 +107,11 @@ InsightFace labels its pretrained recognition models for non-commercial research
 
 ### Qwen local LLM
 
+The chosen Qwen2.5-0.5B-Instruct Q4_K_M file is about 491 MB. It is a better fit for fast, short voice-assistant replies on the Pi than the previous 1.5B suggestion; it is less capable at complex reasoning. The code expects this exact filename. [Official Qwen GGUF files](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/tree/main).
+
+
 ```bash
-hf download Qwen/Qwen2.5-1.5B-Instruct-GGUF qwen2.5-1.5b-instruct-q4_k_m.gguf --local-dir "$THASHU_MODELS_DIR/llm"
+hf download Qwen/Qwen2.5-0.5B-Instruct-GGUF qwen2.5-0.5b-instruct-q4_k_m.gguf --local-dir "$THASHU_MODELS_DIR/llm"
 ```
 
 ### Piper voice
@@ -134,7 +137,7 @@ test -s "$THASHU_MODELS_DIR/face/w600k_r50.onnx"
 test -s "$THASHU_MODELS_DIR/openwakeword/hey_jarvis_v0.1.onnx"
 test -s "$THASHU_MODELS_DIR/openwakeword/melspectrogram.onnx"
 test -s "$THASHU_MODELS_DIR/openwakeword/embedding_model.onnx"
-test -s "$THASHU_MODELS_DIR/llm/qwen2.5-1.5b-instruct-q4_k_m.gguf"
+test -s "$THASHU_MODELS_DIR/llm/qwen2.5-0.5b-instruct-q4_k_m.gguf"
 test -s "$THASHU_MODELS_DIR/piper/en_US-lessac-low.onnx"
 test -s "$THASHU_MODELS_DIR/piper/en_US-lessac-low.onnx.json"
 git -C ~/ThashuRobot check-ignore -v thashu/models/face/w600k_r50.onnx
@@ -147,6 +150,6 @@ git -C ~/ThashuRobot check-ignore -v thashu/models/face/w600k_r50.onnx
 - [openWakeWord model downloader](https://github.com/dscripka/openWakeWord)
 - [InsightFace model-zoo release and checksum](https://github.com/deepinsight/insightface/releases/tag/model-zoo)
 - [InsightFace model licensing](https://github.com/deepinsight/insightface/blob/master/model_zoo/README.md)
-- [Official Qwen 2.5 1.5B Instruct GGUF files](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/tree/main)
+- [Official Qwen 2.5 1.5B Instruct GGUF files](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/tree/main)
 - [Piper en_US-lessac-low voice files](https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_US/lessac/low)
 - [faster-whisper `download_root` option](https://github.com/SYSTRAN/faster-whisper/blob/master/faster_whisper/transcribe.py)
