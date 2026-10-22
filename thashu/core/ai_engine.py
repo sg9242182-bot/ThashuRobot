@@ -1,5 +1,6 @@
 from llama_cpp import Llama
 import os
+import re
 
 from core.model_paths import model_path
 
@@ -18,15 +19,19 @@ print("[AI ENGINE] Qwen2.5-0.5B loaded")
 
 # ── Prompts ───────────────────────────────────────────────────────────────────
 _SYSTEM_NORMAL = (
-    "You are Thashu, a robot assistant. "
-    "Give a short, direct, factual answer in 2-3 sentences max. "
-    "No lists. No stories. No filler words."
+    "You are Thashu, a helpful robot assistant. "
+    "Answer the user's actual question directly in one short sentence. "
+    "If the input is unclear, incomplete, or nonsensical, reply exactly: "
+    "I didn't understand that. Please say it again. "
+    "Do not guess unclear words or add a preamble, unrelated facts, lists, or filler."
 )
 
 _SYSTEM_DEEP = (
-    "You are Thashu, a precise AI assistant. "
-    "Explain clearly and simply in 3-4 sentences max. "
-    "Stay on topic. No lists. No stories."
+    "You are Thashu, a helpful robot assistant. "
+    "Answer the user's actual question directly in at most two short sentences. "
+    "If the input is unclear, incomplete, or nonsensical, reply exactly: "
+    "I didn't understand that. Please say it again. "
+    "Do not guess unclear words or add a preamble, unrelated facts, lists, or filler."
 )
 
 # ── Main function (same signature as before) ──────────────────────────────────
@@ -39,28 +44,26 @@ def generate_response(prompt: str, mode: str = "normal") -> str:
                 {"role": "system", "content": system},
                 {"role": "user",   "content": prompt}
             ],
-            max_tokens=40,
-            temperature=0.3,
+            max_tokens=56 if mode == "deep" else 32,
+            temperature=0.2,
             stop=["User:", "Assistant:", "\n\n"]
         )
 
         text = output["choices"][0]["message"]["content"].strip()
 
-        # ── Clean ─────────────────────────────────────────────────────────────
+        # Remove common role labels and enforce the requested short answer.
         for tag in ["Assistant:", "Answer:", "Thashu:"]:
             if text.startswith(tag):
                 text = text[len(tag):].strip()
 
-        text = text.replace("\n", " ").strip()
-
-        # Keep max 2 sentences
-        sentences = [s.strip() for s in text.split(".") if s.strip()]
-        if len(sentences) >= 2:
-            text = sentences[0] + ". " + sentences[1] + "."
-        elif len(sentences) == 1:
-            text = sentences[0] + "."
-        else:
-            text = "I did not understand that."
+        text = " ".join(text.split())
+        sentence_limit = 2 if mode == "deep" else 1
+        sentences = re.split(r"(?<=[.!?])\\s+", text)
+        text = " ".join(sentence.strip() for sentence in sentences[:sentence_limit]).strip()
+        if text and text[-1] not in ".!?":
+            text += "."
+        if not text:
+            text = "I didn't understand that. Please say it again."
 
         return text.strip()
 
