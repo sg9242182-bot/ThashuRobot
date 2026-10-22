@@ -58,7 +58,7 @@ def generate_response(prompt: str, mode: str = "normal") -> str:
 
         text = " ".join(text.split())
         sentence_limit = 2 if mode == "deep" else 1
-        sentences = re.split(r"(?<=[.!?])\\s+", text)
+        sentences = re.split(r"(?<=[.!?])\s+", text)
         text = " ".join(sentence.strip() for sentence in sentences[:sentence_limit]).strip()
         if text and text[-1] not in ".!?":
             text += "."
