@@ -47,7 +47,7 @@ If you already downloaded files into the old checkout-local `models/` directory,
 if [ -d "$HOME/ThashuRobot/thashu/models" ]; then
   cp -an "$HOME/ThashuRobot/thashu/models/." "$THASHU_MODELS_DIR/"
 fi
-find "$THASHU_MODELS_DIR" -type f -printf '%p %s bytes\\n' | sort
+find "$THASHU_MODELS_DIR" -type f -printf '%p %s bytes\n' | sort
 ```
 
 ## Required model assets
@@ -129,7 +129,7 @@ python -c 'from voice.speech_to_text import _get_model; _get_model()'
 ### Verify
 
 ```bash
-find "$THASHU_MODELS_DIR" -type f -printf '%p %s bytes\\n' | sort
+find "$THASHU_MODELS_DIR" -type f -printf '%p %s bytes\n' | sort
 test -s "$THASHU_MODELS_DIR/face/w600k_r50.onnx"
 test -s "$THASHU_MODELS_DIR/openwakeword/hey_jarvis_v0.1.onnx"
 test -s "$THASHU_MODELS_DIR/openwakeword/melspectrogram.onnx"
@@ -137,7 +137,7 @@ test -s "$THASHU_MODELS_DIR/openwakeword/embedding_model.onnx"
 test -s "$THASHU_MODELS_DIR/llm/qwen2.5-1.5b-instruct-q4_k_m.gguf"
 test -s "$THASHU_MODELS_DIR/piper/en_US-lessac-low.onnx"
 test -s "$THASHU_MODELS_DIR/piper/en_US-lessac-low.onnx.json"
-git -C ~/ThashuRobot check-ignore thashu/models
+git -C ~/ThashuRobot check-ignore -v thashu/models/face/w600k_r50.onnx
 ```
 
 `git check-ignore` should report `thashu/models`; the active assets are in your home data directory, outside Git altogether.
