@@ -280,19 +280,13 @@ def main():
 
                 print(f"[SYSTEM] 🗣  YOU SAID: {text}")
 
-                # ── Whisper returned no reliable transcript ────────────
+                # ── Nothing understood ───────────────────────────────
                 if not text or not text.strip():
-                    # The mic is paused and wake-word detection is locked while
-                    # TTS asks the user to repeat the unclear command.
-                    eyes.listening()
-                    transition_runtime(RuntimeState.SPEAKING)
-                    speak("I don't understand, please say that again.")
+                    print("[SYSTEM] ── Nothing understood")
 
-                    time.sleep(0.8)
-
-                    audio.resume()
+                    wake.lock()
+                    safe_play(SOUND_NOT_HEARD)
                     wake.unlock()
-                    eyes.idle()
 
                     transition_runtime(RuntimeState.RETURN_TO_IDLE)
                     transition_runtime(RuntimeState.IDLE)
