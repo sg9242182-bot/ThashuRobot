@@ -151,24 +151,8 @@ class Brain:
 
             mode = "deep" if decision_result == "DEEP_MODE" else "normal"
 
-            prompt = f"""
-You are Thashu.
-
-Answer in 1-2 clear sentences.
-
-Do NOT:
-- say "I do not have the ability"
-- mention AI limitations
-- say "Sure" or "I'd be happy"
-- generate lists
-- go off topic
-
-User: {user_input}
-
-Answer:
-"""
-
-            ai_response = generate_response(prompt=prompt, mode=mode)
+            # The model has a single system prompt; pass only the spoken request.
+            ai_response = generate_response(prompt=user_input, mode=mode)
 
             # ===== SAFETY =====
             if not ai_response or len(ai_response.strip()) == 0:
