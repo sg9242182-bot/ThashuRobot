@@ -286,7 +286,7 @@ def main():
                     # (safe_play would call audio.pause/resume internally and
                     # unpause before wake.unlock, leaving the pipeline in a
                     # wrong state)
-                    play(SOUND_NOT_HEARD, blocking=True)
+                    speak("I don't understand, please say that again.")
 
                     time.sleep(0.8)
 
