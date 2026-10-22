@@ -1,10 +1,14 @@
-"""Stable paths for Thashu's source tree and machine-local model assets."""
+"""Stable source and machine-local model paths for Thashu."""
 
+import os
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-MODELS_DIR = PROJECT_ROOT / "models"
+DEFAULT_MODELS_DIR = Path.home() / ".local" / "share" / "thashu" / "models"
+MODELS_DIR = Path(
+    os.environ.get("THASHU_MODELS_DIR", str(DEFAULT_MODELS_DIR))
+).expanduser().resolve()
 
 
 def project_path(*parts):
@@ -13,5 +17,5 @@ def project_path(*parts):
 
 
 def model_path(*parts):
-    """Return an absolute path within the ignored, machine-local models folder."""
+    """Return an absolute path in the persistent, machine-local model directory."""
     return str(MODELS_DIR.joinpath(*parts))
