@@ -105,29 +105,9 @@ def transcribe(audio_48k: np.ndarray) -> str:
                 "min_silence_duration_ms": 300,
             },
         )
-        segments = list(segments)
-        if not segments:
-            print("[STT] No speech segments; rejecting the transcript.")
-            return ""
-
         text = " ".join(s.text.strip() for s in segments).strip()
-        if not text:
-            print("[STT] Empty transcript; asking the user to repeat.")
-            return ""
-
-        avg_logprob = sum(s.avg_logprob for s in segments) / len(segments)
-        mean_no_speech = sum(s.no_speech_prob for s in segments) / len(segments)
         duration_s = len(audio_48k) / INPUT_RATE
-        print(
-            f"[STT] ({duration_s:.1f}s audio) Heard: {text!r}; "
-            f"avg_logprob={avg_logprob:.2f}, no_speech={mean_no_speech:.2f}"
-        )
-
-        # Reject clearly uncertain/no-speech output instead of sending it to the LLM.
-        if avg_logprob < -0.9 or mean_no_speech >= 0.6:
-            print("[STT] Low-confidence transcript rejected.")
-            return ""
-
+        print(f"[STT] ({duration_s:.1f}s audio) Heard: {text!r}")
         return text
 
     except Exception as e:
