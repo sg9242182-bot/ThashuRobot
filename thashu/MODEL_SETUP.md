@@ -1,61 +1,103 @@
-# Local model setup
+# Local Python environment and model setup
 
-Thashu's model weights are machine-local files. Keep them under `thashu/models/`; the repository's `.gitignore` excludes `models/` at every depth, so these files will not be committed.
+Keep the Python virtual environment and model weights outside the Git checkout. Pulling, switching branches, cleaning, or pushing `~/ThashuRobot` then cannot remove them or add them to a commit.
 
-The code resolves paths from the installed source files, not the shell's current directory. On the Raspberry Pi, the expected directory is:
+Use these persistent, user-owned locations on the Raspberry Pi:
 
-```text
-/home/tharun/ThashuRobot/thashu/models/
+- Virtual environment: `~/.venvs/thashu`
+- Model weights: `~/.local/share/thashu/models/`
+
+The code defaults to that model directory. Set `THASHU_MODELS_DIR` only if you deliberately choose another location.
+
+## Create the virtual environment
+
+A virtual environment is local to this Pi and is not downloaded by Git:
+
+```bash
+deactivate 2>/dev/null || true
+unset VIRTUAL_ENV
+hash -r
+mkdir -p ~/.venvs
+python3 -m venv ~/.venvs/thashu
+source ~/.venvs/thashu/bin/activate
+python -c 'import sys; print(sys.executable)'
+python -m pip --version
 ```
 
-## Required assets
+Both reported paths should be inside `/home/tharun/.venvs/thashu`. If `python3 -m venv` reports that `ensurepip` is unavailable, install the OS package with `sudo apt install python3-venv` and retry. In a new terminal, activate it with:
 
-| Feature | Local path | How it is obtained |
-|---|---|---|
-| Face recognition | `models/face/w600k_r50.onnx` | Extracted from InsightFace `buffalo_l.zip` |
-| Wake word | `models/openwakeword/hey_jarvis_v0.1.onnx` | openWakeWord downloader |
-| Wake word support | `models/openwakeword/melspectrogram.onnx`, `embedding_model.onnx` | Same openWakeWord download |
-| Local LLM | `models/llm/qwen2.5-1.5b-instruct-q4_k_m.gguf` | Official Qwen GGUF repository |
-| Piper voice | `models/piper/en_US-lessac-low.onnx` and matching `.onnx.json` | Piper voices repository |
-| Speech recognition | `models/whisper/` | faster-whisper downloads Whisper tiny on first initialization |
+```bash
+source ~/.venvs/thashu/bin/activate
+```
 
-The face detector uses OpenCV's installed Haar cascade; there are no separate MobileNet SSD files to download. Piper's executable is software, not a model weight. The code defaults to `~/piper/piper/piper`; set `THASHU_PIPER_BIN` if it is installed elsewhere.
+## Set up the model directory
 
-## Download on the Pi
-
-Run these commands in the project's existing Python virtual environment:
+Run from the repository's Python project directory:
 
 ```bash
 cd ~/ThashuRobot/thashu
-mkdir -p models/{face,openwakeword,llm,piper,whisper}
-df -h .
+export THASHU_MODELS_DIR="$HOME/.local/share/thashu/models"
+mkdir -p "$THASHU_MODELS_DIR"/{face,openwakeword,llm,piper,whisper}
+df -h "$HOME"
 ```
 
-The Qwen model is about 1.12 GB; make sure the filesystem has enough free space before downloading.
+If you already downloaded files into the old checkout-local `models/` directory, copy them into the persistent location. This leaves the originals in place until you have verified the application:
+
+```bash
+if [ -d "$HOME/ThashuRobot/thashu/models" ]; then
+  cp -an "$HOME/ThashuRobot/thashu/models/." "$THASHU_MODELS_DIR/"
+fi
+find "$THASHU_MODELS_DIR" -type f -printf '%p %s bytes\\n' | sort
+```
+
+## Required model assets
+
+| Feature | Path under `$THASHU_MODELS_DIR` | Source |
+|---|---|---|
+| Face recognition | `face/w600k_r50.onnx` | InsightFace `buffalo_l.zip` |
+| Wake word | `openwakeword/hey_jarvis_v0.1.onnx` | openWakeWord downloader |
+| Wake word support | `openwakeword/melspectrogram.onnx`, `embedding_model.onnx` | Same openWakeWord download |
+| Local LLM | `llm/qwen2.5-1.5b-instruct-q4_k_m.gguf` | Official Qwen GGUF repository |
+| Piper voice | `piper/en_US-lessac-low.onnx` and matching `.onnx.json` | Piper voices repository |
+| Speech recognition | `whisper/` | faster-whisper downloads Whisper tiny on first initialization |
+
+The face detector uses OpenCV's installed Haar cascade; it has no separate MobileNet model files. Piper's executable is software, not a model weight. The code defaults to `~/piper/piper/piper`; set `THASHU_PIPER_BIN` if it is installed elsewhere.
+
+## Download the models
+
+Activate the virtual environment above before installing packages or running Python commands:
+
+```bash
+cd ~/ThashuRobot/thashu
+source ~/.venvs/thashu/bin/activate
+export THASHU_MODELS_DIR="$HOME/.local/share/thashu/models"
+python -m pip install --upgrade pip
+python -m pip install openwakeword huggingface_hub faster-whisper scipy
+```
 
 ### Wake word
 
 ```bash
-python3 -c 'from openwakeword.utils import download_models; download_models(model_names=["hey_jarvis_v0.1"], target_directory="models/openwakeword")'
+python -c 'import os; from openwakeword.utils import download_models; download_models(model_names=["hey_jarvis_v0.1"], target_directory=os.path.join(os.environ["THASHU_MODELS_DIR"], "openwakeword"))'
 ```
 
 ### Face recognition
 
-The official InsightFace model archive publishes a SHA-256 checksum. This downloads it to `/tmp`, verifies it, and extracts only the recognition model into the ignored project-local directory:
+The official InsightFace model archive publishes a SHA-256 checksum. This downloads it to `/tmp`, verifies it, and extracts only the recognition model:
 
 ```bash
 wget -O /tmp/thashu-buffalo_l.zip https://github.com/deepinsight/insightface/releases/download/model-zoo/buffalo_l.zip
 echo '80ffe37d8a5940d59a7384c201a2a38d4741f2f3c51eef46ebb28218a7b0ca2f  /tmp/thashu-buffalo_l.zip' | sha256sum -c -
-python3 - <<'PY'
+python - <<'PY'
+import os
 from pathlib import Path
 from zipfile import ZipFile
 
-archive = Path("/tmp/thashu-buffalo_l.zip")
-target = Path("models/face/w600k_r50.onnx")
-with ZipFile(archive) as zf:
+target = Path(os.environ["THASHU_MODELS_DIR"]) / "face" / "w600k_r50.onnx"
+with ZipFile("/tmp/thashu-buffalo_l.zip") as zf:
     matches = [name for name in zf.namelist() if Path(name).name == target.name]
     if len(matches) != 1:
-        raise SystemExit(f"Expected exactly one {target.name} in archive; found {matches}")
+        raise SystemExit(f"Expected one {target.name}; found {matches}")
     target.write_bytes(zf.read(matches[0]))
 print(f"Installed {target} ({target.stat().st_size:,} bytes)")
 PY
@@ -66,42 +108,39 @@ InsightFace labels its pretrained recognition models for non-commercial research
 ### Qwen local LLM
 
 ```bash
-python3 -m pip install -U huggingface_hub
-hf download Qwen/Qwen2.5-1.5B-Instruct-GGUF qwen2.5-1.5b-instruct-q4_k_m.gguf --local-dir models/llm
+hf download Qwen/Qwen2.5-1.5B-Instruct-GGUF qwen2.5-1.5b-instruct-q4_k_m.gguf --local-dir "$THASHU_MODELS_DIR/llm"
 ```
-
-If the `hf` command is not on the virtual environment's PATH after installation, reopen the shell in the same environment and run the command again.
 
 ### Piper voice
 
 ```bash
-curl -fL 'https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/low/en_US-lessac-low.onnx' -o models/piper/en_US-lessac-low.onnx
-curl -fL 'https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/low/en_US-lessac-low.onnx.json' -o models/piper/en_US-lessac-low.onnx.json
+curl -fL 'https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/low/en_US-lessac-low.onnx' -o "$THASHU_MODELS_DIR/piper/en_US-lessac-low.onnx"
+curl -fL 'https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/low/en_US-lessac-low.onnx.json' -o "$THASHU_MODELS_DIR/piper/en_US-lessac-low.onnx.json"
 ```
 
 ### Whisper tiny
 
-The application downloads Whisper tiny into `models/whisper/` the first time speech recognition initializes. To fetch it before running the robot:
+The application downloads Whisper tiny into `$THASHU_MODELS_DIR/whisper/` when speech recognition initializes. To fetch it now:
 
 ```bash
-python3 -c 'from voice.speech_to_text import _get_model; _get_model()'
+python -c 'from voice.speech_to_text import _get_model; _get_model()'
 ```
 
-### Check the files
+### Verify
 
 ```bash
-find models -type f -printf '%p %s bytes\\n' | sort
-test -s models/face/w600k_r50.onnx
-test -s models/openwakeword/hey_jarvis_v0.1.onnx
-test -s models/openwakeword/melspectrogram.onnx
-test -s models/openwakeword/embedding_model.onnx
-test -s models/llm/qwen2.5-1.5b-instruct-q4_k_m.gguf
-test -s models/piper/en_US-lessac-low.onnx
-test -s models/piper/en_US-lessac-low.onnx.json
-git check-ignore models
+find "$THASHU_MODELS_DIR" -type f -printf '%p %s bytes\\n' | sort
+test -s "$THASHU_MODELS_DIR/face/w600k_r50.onnx"
+test -s "$THASHU_MODELS_DIR/openwakeword/hey_jarvis_v0.1.onnx"
+test -s "$THASHU_MODELS_DIR/openwakeword/melspectrogram.onnx"
+test -s "$THASHU_MODELS_DIR/openwakeword/embedding_model.onnx"
+test -s "$THASHU_MODELS_DIR/llm/qwen2.5-1.5b-instruct-q4_k_m.gguf"
+test -s "$THASHU_MODELS_DIR/piper/en_US-lessac-low.onnx"
+test -s "$THASHU_MODELS_DIR/piper/en_US-lessac-low.onnx.json"
+git -C ~/ThashuRobot check-ignore thashu/models
 ```
 
-The last command should print `models`, confirming the local weights are ignored by Git.
+`git check-ignore` should report `thashu/models`; the active assets are in your home data directory, outside Git altogether.
 
 ## References
 
