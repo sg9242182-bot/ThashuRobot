@@ -50,6 +50,7 @@ class VisionCore:
         self.current_faces = []
         self.current_names = {}
         self.person_present = False
+        self._reported_face_count = 0
 
         print("[VISION] Initialized")
 
@@ -58,20 +59,25 @@ class VisionCore:
         if not isinstance(payload, dict) or "to" not in payload:
             return
 
-        enable_processing = payload["to"] == "IDLE"
+        target_state = payload["to"]
+        enable_processing = target_state == "IDLE"
         was_enabled = self._processing_enabled.is_set()
         if enable_processing:
             if not was_enabled:
                 with self._lock:
                     self._tracker_reset_pending = True
+                print("[VISION] Processing resumed in IDLE; camera and models retained")
             self._processing_enabled.set()
             return
 
+        if was_enabled:
+            print(f"[VISION] Processing paused during {target_state}")
         self._processing_enabled.clear()
         with self._lock:
             self.current_faces = []
             self.current_names.clear()
             self.person_present = False
+            self._reported_face_count = 0
             self._tracker_reset_pending = True
 
     def start(self):
@@ -90,7 +96,7 @@ class VisionCore:
                 daemon=True,
             )
             self._thread.start()
-        print("[VISION] Started")
+        print("[VISION] Started (camera worker active)")
         return self
 
     def stop(self):
@@ -210,10 +216,25 @@ class VisionCore:
             if not self._processing_enabled.is_set():
                 continue
 
+            face_count = len(faces)
             with self._lock:
                 if not self._processing_enabled.is_set():
                     continue
+                previous_count = self._reported_face_count
+                self._reported_face_count = face_count
                 self.current_faces = faces
                 self.person_present = bool(faces)
+
+            if face_count != previous_count:
+                if previous_count == 0 and face_count > 0:
+                    centers = [
+                        ((x1 + x2) // 2, (y1 + y2) // 2)
+                        for x1, y1, x2, y2 in faces
+                    ]
+                    print(f"[VISION] Face detected (count={face_count}, centers={centers})")
+                elif face_count == 0:
+                    print("[VISION] No faces detected")
+                else:
+                    print(f"[VISION] Face count changed: {previous_count} -> {face_count}")
 
             time.sleep(0.08)
