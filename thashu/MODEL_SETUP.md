@@ -150,6 +150,6 @@ git -C ~/ThashuRobot check-ignore -v thashu/models/face/w600k_r50.onnx
 - [openWakeWord model downloader](https://github.com/dscripka/openWakeWord)
 - [InsightFace model-zoo release and checksum](https://github.com/deepinsight/insightface/releases/tag/model-zoo)
 - [InsightFace model licensing](https://github.com/deepinsight/insightface/blob/master/model_zoo/README.md)
-- [Official Qwen 2.5 1.5B Instruct GGUF files](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/tree/main)
+- [Official Qwen 2.5 0.5B Instruct GGUF files](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/tree/main)
 - [Piper en_US-lessac-low voice files](https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_US/lessac/low)
 - [faster-whisper `download_root` option](https://github.com/SYSTRAN/faster-whisper/blob/master/faster_whisper/transcribe.py)
