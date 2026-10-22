@@ -4,9 +4,9 @@ Wake word detection using openWakeWord's pretrained "hey jarvis" model.
 
 Key design decisions:
 - Local copies of the wake-word model and openWakeWord support models
-  live under the ignored project-local directory models/openwakeword/.
+  live under ~/.local/share/thashu/models/openwakeword/ by default, or the directory selected by THASHU_MODELS_DIR.
   From the thashu/ directory, fetch them with:
-      python3 -c 'from openwakeword.utils import download_models; download_models(model_names=["hey_jarvis_v0.1"], target_directory="models/openwakeword")'
+      python -c 'import os; from openwakeword.utils import download_models; download_models(model_names=["hey_jarvis_v0.1"], target_directory=os.path.join(os.environ["THASHU_MODELS_DIR"], "openwakeword"))'
   This keeps startup independent of network access after setup.
 - Resampling mirrors vad.py exactly (48 kHz -> 16 kHz via resample_poly,
   down=3), since openWakeWord's models are trained on 16 kHz audio.
@@ -102,7 +102,7 @@ class WakeWordEngine:
     int16 audio chunks.
 
     Usage:
-        wake = WakeWordEngine(model_path="models/wake_word/hey_jarvis_v0.1.onnx")
+        wake = WakeWordEngine(model_path="~/.local/share/thashu/models/openwakeword/hey_jarvis_v0.1.onnx")
         if wake.process(chunk):
             ...  # wake word heard
 
@@ -130,7 +130,7 @@ class WakeWordEngine:
             oww_kwargs["embedding_model_path"] = _EMBEDDING_LOCAL
         else:
             print(
-                "[WAKE] Warning: models/openwakeword/{melspectrogram,embedding_model}.onnx "
+                "[WAKE] Warning: local openWakeWord support models are missing from the configured model directory "
                 "not found. Falling back to openWakeWord's default support-model path — "
                 "this may try to download them over the network on first use. See the "
                 "module docstring in wake_word.py to fetch them once and go fully offline."
