@@ -14,7 +14,6 @@ bool SafetyManager::begin(MotorManager& motorManager, ToFManager& frontTof,
     rear = &rearUltrasonic;
     eyes = &eyeManager;
     servos = &servoManager;
-    pinMode(DRIVER_FAULT_PIN, INPUT);
     motors->stop();
     if (!requiredHardwareReady()) return false;
     if (!tof->begin()) return false;
@@ -46,7 +45,7 @@ bool SafetyManager::rearClear() const {
 
 bool SafetyManager::allowMotion(Motion motion, uint8_t speed) const {
     if (speed == 0 || motion == STOPPED) return true;
-    if (!initialized || watchdogExpired || driverFaulted()) return false;
+    if (!initialized || watchdogExpired) return false;
     if ((motion == FORWARD || motion == TURNING) && !frontClear()) return false;
     if ((motion == REVERSE || motion == TURNING) && !rearClear()) return false;
     return true;
@@ -72,7 +71,7 @@ void SafetyManager::update() {
         return;
     }
     if (millis() - lastPiFrameMs >= PI_WATCHDOG_MS) watchdogExpired = true;
-    if (watchdogExpired || driverFaulted() ||
+    if (watchdogExpired ||
         (activeMotion != STOPPED &&
          !allowMotion(activeMotion, 1))) {
         motors->stop();
@@ -85,9 +84,6 @@ bool SafetyManager::requiredHardwareReady() const {
            servos && servos->isReady();
 }
 
-bool SafetyManager::driverFaulted() const {
-    return digitalRead(DRIVER_FAULT_PIN) == LOW;
-}
 
 void SafetyManager::setActiveMotion(Motion motion, uint8_t speed) {
     activeMotion = speed == 0 ? STOPPED : motion;
