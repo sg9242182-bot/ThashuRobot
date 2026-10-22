@@ -4,7 +4,7 @@ import os
 from core.model_paths import model_path
 
 # ── Load once at import time ──────────────────────────────────────────────────
-_MODEL_PATH = model_path("llm", "qwen2.5-1.5b-instruct-q4_k_m.gguf")
+_MODEL_PATH = model_path("llm", "qwen2.5-0.5b-instruct-q4_k_m.gguf")
 
 _llm = Llama(
     model_path=_MODEL_PATH,
@@ -14,7 +14,7 @@ _llm = Llama(
     verbose=False
 )
 
-print("[AI ENGINE] Qwen2.5-1.5B loaded")
+print("[AI ENGINE] Qwen2.5-0.5B loaded")
 
 # ── Prompts ───────────────────────────────────────────────────────────────────
 _SYSTEM_NORMAL = (
