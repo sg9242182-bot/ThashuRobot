@@ -103,7 +103,7 @@ class ResponseManager:
             return None
 
         if self.is_garbage(user_input, ai_response):
-            return "I didn’t understand that. Say it again."
+            return "I don't understand, please say that again."
 
         response = ai_response.strip()
 
