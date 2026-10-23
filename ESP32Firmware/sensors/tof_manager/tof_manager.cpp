@@ -82,12 +82,16 @@ void ToFManager::update() {
         hasData[i] = true;
         distanceMm[i] = measuredDistance;
 
-        // Only a status-0 measurement is considered trustworthy for safety.
-        // Other statuses remain available for diagnostics but cannot trigger
-        // obstacle protection.
-        valid[i] = (status == 0);
-        obstacleDetected[i] = valid[i] &&
-            distanceMm[i] <= static_cast<uint16_t>(OBSTACLE_DISTANCE_CM) * 10U;
+        const uint16_t obstacleThresholdMm =
+            static_cast<uint16_t>(OBSTACLE_DISTANCE_CM) * 10U;
+        const bool inObstacleZone = measuredDistance <= obstacleThresholdMm;
+
+        // Status 2 reports a weak return. In this robot's validated setup,
+        // readings above the 30 cm stop threshold are usable for clear-path
+        // checks. At or inside the threshold, status 2 remains fail-safe.
+        valid[i] = (status == 0) || (status == 2 && !inObstacleZone);
+        obstacleDetected[i] =
+            (status == 0 || status == 2) && inObstacleZone;
     }
 }
 
