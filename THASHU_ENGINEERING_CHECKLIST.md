@@ -386,7 +386,7 @@ Acceptance:
 
 Phase 4 — Vision Lifecycle
 
-Status: IN PROGRESS — SOFTWARE IMPLEMENTATION AND MOCK TESTS COMPLETE; RASPBERRY PI VALIDATION PENDING
+Status: COMPLETE — SOFTWARE, MOCK TESTS, AND RASPBERRY PI VALIDATION COMPLETE
 
 Files to inspect/reuse:
 
@@ -424,15 +424,15 @@ Tasks:
 
 Acceptance:
 
-\[ ] Vision processing genuinely stops during voice/AI processing.
+\[x] Vision processing genuinely stops during voice/AI processing.
 
-\[ ] Vision resumes without unnecessary model reloads.
+\[x] Vision resumes without unnecessary model reloads.
 
-\[ ] No camera/thread duplication.
+\[x] No camera/thread duplication.
 
-\[ ] No race condition with hardware control.
+\[x] No race condition with hardware control.
 
-Implementation and validation note (2026-10-17): Updated `thashu/vision/vision_core.py` to gate detection, recognition, tracking, servo updates, and motor following to IDLE; transition-time motor STOP and servo center are synchronized against vision outputs. Existing detector/recognizer instances remain resident, and tracks are reset on resume. Updated `thashu/vision/camera.py` to prevent duplicate capture threads and to join the thread on stop; added `CentroidTracker.reset()` in `thashu/vision/tracker.py`. In `thashu/main.py`, vision starts after the startup audio. Added unit tests in `thashu/tests/test_vision_lifecycle.py` and `thashu/tests/test_camera_lifecycle.py`. Offline lifecycle tests pass (4 tests) with fake camera/actuator dependencies. Verify on the Raspberry Pi with the real camera and voice pipeline before checking acceptance or marking Phase 4 complete.
+Implementation and validation note (2026-10-17): Updated `thashu/vision/vision_core.py` to gate detection, recognition, tracking, servo updates, and motor following to IDLE; transition-time motor STOP and servo center are synchronized against vision outputs. Existing detector/recognizer instances remain resident, and tracks are reset on resume. Updated `thashu/vision/camera.py` to prevent duplicate capture threads and to join the thread on stop; added `CentroidTracker.reset()` in `thashu/vision/tracker.py`. In `thashu/main.py`, vision starts after the startup audio. Added unit tests in `thashu/tests/test_vision_lifecycle.py` and `thashu/tests/test_camera_lifecycle.py`. Offline lifecycle tests pass (4 tests) with fake camera/actuator dependencies. User-reported Raspberry Pi validation (2026-10-23): real camera and voice pipeline tests confirmed vision pauses during interaction and resumes afterward; lifecycle tests passed. Phase 4 acceptance is complete.
 
 \---
 
@@ -832,7 +832,7 @@ Phase 2	—	—
 
 Phase 3	—	—
 
-Phase 4	—	—
+Phase 4	2026-10-23	Vision lifecycle software and Raspberry Pi acceptance passed (user-reported; logged 2026-10-23).
 
 Phase 5	—	—
 
