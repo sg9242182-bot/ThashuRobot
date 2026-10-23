@@ -2,7 +2,7 @@
 
 **Project:** Thashu — Intelligent Self-Reliant Robot  
 **Phase:** Phase 1 — Hardware Abstraction & ESP32 Migration  
-**Status:** Existing TA6586 wiring and integrated motor operation are user-verified. Testing the M0 startup-twitch mitigation remains pending.
+**Status:** Phase 1 pin map validated by user. M0 startup twitch is resolved; M0 D1 uses GPIO33 and the M0 encoder signal uses GPIO34.
 **MCU:** ESP32-WROOM-32, 38-pin NodeMCU  
 **Expansion:** Purple ESP32 38-pin expansion board
 
