@@ -356,23 +356,21 @@ Acceptance:
 
 Phase 3 — Voice → Command → Hardware
 
-Status: IN PROGRESS — explicit voice STOP is wired directly to the ESP32; physical acceptance and remaining movement-command work are pending.
+Status: IN PROGRESS — voice-to-decision path traced; STOP is not yet dispatched to the ESP32 motor interface.
 
 Tasks:
 
 \[x] Trace Whisper → intent → decision path.
 
-\[x] Connect explicit STOP phrases to the existing ESP32 STOP command.
+\[ ] Connect STOP to actual hardware stop.
 
-\[x] Handle STOP before Brain/LLM response generation; the ESP32 receives its dedicated STOP frame.
+\[ ] Define high-priority STOP handling.
 
-\[x] Keep the LLM out of the actuator command path; voice STOP dispatch is deterministic.
+\[ ] Prevent LLM from directly bypassing command/safety layer.
 
 \[ ] Validate movement commands.
 
 \[ ] Validate unsafe command rejection.
-
-Implementation note (2026-10-23): `thashu/core/decision.py` now recognizes a bounded set of explicit STOP phrases instead of matching any incidental use of “stop”. `thashu/main.py` dispatches those phrases through `MotorController.stop()` before Brain/LLM handling, and reports whether the serial frame could be sent. `thashu/hardware/motors.py` returns the transport sequence result. No movement commands were changed. Pi/ESP32 voice STOP and no-link behavior still require hardware validation.
 
 Acceptance:
 
