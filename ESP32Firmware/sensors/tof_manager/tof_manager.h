@@ -20,6 +20,7 @@ public:
     bool hasReading(SensorId sensor) const;
     bool isValid(SensorId sensor) const;
     bool isFresh(SensorId sensor) const;
+    bool isOutOfRange(SensorId sensor) const;
     bool isObstacleDetected(SensorId sensor) const;
     uint8_t getRangeStatus(SensorId sensor) const;
 
@@ -35,6 +36,7 @@ private:
     uint16_t distanceMm[SENSOR_COUNT] = {0, 0, 0};
     uint8_t rangeStatus[SENSOR_COUNT] = {255, 255, 255};
     bool hasData[SENSOR_COUNT] = {false, false, false};
+    bool outOfRange[SENSOR_COUNT] = {false, false, false};
     bool valid[SENSOR_COUNT] = {false, false, false};
     bool obstacleDetected[SENSOR_COUNT] = {false, false, false};
     unsigned long lastReadingTime[SENSOR_COUNT] = {0, 0, 0};
