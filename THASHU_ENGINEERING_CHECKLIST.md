@@ -356,11 +356,11 @@ Acceptance:
 
 Phase 3 — Voice → Command → Hardware
 
-Status: NOT STARTED
+Status: IN PROGRESS — voice-to-decision path traced; STOP is not yet dispatched to the ESP32 motor interface.
 
 Tasks:
 
-\[ ] Trace Whisper → intent → decision path.
+\[x] Trace Whisper → intent → decision path.
 
 \[ ] Connect STOP to actual hardware stop.
 
