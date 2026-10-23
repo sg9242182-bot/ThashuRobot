@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 
 # Local virtual environments
+.venvs/
 venv/
 .venv/
 venv_wake/
