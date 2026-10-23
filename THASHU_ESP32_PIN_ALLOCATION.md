@@ -2,7 +2,7 @@
 
 **Project:** Thashu — Intelligent Self-Reliant Robot  
 **Phase:** Phase 1 — Hardware Abstraction & ESP32 Migration  
-**Status:** TA6586 board header identified from the user's photo; GPIO12 tilt-servo reset test and four-encoder map validation remain. New motor-driver GPIO mapping is documented but firmware adaptation and physical tests remain pending.
+**Status:** Existing TA6586 wiring and integrated motor operation are user-verified. Testing the M0 startup-twitch mitigation remains pending.
 **MCU:** ESP32-WROOM-32, 38-pin NodeMCU  
 **Expansion:** Purple ESP32 38-pin expansion board
 
@@ -25,7 +25,7 @@
 | 4 | Front-left ToF X | OUT | VL53LDK |
 | 5 | Camera PAN servo signal | OUT | MG90S |
 | 13 | TA6586 module 1 D0 (motor channel A input 1) | OUT | Motor driver |
-| 14 | TA6586 module 1 D1 (motor channel A input 2) | OUT | Motor driver |
+| 14 | Unassigned after M0 startup-twitch remap | — | ESP32 |
 | 15 | Encoder 1 DO (proposed; boot-log strap only) | IN/interrupt | HC-89 on motor 4 |
 | 16 | Front-center ToF X | OUT | VL53LDK |
 | 17 | Front-right ToF X | OUT | VL53LDK |
@@ -38,12 +38,12 @@
 | 26 | TA6586 module 1 D3 (motor channel B input 2) | OUT | Motor driver |
 | 27 | TA6586 module 1 D2 (motor channel B input 1) | OUT | Motor driver |
 | 12 | Camera TILT servo signal (provisional; cold-boot validation required) | OUT after startup | MG90S |
-| 33 | Encoder 4 DO (provisional) | IN/interrupt | HC-89 on motor 1 |
+| 33 | TA6586 module 1 D1 (motor channel A input 2) | OUT | Motor driver |
 | 35 | Encoder 2 DO (proposed) | IN/interrupt | HC-89 on motor 2 |
 | 36 | HC-SR04 ECHO (restored baseline; retain divider) | IN | HC-SR04 |
 | 39 | Encoder 3 DO (proposed) | IN/interrupt | HC-89 on motor 3 |
 | 32 | HC-SR04 TRIG | OUT | HC-SR04 |
-| 34 | Unassigned by revised TA6586 wiring map | — | Available GPIO |
+| 34 | Encoder 4 DO (M0 encoder) | IN/interrupt | HC-89 on motor 1 |
 
 ## I2C bus
 
@@ -69,7 +69,7 @@ Encoder speed matching (2026-10-23): MotorManager now samples encoder pulse rate
 
 | Module/channel | Header input 1 | Header input 2 | Motor |
 |---|---|---|---|
-| Module 1, A | D0 → GPIO13 | D1 → GPIO14 | Motor 1 |
+| Module 1, A | D0 → GPIO13 | D1 → GPIO33 | Motor 1 |
 | Module 1, B | D2 → GPIO27 | D3 → GPIO26 | Motor 2 |
 | Module 2, A | D0 → GPIO25 | D1 → GPIO23 | Motor 3 |
 | Module 2, B | D2 → GPIO19 | D3 → GPIO18 | Motor 4 |
@@ -82,7 +82,7 @@ These TA6586 boards do not expose the DRV8833 EEP/nSLEEP and ULT/nFAULT pins ass
 
 The proposed GPIO pairing is based on the user-provided board photo and the TA6586 datasheet, but remains subject to wiring, low-speed direction, STOP, safety-stop, and cold-boot tests. Do not call it physically validated yet.
 
-The integrated firmware maps encoder IDs 1–4 to GPIO15, GPIO35, GPIO39, and GPIO33 respectively; these sensors are mounted on motors 4, 2, 3, and 1. GPIO36 remains reserved for HC-SR04 ECHO. GPIO15 is a boot strap that controls ROM boot-message output when low; verify the HC-89 output does not prevent application boot. Power HC-89 boards at 3.3 V and connect grounds together. The tilt-servo signal is provisionally moved from GPIO15 to GPIO12 to free GPIO15. GPIO12 is a flash-voltage strap: its use is conditional on confirming it remains low during reset with the servo attached and passing repeated cold boots.
+The integrated firmware maps encoder IDs 1–4 to GPIO15, GPIO35, GPIO39, and GPIO34 respectively; these sensors are mounted on motors 4, 2, 3, and 1. GPIO36 remains reserved for HC-SR04 ECHO. GPIO15 is a boot strap that controls ROM boot-message output when low; verify the HC-89 output does not prevent application boot. Power HC-89 boards at 3.3 V and connect grounds together. The tilt-servo signal is provisionally moved from GPIO15 to GPIO12 to free GPIO15. GPIO12 is a flash-voltage strap: its use is conditional on confirming it remains low during reset with the servo attached and passing repeated cold boots.
 
 Bench result (2026-10-03): HC-SR04 ECHO on GPIO12 allowed operation only when connected after boot; with ECHO connected during power-on, boot produced serial garbage/repeated output and did not start normally. This is consistent with GPIO12 being sampled high and selecting 1.8 V flash power on this 3.3 V-flash ESP32-WROOM board. Withdraw GPIO12 as an ECHO candidate. Restore HC-SR04 ECHO to GPIO36 through its existing divider for the standalone ultrasonic test. GPIO36's encoder conflict is resolved by moving encoder 3 to GPIO39; encoder 4 is assigned to GPIO15. The GPIO12 tilt-servo reassignment remains provisional pending reset-level and repeated cold-boot tests.
 
@@ -94,7 +94,7 @@ Restore the baseline HC-SR04 ECHO assignment at GPIO36. The GPIO12 ECHO proposal
 
 ## TA6586 module 1
 
-- D0 → GPIO13; D1 → GPIO14 → Motor 1 channel A input pair
+- D0 → GPIO13; D1 → GPIO33 → Motor 1 channel A input pair
 - D2 → GPIO27; D3 → GPIO26 → Motor 2 channel B input pair
 - Motor supply → regulated motor rail within the motors' 3–6 V rating, observing printed polarity
 - GND → common ESP32/battery ground
@@ -143,7 +143,7 @@ Servo control will use ESP32 hardware PWM with software rate/position limiting f
 
 The allocation avoids GPIO6–11 (flash-connected) and GPIO1/3 (primary serial/programming). GPIO34/35/36/39 are input-only; GPIO32 and GPIO34 are unassigned by the TA6586 wiring proposal.
 
-GPIO5 is used for PAN after successful functional and cold-boot validation. GPIO12 is provisionally assigned to TILT only after reset-level and repeated cold-boot validation; do not use it for HC-SR04 ECHO. GPIO15 is provisionally assigned to encoder 1 (on motor 4); GPIO33 is assigned to encoder 4 (on motor 1). A low level on GPIO15 may suppress ROM boot text, so confirm normal application boot. GPIO32 is used for HC-SR04 TRIG; GPIO2 is unused by the current pin map. GPIO34/35/36/39 are input-only.
+GPIO5 is used for PAN after successful functional and cold-boot validation. GPIO12 is provisionally assigned to TILT only after reset-level and repeated cold-boot validation; do not use it for HC-SR04 ECHO. GPIO15 is provisionally assigned to encoder 1 (on motor 4); GPIO34 is assigned to encoder 4 (on motor 1). A low level on GPIO15 may suppress ROM boot text, so confirm normal application boot. GPIO32 is used for HC-SR04 TRIG; GPIO2 is unused by the current pin map. GPIO34/35/36/39 are input-only.
 
 ## Servo validation record
 
@@ -165,4 +165,7 @@ The following tests passed on GPIO15 before reassignment and do not validate GPI
 
 User report (2026-10-04): tilt servo operates correctly with its signal on GPIO12. Functional movement is confirmed; reset-level measurement and 10 cold boots with the servo attached are still pending before treating this assignment as final.
 
-HC-SR04 trigger-pin update (2026-10-23): Moved only TRIG from GPIO2 to GPIO32 to avoid using the GPIO2 boot-strap pin. ECHO remains on GPIO36 through the existing voltage divider; the encoder map is unchanged. GPIO34 remains unassigned. Update the TRIG wire before uploading the integrated controller, then verify cold boot and rear range readings.
+HC-SR04 trigger-pin update (2026-10-23): Moved only TRIG from GPIO2 to GPIO32 to avoid using the GPIO2 boot-strap pin. ECHO remains on GPIO36 through the existing voltage divider; the encoder map is unchanged. GPIO34 is assigned to M0's HC-89 encoder output. Update the TRIG wire before uploading the integrated controller, then verify cold boot and rear range readings.
+
+
+M0 startup-twitch pin remap (2026-10-23): User approved moving TA6586 module 1 D1 for M0 from GPIO14 to GPIO33, and moving M0's encoder ID4 signal from GPIO33 to GPIO34. GPIO34 is input-only and therefore reserved for the HC-89 DO input, not a driver input. Both existing MotorManager implementations now use IN2_PINS `{33, 26, 23, 18}` and ENCODER_PINS `{15, 35, 39, 34}`. This removes GPIO14 from the M0 bridge pair; it does not guarantee the startup twitch is fixed. Move the two wires, upload the integrated controller, verify encoder ID4 still increments for M0, and check M0 at reset/cold boot before normal motor tests. GPIO34 has no internal pull-up/down; power the HC-89 at 3.3 V and confirm its DO output drives valid logic levels.
