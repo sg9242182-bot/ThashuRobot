@@ -17,6 +17,8 @@ from core.state           import RuntimeState, RuntimeStateMachine
 from core.event_bus       import EventBus
 from vision.vision_core   import VisionCore
 from hardware.eyes        import Eyes
+from hardware.motors      import MotorController
+from core.decision        import is_stop_command
 from core.model_paths import model_path, project_path
 
 # ── Sounds ────────────────────────────────────────────────────────────────────
@@ -40,6 +42,7 @@ runtime   = RuntimeStateMachine()
 event_bus = EventBus()
 
 brain  = Brain()
+motors = MotorController()
 audio  = AudioManager(sample_rate=SAMPLE_RATE, blocksize=BLOCK_SIZE)
 wake = WakeWordEngine(
     model_path=model_path("openwakeword", "hey_jarvis_v0.1.onnx"),
@@ -305,7 +308,17 @@ def main():
 
                 brain_start = time.time()
 
-                response = brain.process(text)
+                if is_stop_command(text):
+                    print("[COMMAND] Explicit STOP recognized; sending directly to ESP32")
+                    stop_sequence = motors.stop()
+                    if stop_sequence is None:
+                        print("[COMMAND] STOP could not be sent; ESP32 link is unavailable")
+                        response = "I couldn't reach the motor controller, so I can't confirm the stop."
+                    else:
+                        print(f"[COMMAND] STOP sent to ESP32 (sequence {stop_sequence})")
+                        response = "Stopping."
+                else:
+                    response = brain.process(text)
 
                 brain_time = time.time() - brain_start
                 print(f"[TIME] BRAIN = {brain_time:.2f}s")
