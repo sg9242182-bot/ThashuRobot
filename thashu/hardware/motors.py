@@ -29,4 +29,4 @@ class MotorController:
 
     def stop(self):
         # STOP is deliberately a dedicated high-priority protocol command.
-        self.gpio.send("STOP")
+        return self.gpio.send("STOP")
