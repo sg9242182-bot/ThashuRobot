@@ -826,7 +826,7 @@ Phase	Completion date	Result
 
 Phase 0	2026-08-23	Architecture/source audit complete
 
-Phase 1	2026-10-23	Complete — integrated controller passed; M0 startup twitch fixed; encoder confirmed on GPIO34.
+Phase 1	2026-10-23	Complete — integrated controller and direct Pi USB-serial test passed; M0 startup twitch fixed; encoder confirmed on GPIO34.
 
 Phase 2	—	—
 
