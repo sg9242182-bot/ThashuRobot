@@ -1,9 +1,11 @@
 import threading
 import time
 
+from core.model_paths import model_path, project_path
+
 
 class VisionCore:
-    """Coordinates the single camera/vision worker and gates follow behavior by runtime state."""
+    """Owns camera perception only; hardware actuation belongs to other managers."""
 
     def __init__(
         self,
@@ -12,9 +14,6 @@ class VisionCore:
         recognizer=None,
         database=None,
         tracker=None,
-        follow=None,
-        servo=None,
-        motors=None,
     ):
         # Lazy imports let lifecycle behavior be tested without opening hardware
         # or loading vision models. Production still uses the existing modules.
@@ -23,42 +22,26 @@ class VisionCore:
             camera = Camera(src=0, width=640, height=480)
         if detector is None:
             from vision.face_detection import FaceDetector
-            detector = FaceDetector(
-                model_path="models/mobilenet_ssd/MobileNetSSD_deploy.caffemodel",
-                config_path="models/mobilenet_ssd/MobileNetSSD_deploy.prototxt",
-            )
+            # FaceDetector uses OpenCV's packaged Haar cascade; it has no local
+            # MobileNet model files to load.
+            detector = FaceDetector()
         if recognizer is None:
             from vision.face_recognition import FaceRecognizer
-            recognizer = FaceRecognizer("models/face/w600k_r50.onnx")
+            recognizer = FaceRecognizer(model_path("face", "w600k_r50.onnx"))
         if database is None:
             from vision.face_database import FaceDatabase
-            database = FaceDatabase("data/faces.json")
+            database = FaceDatabase(project_path("data", "faces.json"))
         if tracker is None:
             from vision.tracker import CentroidTracker
             tracker = CentroidTracker(max_disappeared=20)
-        if follow is None:
-            from vision.follow_logic import FollowLogic
-            follow = FollowLogic(frame_w=640, frame_h=480)
-        if servo is None:
-            from hardware.servo_tracking import ServoTracker
-            servo = ServoTracker()
-        if motors is None:
-            from hardware.motors import MotorController
-            motors = MotorController()
-
         self.camera = camera
         self.detector = detector
         self.recognizer = recognizer
         self.database = database
         self.tracker = tracker
-        self.follow = follow
-        self.servo = servo
-        self.motors = motors
-
         self._thread = None
         self._running = False
         self._lifecycle_lock = threading.Lock()
-        self._actuation_lock = threading.Lock()
         self._lock = threading.Lock()
         self._processing_enabled = threading.Event()
         self._processing_enabled.set()  # Runtime starts in IDLE.
@@ -67,35 +50,37 @@ class VisionCore:
         self.current_faces = []
         self.current_names = {}
         self.person_present = False
+        self._reported_face_count = 0
 
         print("[VISION] Initialized")
 
     def on_runtime_state_changed(self, payload):
-        """Run inference and autonomous following only in IDLE."""
+        """Run perception only in IDLE, pausing inference during voice/AI work."""
         if not isinstance(payload, dict) or "to" not in payload:
             return
 
-        enable_processing = payload["to"] == "IDLE"
-        with self._actuation_lock:
-            was_enabled = self._processing_enabled.is_set()
-            if enable_processing:
-                if not was_enabled:
-                    with self._lock:
-                        self._tracker_reset_pending = True
-                self._processing_enabled.set()
-                return
+        target_state = payload["to"]
+        enable_processing = target_state == "IDLE"
+        was_enabled = self._processing_enabled.is_set()
+        if enable_processing:
+            if not was_enabled:
+                with self._lock:
+                    self._tracker_reset_pending = True
+                print("[VISION] Processing resumed in IDLE; camera and models retained")
+            self._processing_enabled.set()
+            return
 
-            self._processing_enabled.clear()
-            if was_enabled:
-                # Serialize the stop with the vision worker's actuator writes.
-                self.motors.stop()
-                self.servo.center()
-
-            with self._lock:
-                self.current_faces = []
-                self.current_names.clear()
-                self.person_present = False
-                self._tracker_reset_pending = True
+        if was_enabled:
+            print(f"[VISION] Processing paused at {target_state}")
+        else:
+            print(f"[VISION] Processing remains paused during {target_state}")
+        self._processing_enabled.clear()
+        with self._lock:
+            self.current_faces = []
+            self.current_names.clear()
+            self.person_present = False
+            self._reported_face_count = 0
+            self._tracker_reset_pending = True
 
     def start(self):
         """Start the camera and one vision worker; repeated starts are harmless."""
@@ -113,20 +98,17 @@ class VisionCore:
                 daemon=True,
             )
             self._thread.start()
-        print("[VISION] Started")
+        print("[VISION] Started (camera worker active)")
         return self
 
     def stop(self):
-        """Stop outputs and join the vision worker without leaving a duplicate thread."""
+        """Stop camera perception and join the worker without duplicating threads."""
         with self._lifecycle_lock:
             if not self._running and self._thread is None:
                 return
 
             self._running = False
-            with self._actuation_lock:
-                self._processing_enabled.clear()
-                self.motors.stop()
-                self.servo.center()
+            self._processing_enabled.clear()
             self.camera.stop()
             thread = self._thread
 
@@ -236,30 +218,25 @@ class VisionCore:
             if not self._processing_enabled.is_set():
                 continue
 
+            face_count = len(faces)
             with self._lock:
                 if not self._processing_enabled.is_set():
                     continue
+                previous_count = self._reported_face_count
+                self._reported_face_count = face_count
                 self.current_faces = faces
                 self.person_present = bool(faces)
 
-            target = self.follow.select_target(faces)
-            if target:
-                cx, cy = target
-                direction = self.follow.should_move_motors(cx, cy)
-                with self._actuation_lock:
-                    if not self._processing_enabled.is_set():
-                        continue
-                    self.servo.update(cx, cy, 640, 480)
-                    if direction == "LEFT":
-                        self.motors.left(speed=150)
-                    elif direction == "RIGHT":
-                        self.motors.right(speed=150)
-                    else:
-                        self.motors.stop()
-            else:
-                with self._actuation_lock:
-                    if not self._processing_enabled.is_set():
-                        continue
-                    self.motors.stop()
+            if face_count != previous_count:
+                if previous_count == 0 and face_count > 0:
+                    centers = [
+                        ((x1 + x2) // 2, (y1 + y2) // 2)
+                        for x1, y1, x2, y2 in faces
+                    ]
+                    print(f"[VISION] Face detected (count={face_count}, centers={centers})")
+                elif face_count == 0:
+                    print("[VISION] No faces detected")
+                else:
+                    print(f"[VISION] Face count changed: {previous_count} -> {face_count}")
 
             time.sleep(0.08)
