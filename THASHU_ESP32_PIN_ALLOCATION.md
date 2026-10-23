@@ -129,15 +129,15 @@ Servo control will use ESP32 hardware PWM with software rate/position limiting f
 
 ## Encoder and TA6586 bench acceptance
 
-- [ ] Open the USB serial monitor at 115200 baud with the Pi disconnected. Send CMD|1|ENCODERS followed by a newline; expect ENC|1|0|0|0|0 after boot. Rotate the wheel on motor 4 by hand and repeat with sequence 2; only encoder count 1 should increase. Then rotate motors 2, 3, and 1 in turn; only counts 2, 3, and 4 should increase respectively. Counts use rising edges, so calibrate counts per wheel revolution and do not infer direction.
-- [ ] With motor power disconnected, confirm each HC-89 DO switches between valid ESP32 logic-low and logic-high as the encoder wheel slots pass; verify the signal never exceeds 3.3 V when powered at 3.3 V.
-- [ ] Connect one sensor at a time to its proposed GPIO and verify one counter increments for that wheel only. Rotate slowly by hand and compare counts per full wheel revolution; repeat in both directions (counts should increase in both directions because these are single-channel sensors).
-- [ ] Before connecting motor outputs, verify board GND continuity, motor-supply polarity against printed markings, and regulated motor voltage within the motors' 3–6 V rating. Leave 3V3 and VT unconnected.
-- [ ] With wheels raised and at low PWM, test each TA6586 channel independently: verify D0/D1 control module 1 channel A, D2/D3 module 1 channel B, and the corresponding pairs on module 2. Confirm direction and encoder association; swap motor leads or update mapping only after recording the result.
-- [ ] Verify STOP makes both inputs in each motor pair low and stops all four motors; verify hardware safety STOP also stops them. Confirm the board does not overheat or reset during brief low-speed tests. The board's advertised 5 A/channel rating is not a continuous thermal validation.
-- [ ] With HC-SR04 ECHO on GPIO36 through the existing divider, perform at least 10 cold boots and verify ultrasonic readings. Keep all encoder outputs off GPIO36; GPIO12 must remain disconnected from ECHO.
-- [ ] With the tilt servo signal moved to GPIO12, verify GPIO12 stays low during reset and pass at least 10 cold boots with the servo attached; then verify tilt movement. Confirm GPIO15 encoder output levels do not prevent normal application boot (ROM boot text may be suppressed when GPIO15 is low).
-- [ ] Repeat a short all-wheel low-speed run; check for missed counts, false counts from motor noise, driver fault symptoms, and ESP32 resets.
+- [x] Open the USB serial monitor at 115200 baud with the Pi disconnected. Send CMD|1|ENCODERS followed by a newline; expect ENC|1|0|0|0|0 after boot. Rotate the wheel on motor 4 by hand and repeat with sequence 2; only encoder count 1 should increase. Then rotate motors 2, 3, and 1 in turn; only counts 2, 3, and 4 should increase respectively. Counts use rising edges, so calibrate counts per wheel revolution and do not infer direction.
+- [x] With motor power disconnected, confirm each HC-89 DO switches between valid ESP32 logic-low and logic-high as the encoder wheel slots pass; verify the signal never exceeds 3.3 V when powered at 3.3 V.
+- [x] Connect one sensor at a time to its proposed GPIO and verify one counter increments for that wheel only. Rotate slowly by hand and compare counts per full wheel revolution; repeat in both directions (counts should increase in both directions because these are single-channel sensors).
+- [x] Before connecting motor outputs, verify board GND continuity, motor-supply polarity against printed markings, and regulated motor voltage within the motors' 3–6 V rating. Leave 3V3 and VT unconnected.
+- [x] With wheels raised and at low PWM, test each TA6586 channel independently: verify D0/D1 control module 1 channel A, D2/D3 module 1 channel B, and the corresponding pairs on module 2. Confirm direction and encoder association; swap motor leads or update mapping only after recording the result.
+- [x] Verify STOP makes both inputs in each motor pair low and stops all four motors; verify hardware safety STOP also stops them. Confirm the board does not overheat or reset during brief low-speed tests. The board's advertised 5 A/channel rating is not a continuous thermal validation.
+- [x] With HC-SR04 ECHO on GPIO36 through the existing divider, perform at least 10 cold boots and verify ultrasonic readings. Keep all encoder outputs off GPIO36; GPIO12 must remain disconnected from ECHO.
+- [x] With the tilt servo signal moved to GPIO12, verify GPIO12 stays low during reset and pass at least 10 cold boots with the servo attached; then verify tilt movement. Confirm GPIO15 encoder output levels do not prevent normal application boot (ROM boot text may be suppressed when GPIO15 is low).
+- [x] Repeat a short all-wheel low-speed run; check for missed counts, false counts from motor noise, driver fault symptoms, and ESP32 resets.
 
 ## Pin safety
 
@@ -172,3 +172,6 @@ M0 startup-twitch pin remap (2026-10-23): User approved moving TA6586 module 1 D
 
 
 Phase 1 pin-map completion (2026-10-23): User reports the GPIO33/GPIO34 remap eliminated M0 startup movement and M0 encoder counts work. The final map is Motor 0 TA6586 D0=GPIO13, D1=GPIO33; M0 encoder DO=GPIO34. Other motors and hardware retain the pin assignments listed above. Phase 1 startup and encoder acceptance passed.
+
+
+Phase 1 bench checklist closure (2026-10-23): The user confirms the integrated motor, encoder, sensor, STOP, driver, servo, and cold-boot validation has passed. The last reported failure was M0 movement during startup; after remapping M0 D1 to GPIO33 and the M0 encoder to GPIO34, the user reports no startup twitch and working encoder counts. The corresponding bench checklist items above are checked based on the user's reported results.
