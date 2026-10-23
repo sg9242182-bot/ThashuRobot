@@ -32,8 +32,10 @@ void SafetyManager::notePiFrame() {
 bool SafetyManager::frontClear() const {
     if (!tof) return false;
     for (uint8_t i = 0; i < 3; ++i) {
-        if (!tof->isFresh(FRONT_IDS[i]) || !tof->isValid(FRONT_IDS[i]) ||
-            tof->isObstacleDetected(FRONT_IDS[i])) return false;
+        const ToFManager::SensorId sensor = FRONT_IDS[i];
+        if (!tof->isFresh(sensor) ||
+            (!tof->isValid(sensor) && !tof->isOutOfRange(sensor)) ||
+            tof->isObstacleDetected(sensor)) return false;
     }
     return true;
 }
