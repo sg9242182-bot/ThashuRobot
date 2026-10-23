@@ -290,7 +290,7 @@ Phase 1 Acceptance Criteria
 
 \[x] Both OLED displays operate correctly.
 
-\[x] Pi-format command/telemetry protocol is reliable in serial-monitor testing; direct Pi connection was not required for this Phase 1 bench acceptance.
+\[x] Pi ↔ ESP32 USB-serial communication passed on the Raspberry Pi: five HEARTBEAT commands received ALIVE acknowledgements, ENCODERS returned a response, sensor telemetry arrived, and STOP returned OK.
 
 \[x] ESP32 can perform a hardware-level motor STOP.
 
@@ -882,7 +882,7 @@ HC-SR04 trigger-pin update (2026-10-23): Moved only the HC-SR04 TRIG signal from
 
 
 
-Phase 1 integrated-controller acceptance update (2026-10-23; user-reported physical results): The user completed the final integrated ThashuController checks after the isolated motors.ino checks. Four motor channels and encoder/PID behavior were already tested and reported working; no repeat motor-only test is required. The user reports successful integrated forward movement, automatic timeout stop, explicit STOP, front obstacle stop, three front ToF obstacle checks, rear ultrasonic readings and reverse obstacle stop (clear at 789 mm, blocked at 250 mm), both OLED expressions, servo operation, sensor telemetry, and open-space movement with ToF FAR readings. Marked the corresponding Phase 1 acceptance boxes above as passed based on those reports. Pi-style command and telemetry framing was tested through the serial monitor.
+Phase 1 integrated-controller acceptance update (2026-10-23; user-reported physical results): The user completed the final integrated ThashuController checks after the isolated motors.ino checks. Four motor channels and encoder/PID behavior were already tested and reported working; no repeat motor-only test is required. The user reports successful integrated forward movement, automatic timeout stop, explicit STOP, front obstacle stop, three front ToF obstacle checks, rear ultrasonic readings and reverse obstacle stop (clear at 789 mm, blocked at 250 mm), both OLED expressions, servo operation, sensor telemetry, and open-space movement with ToF FAR readings. Marked the corresponding Phase 1 acceptance boxes above as passed based on those reports. Pi-style framing was first tested through the serial monitor, then verified on the Raspberry Pi over USB serial (five heartbeats, encoder response, telemetry, and STOP acknowledgement).
 
 The user confirms the TA6586 modules have been verified, including their operation under the robot's tested conditions. Do not list TA6586 module validation as pending. This does not independently establish the vendor's advertised 5 A/channel as a continuous rating.
 
