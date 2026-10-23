@@ -41,6 +41,7 @@ void setup() {
 
 void loop() {
     safety.update();
+    motors.update();
     servos.update();
     eyes.update();
     communication.update();
