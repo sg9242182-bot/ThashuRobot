@@ -167,6 +167,7 @@ void setup() {
 
 void loop() {
     readCommands();
+    motors.update();
 
     if (driveActive &&
         static_cast<int32_t>(millis() - stopDeadline) >= 0) {
