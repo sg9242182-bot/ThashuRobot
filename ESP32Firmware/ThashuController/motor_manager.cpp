@@ -169,8 +169,10 @@ uint32_t MotorManager::encoderCount(uint8_t encoderId) const {
 
 void MotorManager::writeMotor(uint8_t motor, int16_t speed) {
     if (speed == 0) {
-        analogWrite(IN1_PINS[motor], 0);
-        analogWrite(IN2_PINS[motor], 0);
+        if (pwmConfiguredMask[motor] & 0x01U) analogWrite(IN1_PINS[motor], 0);
+        else digitalWrite(IN1_PINS[motor], LOW);
+        if (pwmConfiguredMask[motor] & 0x02U) analogWrite(IN2_PINS[motor], 0);
+        else digitalWrite(IN2_PINS[motor], LOW);
         return;
     }
     const uint8_t duty = static_cast<uint8_t>(speed < 0 ? -speed : speed);
