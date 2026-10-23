@@ -13,10 +13,9 @@ public:
     bool isObstacleDetected() const;
 
 private:
-    static constexpr uint8_t TRIG_PIN = 2;
-    // GPIO12 caused boot trouble when HC-SR04 ECHO was connected during reset.
-    // Restore the tested baseline pin; keep the encoder disconnected on GPIO36
-    // while using this standalone ultrasonic test sketch.
+    // GPIO32 is output-capable and avoids the GPIO2 boot-strap pin.
+    static constexpr uint8_t TRIG_PIN = 32;
+    // Keep ECHO on the existing GPIO36 input through its voltage divider.
     static constexpr uint8_t ECHO_PIN = 36;
 
     static constexpr unsigned long MEASUREMENT_INTERVAL_MS = 60;
