@@ -270,33 +270,33 @@ ESP32 Communication
 
 Safety
 
-\[ ] ESP32 can independently stop motors.
+\[x] ESP32 can independently stop motors.
 
-\[ ] Front ToF protection works independently of Pi vision processing.
+\[x] Front ToF protection works independently of Pi vision processing.
 
-\[ ] Rear ultrasonic protection works independently of Pi vision processing.
+\[x] Rear ultrasonic protection works independently of Pi vision processing.
 
-\[ ] Unsafe movement commands are rejected at hardware level.
+\[x] Unsafe movement commands are rejected at hardware level.
 
 \[x] Stale/lost Pi commands cannot leave motors running indefinitely.
 
 Phase 1 Acceptance Criteria
 
-\[ ] Both TA6586 dual-channel modules operate correctly across all four independently controlled motors.
+\[x] Both TA6586 dual-channel modules operate correctly across all four independently controlled motors.
 
-\[ ] All three VL53LDK sensors return reliable measurements.
+\[x] All three VL53LDK sensors return reliable measurements.
 
-\[ ] Rear ultrasonic returns reliable measurements.
+\[x] Rear ultrasonic returns reliable measurements.
 
-\[ ] Both OLED displays operate correctly.
+\[x] Both OLED displays operate correctly.
 
 \[ ] Pi ↔ ESP32 communication is reliable.
 
-\[ ] ESP32 can perform a hardware-level motor STOP.
+\[x] ESP32 can perform a hardware-level motor STOP.
 
-\[ ] Safety sensors remain active independently of Pi AI/vision workload.
+\[x] Safety sensors remain active independently of Pi AI/vision workload.
 
-\[ ] Existing required robot functionality is preserved.
+\[x] Existing required robot functionality is preserved.
 
 Phase 1 completion: Do not mark complete until all acceptance criteria pass.
 
@@ -878,3 +878,10 @@ ToF status-2 reporting and clear-range handling (2026-10-23): The user reports r
 ToF out-of-range handling (2026-10-23): Updated both existing ToFManager copies (ESP32Firmware/sensors/tof_manager and ESP32Firmware/ThashuController) to retain a completed VL53L0X status-4 result as a fresh out-of-range state, reported as FAR in telemetry rather than NA. SafetyManager accepts a fresh FAR result as no obstacle detected, while stale/API-failed readings remain NA and continue to block forward/turning motion. Numeric readings at or below 300 mm continue to trigger the existing obstacle stop. Status 4 can represent phase failure as well as no target in range, so this policy requires controlled physical validation (open space, then obstacle within 300 mm); no build or hardware test has yet been run. Phase 1 remains in progress.
 
 HC-SR04 trigger-pin update (2026-10-23): Moved only the HC-SR04 TRIG signal from GPIO2 to GPIO32 in both existing UltrasonicManager headers (ESP32Firmware/sensors/ultrasonic_manager and ESP32Firmware/ThashuController). ECHO remains on GPIO36 through its voltage divider; encoder assignments remain unchanged and GPIO34 remains unused. The user must move the TRIG wire and verify cold boot plus stable rear readings. The ultrasonic acceptance item remains open until validated.
+
+
+
+
+Phase 1 integrated-controller acceptance update (2026-10-23; user-reported physical results): The user completed the final integrated ThashuController checks after the isolated motors.ino checks. Four motor channels and encoder/PID behavior were already tested and reported working; no repeat motor-only test is required. The user reports successful integrated forward movement, automatic timeout stop, explicit STOP, front obstacle stop, three front ToF obstacle checks, rear ultrasonic readings and reverse obstacle stop (clear at 789 mm, blocked at 250 mm), both OLED expressions, servo operation, sensor telemetry, and open-space movement with ToF FAR readings. Marked the corresponding Phase 1 acceptance boxes above as passed based on those reports.
+
+Phase 1 remains IN PROGRESS. Remaining physical/repository acceptance: (1) test actual Pi ↔ ESP32 serial operation with the Pi connected; current protocol commands were exercised through the serial monitor; (2) resolve and verify the reported M0 startup twitch during reset/flashing, then pass repeated cold boots with the integrated wiring; (3) validate GPIO12 tilt-servo and GPIO15 encoder strap behavior during cold boot as required in THASHU_ESP32_PIN_ALLOCATION.md; and (4) establish safe current/thermal operation for the assembled TA6586 modules under representative load. The advertised 5 A/channel value is not a verified continuous rating. Do not mark Phase 1 complete until these checks are addressed.
