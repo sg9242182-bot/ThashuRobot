@@ -65,6 +65,8 @@ Proposed channel pairing and assignments (motor direction polarity is to be conf
 
 Direction calibration (2026-10-23): User reports isolated positive-drive testing showed M0 moves in the intended chassis-forward direction, while M1, M2, and M3 run in reverse under the same positive command. MotorManager now reverses control polarity for M1–M3 in software; recheck all four wheel directions after uploading before floor testing.
 
+Encoder speed matching (2026-10-23): MotorManager now samples encoder pulse rates every 250 ms and applies bounded PID corrections (up to ±35% of requested PWM) to simultaneously driven motors, using their group's measured mean pulse rate as the shared target. M0–M3 map to encoder IDs 4, 2, 3, 1 respectively; this preserves the existing encoder wiring. The requested speed remains a base PWM command, and a single motor by itself has no peer reference, so it remains open-loop. HC-89 pulses per wheel revolution and PID gains are not calibrated; this is relative speed matching, not verified RPM regulation. Compile and test with all wheels raised before floor driving.
+
 | Module/channel | Header input 1 | Header input 2 | Motor |
 |---|---|---|---|
 | Module 1, A | D0 → GPIO13 | D1 → GPIO14 | Motor 1 |
