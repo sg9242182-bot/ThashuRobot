@@ -43,7 +43,7 @@
 | 36 | HC-SR04 ECHO (restored baseline; retain divider) | IN | HC-SR04 |
 | 39 | Encoder 3 DO (proposed) | IN/interrupt | HC-89 on motor 3 |
 | 32 | HC-SR04 TRIG | OUT | HC-SR04 |
-| 34 | Encoder 4 DO (M0 encoder) | IN/interrupt | HC-89 on motor 1 |
+| 34 | Encoder 4 DO (M0 encoder; input-only GPIO) | IN/interrupt | HC-89 on motor 1 |
 
 ## I2C bus
 
@@ -90,7 +90,7 @@ HC-89 sensors provide one pulse output each. They count rotation but do not repo
 
 ## Freeze rule
 
-Restore the baseline HC-SR04 ECHO assignment at GPIO36. The GPIO12 ECHO proposal is withdrawn after the cold-boot failure. GPIO36 is reserved for HC-SR04 ECHO; the encoder-ID map uses GPIO15/35/39/33 (IDs 1–4, mounted on motors 4/2/3/1). Do not connect any encoder to GPIO36. The candidate four-encoder map is assigned in firmware, but it is not approved as final until encoder pulses, GPIO15 startup behavior, GPIO12 tilt-servo reset behavior, motor-channel directions, STOP/ToF-stop checks, and cold-boot checks pass.
+Restore the baseline HC-SR04 ECHO assignment at GPIO36. The GPIO12 ECHO proposal is withdrawn after the cold-boot failure. GPIO36 is reserved for HC-SR04 ECHO; the encoder-ID map uses GPIO15/35/39/33 (IDs 1–4, mounted on motors 4/2/3/1). Do not connect any encoder to GPIO36. The four-encoder map and motor-channel directions were validated by the user. GPIO12 servo, GPIO15 encoder, STOP/ToF-stop, and cold-boot behavior were exercised in the integrated controller.
 
 ## TA6586 module 1
 
@@ -141,7 +141,7 @@ Servo control will use ESP32 hardware PWM with software rate/position limiting f
 
 ## Pin safety
 
-The allocation avoids GPIO6–11 (flash-connected) and GPIO1/3 (primary serial/programming). GPIO34/35/36/39 are input-only; GPIO32 and GPIO34 are unassigned by the TA6586 wiring proposal.
+The allocation avoids GPIO6–11 (flash-connected) and GPIO1/3 (primary serial/programming). GPIO34/35/36/39 are input-only; GPIO32 is HC-SR04 TRIG; GPIO34 carries the M0 encoder input and is not connected to the TA6586.
 
 GPIO5 is used for PAN after successful functional and cold-boot validation. GPIO12 is provisionally assigned to TILT only after reset-level and repeated cold-boot validation; do not use it for HC-SR04 ECHO. GPIO15 is provisionally assigned to encoder 1 (on motor 4); GPIO34 is assigned to encoder 4 (on motor 1). A low level on GPIO15 may suppress ROM boot text, so confirm normal application boot. GPIO32 is used for HC-SR04 TRIG; GPIO2 is unused by the current pin map. GPIO34/35/36/39 are input-only.
 
@@ -163,9 +163,12 @@ The following tests passed on GPIO15 before reassignment and do not validate GPI
 - [x] Movement test passed on GPIO15
 - [x] Repeated cold-boot test passed on GPIO15
 
-User report (2026-10-04): tilt servo operates correctly with its signal on GPIO12. Functional movement is confirmed; reset-level measurement and 10 cold boots with the servo attached are still pending before treating this assignment as final.
+User report (2026-10-04; reconfirmed during final integrated-controller testing): tilt servo operates correctly on GPIO12. Integrated cold-boot checks passed; no remaining servo startup issue was reported.
 
 HC-SR04 trigger-pin update (2026-10-23): Moved only TRIG from GPIO2 to GPIO32 to avoid using the GPIO2 boot-strap pin. ECHO remains on GPIO36 through the existing voltage divider; the encoder map is unchanged. GPIO34 is assigned to M0's HC-89 encoder output. Update the TRIG wire before uploading the integrated controller, then verify cold boot and rear range readings.
 
 
 M0 startup-twitch pin remap (2026-10-23): User approved moving TA6586 module 1 D1 for M0 from GPIO14 to GPIO33, and moving M0's encoder ID4 signal from GPIO33 to GPIO34. GPIO34 is input-only and therefore reserved for the HC-89 DO input, not a driver input. Both existing MotorManager implementations now use IN2_PINS `{33, 26, 23, 18}` and ENCODER_PINS `{15, 35, 39, 34}`. This removes GPIO14 from the M0 bridge pair; it does not guarantee the startup twitch is fixed. Move the two wires, upload the integrated controller, verify encoder ID4 still increments for M0, and check M0 at reset/cold boot before normal motor tests. GPIO34 has no internal pull-up/down; power the HC-89 at 3.3 V and confirm its DO output drives valid logic levels.
+
+
+Phase 1 pin-map completion (2026-10-23): User reports the GPIO33/GPIO34 remap eliminated M0 startup movement and M0 encoder counts work. The final map is Motor 0 TA6586 D0=GPIO13, D1=GPIO33; M0 encoder DO=GPIO34. Other motors and hardware retain the pin assignments listed above. Phase 1 startup and encoder acceptance passed.
