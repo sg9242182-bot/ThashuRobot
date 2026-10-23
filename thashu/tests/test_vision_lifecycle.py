@@ -14,7 +14,6 @@ class FakeCamera:
     def __init__(self):
         self.start_calls = 0
         self.stop_calls = 0
-        self.read_calls = 0
         self._lock = threading.Lock()
 
     def start(self):
@@ -24,8 +23,6 @@ class FakeCamera:
         self.stop_calls += 1
 
     def read(self):
-        with self._lock:
-            self.read_calls += 1
         return FakeFrame()
 
 
@@ -75,50 +72,6 @@ class FakeTracker:
         return dict(self.objects)
 
 
-class FakeFollow:
-    def select_target(self, faces):
-        return (80, 50) if faces else None
-
-    def should_move_motors(self, _cx, _cy):
-        return "RIGHT"
-
-
-class FakeServo:
-    def __init__(self):
-        self.update_calls = 0
-        self.center_calls = 0
-
-    def update(self, *_args):
-        self.update_calls += 1
-
-    def center(self):
-        self.center_calls += 1
-
-
-class FakeMotors:
-    def __init__(self):
-        self.right_calls = 0
-        self.left_calls = 0
-        self.stop_calls = 0
-        self._lock = threading.Lock()
-
-    def right(self, **_kwargs):
-        with self._lock:
-            self.right_calls += 1
-
-    def left(self, **_kwargs):
-        with self._lock:
-            self.left_calls += 1
-
-    def stop(self):
-        with self._lock:
-            self.stop_calls += 1
-
-    def move_count(self):
-        with self._lock:
-            return self.right_calls + self.left_calls
-
-
 def wait_for(predicate, timeout=1.5):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -133,38 +86,28 @@ def make_vision(detector=None):
     detector = detector or FakeDetector()
     recognizer = FakeRecognizer()
     tracker = FakeTracker()
-    follow = FakeFollow()
-    servo = FakeServo()
-    motors = FakeMotors()
     vision = VisionCore(
         camera=camera,
         detector=detector,
         recognizer=recognizer,
         database=FakeDatabase(),
         tracker=tracker,
-        follow=follow,
-        servo=servo,
-        motors=motors,
     )
-    return vision, camera, detector, recognizer, tracker, servo, motors
+    return vision, camera, detector, recognizer, tracker
 
 
 class VisionLifecycleTests(unittest.TestCase):
-    def test_pause_stops_inference_and_follow_then_resume_reuses_models(self):
-        vision, camera, detector, recognizer, tracker, servo, motors = make_vision()
+    def test_pause_stops_inference_then_resume_reuses_models(self):
+        vision, camera, detector, recognizer, tracker = make_vision()
         try:
             vision.start()
-            self.assertTrue(wait_for(lambda: motors.move_count() > 0))
+            self.assertTrue(wait_for(lambda: detector.call_count() > 0))
             vision.on_runtime_state_changed({"to": "THINKING"})
-            move_count = motors.move_count()
             calls_at_pause = detector.call_count()
-            self.assertGreater(motors.stop_calls, 0)
-            self.assertGreater(servo.center_calls, 0)
+            self.assertFalse(vision.get_state()["present"])
 
             time.sleep(0.2)
             self.assertEqual(detector.call_count(), calls_at_pause)
-            self.assertEqual(motors.move_count(), move_count)
-            self.assertFalse(vision.get_state()["present"])
 
             vision.on_runtime_state_changed({"to": "IDLE"})
             self.assertTrue(wait_for(lambda: detector.call_count() > calls_at_pause))
@@ -175,22 +118,29 @@ class VisionLifecycleTests(unittest.TestCase):
         finally:
             vision.stop()
 
-    def test_state_change_during_inference_prevents_later_motor_command(self):
+    def test_state_change_during_inference_prevents_stale_face_publish(self):
         detector = FakeDetector(block_first=True)
-        vision, _camera, _detector, _recognizer, _tracker, _servo, motors = make_vision(detector)
+        vision, _camera, _detector, _recognizer, _tracker = make_vision(detector)
         try:
             vision.start()
             self.assertTrue(detector.entered.wait(timeout=1.0))
             vision.on_runtime_state_changed({"to": "SPEAKING"})
             detector.release.set()
             time.sleep(0.15)
-            self.assertEqual(motors.move_count(), 0)
+            self.assertFalse(vision.get_state()["present"])
+            self.assertEqual(detector.call_count(), 1)
         finally:
             detector.release.set()
             vision.stop()
 
+    def test_vision_has_no_motor_or_servo_controller(self):
+        vision, *_ = make_vision()
+        self.assertFalse(hasattr(vision, "motors"))
+        self.assertFalse(hasattr(vision, "servo"))
+        self.assertFalse(hasattr(vision, "follow"))
+
     def test_start_is_idempotent_and_stop_joins_vision_worker(self):
-        vision, camera, _detector, _recognizer, _tracker, _servo, _motors = make_vision()
+        vision, camera, *_ = make_vision()
         vision.start()
         worker = vision._thread
         vision.start()
