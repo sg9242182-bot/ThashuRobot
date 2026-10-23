@@ -16,6 +16,7 @@ bool ToFManager::begin() {
         pinMode(XSHUT_PINS[i], OUTPUT);
         digitalWrite(XSHUT_PINS[i], LOW);
         hasData[i] = false;
+        outOfRange[i] = false;
         valid[i] = false;
         obstacleDetected[i] = false;
         distanceMm[i] = 0;
@@ -70,9 +71,22 @@ void ToFManager::update() {
         rangeStatus[i] = status;
         lastReadingTime[i] = millis();
 
-        // Adafruit returns 0xFFFF for the out-of-range/phase-failure case.
-        if (status == OUT_OF_RANGE_STATUS || measuredDistance == 0xFFFFU) {
+        // A completed status-4 result is distinguishable from a sensor/API
+        // failure: retain freshness and expose it as FAR, without inventing a
+        // numeric distance. Safety may treat fresh FAR as no detected obstacle.
+        if (status == OUT_OF_RANGE_STATUS) {
+            hasData[i] = true;
+            outOfRange[i] = true;
+            valid[i] = false;
+            obstacleDetected[i] = false;
+            distanceMm[i] = 0;
+            continue;
+        }
+
+        // A sentinel without status 4 is an unavailable/failed reading.
+        if (measuredDistance == 0xFFFFU) {
             hasData[i] = false;
+            outOfRange[i] = false;
             valid[i] = false;
             obstacleDetected[i] = false;
             distanceMm[i] = 0;
@@ -80,6 +94,7 @@ void ToFManager::update() {
         }
 
         hasData[i] = true;
+        outOfRange[i] = false;
         distanceMm[i] = measuredDistance;
 
         const uint16_t obstacleThresholdMm =
@@ -118,6 +133,11 @@ bool ToFManager::isFresh(SensorId sensor) const {
     const uint8_t index = static_cast<uint8_t>(sensor);
     return index < SENSOR_COUNT && hasData[index] &&
         (millis() - lastReadingTime[index] <= READING_MAX_AGE_MS);
+}
+
+bool ToFManager::isOutOfRange(SensorId sensor) const {
+    const uint8_t index = static_cast<uint8_t>(sensor);
+    return index < SENSOR_COUNT && outOfRange[index];
 }
 
 bool ToFManager::isObstacleDetected(SensorId sensor) const {
