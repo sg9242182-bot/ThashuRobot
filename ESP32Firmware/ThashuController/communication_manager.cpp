@@ -129,7 +129,9 @@ void CommunicationManager::sendTelemetry() {
     const char* labels[] = {"|TOF_L|", "|TOF_C|", "|TOF_R|"};
     for (uint8_t i = 0; i < 3; ++i) {
         Serial.print(labels[i]);
-        if (tof->isFresh(ids[i]) && tof->isValid(ids[i])) Serial.print(tof->getDistanceMm(ids[i]));
+        if (!tof->isFresh(ids[i])) Serial.print("NA");
+        else if (tof->isValid(ids[i])) Serial.print(tof->getDistanceMm(ids[i]));
+        else if (tof->isOutOfRange(ids[i])) Serial.print("FAR");
         else Serial.print("NA");
     }
     Serial.print("|US_REAR|");
