@@ -1,38 +1,5 @@
 # core/decision.py
 
-import re
-
-
-_STOP_PHRASES = {
-    "stop",
-    "stop now",
-    "stop robot",
-    "stop the robot",
-    "stop moving",
-    "stop the robot now",
-    "stop moving now",
-    "stop all motors",
-    "stop the motors",
-    "emergency stop",
-    "emergency stop now",
-    "halt",
-    "halt now",
-    "halt robot",
-    "please stop",
-    "please stop now",
-    "please stop robot",
-    "can you stop",
-    "can you stop now",
-    "could you stop",
-    "could you stop now",
-}
-
-
-def is_stop_command(user_input: str) -> bool:
-    """Recognize only explicit stop phrases; avoid matching incidental mentions."""
-    normalized = re.sub(r"[^a-z0-9]+", " ", (user_input or "").lower()).strip()
-    return normalized in _STOP_PHRASES
-
 def decide(user_input: str, context=None) -> str:
     """
     Decision logic for Thashu
@@ -57,7 +24,7 @@ def decide(user_input: str, context=None) -> str:
                 return "My name is Thashu."
 
     # ===== SIMPLE COMMAND RULES =====
-    if is_stop_command(user_input):
+    if "stop" in text:
         return "STOP"
 
     if "move" in text:
