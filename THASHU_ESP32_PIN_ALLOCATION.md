@@ -63,6 +63,8 @@ The user's board photo shows the seven-pin header in this order: GND, 3V3, D0, D
 
 Proposed channel pairing and assignments (motor direction polarity is to be confirmed by a brief low-speed test):
 
+Direction calibration (2026-10-23): User reports isolated positive-drive testing showed M0 moves in the intended chassis-forward direction, while M1, M2, and M3 run in reverse under the same positive command. MotorManager now reverses control polarity for M1–M3 in software; recheck all four wheel directions after uploading before floor testing.
+
 | Module/channel | Header input 1 | Header input 2 | Motor |
 |---|---|---|---|
 | Module 1, A | D0 → GPIO13 | D1 → GPIO14 | Motor 1 |
