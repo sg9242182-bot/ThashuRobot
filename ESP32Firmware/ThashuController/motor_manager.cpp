@@ -4,12 +4,12 @@
 
 namespace {
 constexpr uint8_t IN1_PINS[4] = {13, 27, 25, 19};
-constexpr uint8_t IN2_PINS[4] = {14, 26, 23, 18};
+constexpr uint8_t IN2_PINS[4] = {33, 26, 23, 18};
 // M0 already drives the chassis forward; reverse polarity for M1-M3.
 constexpr bool MOTOR_REVERSED[4] = {false, true, true, true};
 // Physical motor M0..M3 correspond to encoder IDs 4, 2, 3, 1.
 constexpr uint8_t MOTOR_ENCODER_INDEX[4] = {3, 1, 2, 0};
-constexpr uint8_t ENCODER_PINS[4] = {15, 35, 39, 33};
+constexpr uint8_t ENCODER_PINS[4] = {15, 35, 39, 34};
 constexpr unsigned long CONTROL_INTERVAL_MS = 250;
 constexpr float PID_KP = 0.45f;
 constexpr float PID_KI = 0.12f;
