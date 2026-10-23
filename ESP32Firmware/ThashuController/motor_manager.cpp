@@ -5,6 +5,8 @@
 namespace {
 constexpr uint8_t IN1_PINS[4] = {13, 27, 25, 19};
 constexpr uint8_t IN2_PINS[4] = {14, 26, 23, 18};
+// M0 already drives the chassis forward; reverse polarity for M1-M3.
+constexpr bool MOTOR_REVERSED[4] = {false, true, true, true};
 constexpr uint8_t ENCODER_PINS[4] = {15, 35, 39, 33}; // Encoder IDs 1-4; attached to motors 4, 2, 3, 1.
 }
 
@@ -79,7 +81,8 @@ void MotorManager::writeMotor(uint8_t motor, int16_t speed) {
     analogWrite(IN2_PINS[motor], 0);
     pwmConfiguredMask[motor] |= 0x02U;
 
-    if (speed > 0) analogWrite(IN1_PINS[motor], duty);
+    const bool driveForward = (speed > 0) != MOTOR_REVERSED[motor];
+    if (driveForward) analogWrite(IN1_PINS[motor], duty);
     else analogWrite(IN2_PINS[motor], duty);
 
     // Enable the bridge only after the requested input duty is configured.
