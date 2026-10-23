@@ -21,7 +21,7 @@
 
 | GPIO | Function | Direction | Hardware |
 |---:|---|---|---|
-| 2 | HC-SR04 TRIG | OUT | HC-SR04 |
+| 32 | HC-SR04 TRIG | OUT | HC-SR04 |
 | 4 | Front-left ToF X | OUT | VL53LDK |
 | 5 | Camera PAN servo signal | OUT | MG90S |
 | 13 | TA6586 module 1 D0 (motor channel A input 1) | OUT | Motor driver |
@@ -42,7 +42,7 @@
 | 35 | Encoder 2 DO (proposed) | IN/interrupt | HC-89 on motor 2 |
 | 36 | HC-SR04 ECHO (restored baseline; retain divider) | IN | HC-SR04 |
 | 39 | Encoder 3 DO (proposed) | IN/interrupt | HC-89 on motor 3 |
-| 32 | Unassigned by revised TA6586 wiring map | — | Available GPIO |
+| 32 | HC-SR04 TRIG | OUT | HC-SR04 |
 | 34 | Unassigned by revised TA6586 wiring map | — | Available GPIO |
 
 ## I2C bus
@@ -123,7 +123,7 @@ Servo control will use ESP32 hardware PWM with software rate/position limiting f
 
 ## HC-SR04
 
-- GPIO2 → TRIG
+- GPIO32 → TRIG
 - GPIO36 → ECHO (restored baseline; existing voltage divider remains)
 - Existing voltage divider remains on ECHO before the ESP32 input.
 
@@ -143,7 +143,7 @@ Servo control will use ESP32 hardware PWM with software rate/position limiting f
 
 The allocation avoids GPIO6–11 (flash-connected) and GPIO1/3 (primary serial/programming). GPIO34/35/36/39 are input-only; GPIO32 and GPIO34 are unassigned by the TA6586 wiring proposal.
 
-GPIO5 is used for PAN after successful functional and cold-boot validation. GPIO12 is provisionally assigned to TILT only after reset-level and repeated cold-boot validation; do not use it for HC-SR04 ECHO. GPIO15 is provisionally assigned to encoder 1 (on motor 4); GPIO33 is assigned to encoder 4 (on motor 1). A low level on GPIO15 may suppress ROM boot text, so confirm normal application boot. GPIO2 is used for HC-SR04 TRIG. GPIO34/35/36/39 are input-only.
+GPIO5 is used for PAN after successful functional and cold-boot validation. GPIO12 is provisionally assigned to TILT only after reset-level and repeated cold-boot validation; do not use it for HC-SR04 ECHO. GPIO15 is provisionally assigned to encoder 1 (on motor 4); GPIO33 is assigned to encoder 4 (on motor 1). A low level on GPIO15 may suppress ROM boot text, so confirm normal application boot. GPIO32 is used for HC-SR04 TRIG; GPIO2 is unused by the current pin map. GPIO34/35/36/39 are input-only.
 
 ## Servo validation record
 
@@ -164,3 +164,5 @@ The following tests passed on GPIO15 before reassignment and do not validate GPI
 - [x] Repeated cold-boot test passed on GPIO15
 
 User report (2026-10-04): tilt servo operates correctly with its signal on GPIO12. Functional movement is confirmed; reset-level measurement and 10 cold boots with the servo attached are still pending before treating this assignment as final.
+
+HC-SR04 trigger-pin update (2026-10-23): Moved only TRIG from GPIO2 to GPIO32 to avoid using the GPIO2 boot-strap pin. ECHO remains on GPIO36 through the existing voltage divider; the encoder map is unchanged. GPIO34 remains unassigned. Update the TRIG wire before uploading the integrated controller, then verify cold boot and rear range readings.
