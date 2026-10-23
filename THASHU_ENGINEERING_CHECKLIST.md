@@ -306,7 +306,7 @@ Motor subsystem implementation note (2026-10-02; pin candidate updated 2026-10-0
 
 Phase 2 — Runtime Supervisor \& State Machine
 
-Status: Runtime supervisor/state machine integrated and verified
+Status: COMPLETE
 
 Target states:
 
@@ -336,7 +336,7 @@ Tasks:
 
 \[x] Define subsystem behavior per state.
 
-\[ ] Keep hardware safety active in every state.
+\[x] Keep hardware safety active in every state.
 
 \[x] Prevent motor following during conversation.
 
@@ -348,7 +348,7 @@ Acceptance:
 
 \[x] No subsystem can silently bypass the supervisor.
 
-\[ ] Safety remains active in all states.
+\[x] Safety remains active in all states.
 
 \[x] Existing voice behavior remains functional.
 
@@ -828,7 +828,7 @@ Phase 0	2026-08-23	Architecture/source audit complete
 
 Phase 1	2026-10-23	Complete — integrated controller and direct Pi USB-serial test passed; M0 startup twitch fixed; encoder confirmed on GPIO34.
 
-Phase 2	—	—
+Phase 2	2026-10-23	Complete — runtime supervisor/state machine verified; user confirms hardware safety remains active across states.
 
 Phase 3	—	—
 
