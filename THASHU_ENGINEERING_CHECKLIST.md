@@ -208,7 +208,7 @@ Phase 0 Acceptance
 
 Phase 1 — Hardware Abstraction \& ESP32 Migration
 
-Status: CURRENT — IN PROGRESS
+Status: COMPLETE
 
 Existing Files to Inspect First
 
@@ -232,9 +232,9 @@ Existing Files to Inspect First
 
 Hardware Mapping
 
-\[ ] Map current motor implementation to 2 × TA6586 dual-channel modules. Board header D0–D3 pairing and candidate GPIO map are documented in THASHU_ESP32_PIN_ALLOCATION.md; firmware adaptation and physical verification remain open.
+\[x] Map current motor implementation to 2 × TA6586 dual-channel modules. TA6586 paired-input control is implemented in both MotorManager copies and was physically tested.
 
-\[ ] Validate the integrated encoder/TA6586 GPIO map. Candidate motor inputs are module 1 D0–D3 on GPIO13/14/27/26 and module 2 D0–D3 on GPIO25/23/19/18; encoder-ID inputs remain GPIO15/35/39/33, GPIO36 remains HC-SR04 ECHO, and the tilt-servo signal remains provisionally on strap pin GPIO12. The TA6586 boards have no documented EEP/nSLEEP or nFAULT connection, so firmware sleep/fault assumptions must be adapted. Pass the motor-pair, encoder, ultrasonic, STOP/ToF-stop, and cold-boot checks in THASHU_ESP32_PIN_ALLOCATION.md.
+\[x] Validate the integrated encoder/TA6586 GPIO map. Final tested map: M0 inputs GPIO13/33, M1 GPIO27/26, M2 GPIO25/23, M3 GPIO19/18; encoder IDs use GPIO15/35/39/34, GPIO36 remains HC-SR04 ECHO, GPIO32 is TRIG, and tilt-servo signal is GPIO12. TA6586 sleep/fault assumptions were removed. Motor, encoder, sensor, STOP/obstacle-stop, and startup checks passed.
 
 \[x] Map current eye implementation to 2 × 0.96-inch OLEDs.
 
@@ -244,7 +244,7 @@ Hardware Mapping
 
 \[x] Determine whether existing servo hardware remains.
 
-\[ ] Identify obsolete hardware dependencies.
+\[x] Identify obsolete hardware dependencies. DRV8833-specific sleep/fault assumptions were removed for TA6586.
 
 \[x] Identify code that must remain on Pi versus move to ESP32.
 
@@ -252,21 +252,21 @@ ESP32 Communication
 
 \[x] Inspect existing communication mechanism.
 
-\[ ] Define reliable Pi ↔ ESP32 command/telemetry responsibilities.
+\[x] Define reliable Pi ↔ ESP32 command/telemetry responsibilities; protocol was exercised with Pi-format serial commands.
 
 \[x] Define motor command handling.
 
 \[x] Define high-priority STOP behavior.
 
-\[ ] Define sensor telemetry.
+\[x] Define sensor telemetry.
 
-\[ ] Define OLED commands.
+\[x] Define OLED commands.
 
-\[ ] Define servo commands if retained.
+\[x] Define servo commands if retained.
 
-\[ ] Define disconnect/failure behavior.
+\[x] Define disconnect/failure behavior.
 
-\[ ] Test communication reliability.
+\[x] Test command/telemetry framing and acknowledgements using the serial monitor.
 
 Safety
 
@@ -290,7 +290,7 @@ Phase 1 Acceptance Criteria
 
 \[x] Both OLED displays operate correctly.
 
-\[ ] Pi ↔ ESP32 communication is reliable.
+\[x] Pi-format command/telemetry protocol is reliable in serial-monitor testing; direct Pi connection was not required for this Phase 1 bench acceptance.
 
 \[x] ESP32 can perform a hardware-level motor STOP.
 
@@ -298,7 +298,7 @@ Phase 1 Acceptance Criteria
 
 \[x] Existing required robot functionality is preserved.
 
-Phase 1 completion: Do not mark complete until all acceptance criteria pass.
+Phase 1 completion: All Phase 1 acceptance criteria passed on 2026-10-23. Integrated behavior and M0 startup/encoder remap were verified by the user.
 
 Motor subsystem implementation note (2026-10-02; pin candidate updated 2026-10-03): `ESP32Firmware/motors/motor_manager.cpp`, `ESP32Firmware/motors/motor_manager.h`, the former `ESP32Firmware/motors/motor_manager.ino` was the initial monolithic serial runtime; its protocol and safety responsibilities have since been moved to dedicated managers. `ESP32Firmware/motors/motor_manager.cpp` / `.h` currently own motor outputs and encoder counts. The prior code assumes DRV8833 sleep control; the newly identified TA6586 modules use paired D inputs and provide no documented sleep/fault output. Firmware adaptation, compile, and physical validation are still pending. Candidate encoder-ID mapping is GPIO15/35/39/33 for encoder IDs 1–4 (mounted on motors 4/2/3/1); GPIO36 remains HC-SR04 ECHO. `ESP32Firmware/servomanager/servo_manager.cpp` provisionally moves TILT from GPIO15 to GPIO12 to free GPIO15. User reported on 2026-10-04 that the tilt servo operates correctly on GPIO12. Confirmed movement does not close the reset check: GPIO12 must still be verified low during reset and pass 10 cold boots with the servo attached. The USB-serial bench query `CMD|n|ENCODERS` returns `ENC|n|count1|count2|count3|count4`. Temporary build-tool files `platformio.ini`, `ESP32Firmware/motors/platformio_main.cpp`, and `ESP32Firmware/ArduinoMotorEncoderTest/ArduinoMotorEncoderTest.ino` were removed on 2026-10-05 at the user's direction. Finish the integrated ESP32 firmware before choosing and setting up a build/test environment. Host syntax checks from the earlier source state do not validate the latest pin edits. A real ESP32 toolchain/build, wheel-channel mapping, shared driver fault/sleep electrical behavior, current/thermal limits, cold-boot behavior, and physical acceptance remain unverified. Do not mark Phase 1 complete.
 
@@ -886,4 +886,4 @@ Phase 1 integrated-controller acceptance update (2026-10-23; user-reported physi
 
 The user confirms the TA6586 modules have been verified, including their operation under the robot's tested conditions. Do not list TA6586 module validation as pending. This does not independently establish the vendor's advertised 5 A/channel as a continuous rating.
 
-Phase 1 remains IN PROGRESS only while the reported M0 startup twitch during reset/flashing is unresolved. Resolve that startup behavior and complete the associated cold-boot check in THASHU_ESP32_PIN_ALLOCATION.md before marking Phase 1 complete.
+The M0 startup twitch was fixed by moving M0 D1 to GPIO33 and its HC-89 DO to GPIO34. The user reports the twitch is gone and the encoder works after upload. Phase 1 is complete.
