@@ -1,9 +1,14 @@
+import os
 import subprocess
 import threading
+
+from core.model_paths import model_path
 from voice.sound_player import _lock
 
-PIPER_PATH = "/home/tharun/piper/piper/piper"
-MODEL_PATH = "/home/tharun/piper/piper/models/en_US-lessac-low.onnx"
+PIPER_PATH = os.environ.get(
+    "THASHU_PIPER_BIN", os.path.expanduser("~/piper/piper/piper")
+)
+MODEL_PATH = model_path("piper", "en_US-lessac-low.onnx")
 DEVICE     = "default"
 
 
