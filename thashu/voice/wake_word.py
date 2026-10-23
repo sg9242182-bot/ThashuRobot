@@ -3,16 +3,11 @@ wake_word.py — Thashu Voice Pipeline
 Wake word detection using openWakeWord's pretrained "hey jarvis" model.
 
 Key design decisions:
-- melspec_model_path/embedding_model_path point at local copies in
-  models/openwakeword/ *if present*, so Model() doesn't hit the network on
-  boot on a robot with no guaranteed internet at startup. If those two
-  files aren't there, we fall back to openWakeWord's own default behavior
-  (its bundled resource path, downloading on first use if needed) rather
-  than crashing — this project doesn't ship those files, so fresh checkouts
-  must not assume they exist. Run once with internet to fetch them locally:
-      python3 -c "from openwakeword.utils import download_models as d; d()"
-  then copy melspectrogram.onnx and embedding_model.onnx out of wherever
-  that prints into models/openwakeword/ for permanent offline use.
+- Local copies of the wake-word model and openWakeWord support models
+  live under ~/.local/share/thashu/models/openwakeword/ by default, or the directory selected by THASHU_MODELS_DIR.
+  From the thashu/ directory, fetch them with:
+      python -c 'import os; from openwakeword.utils import download_models; download_models(model_names=["hey_jarvis_v0.1"], target_directory=os.path.join(os.environ["THASHU_MODELS_DIR"], "openwakeword"))'
+  This keeps startup independent of network access after setup.
 - Resampling mirrors vad.py exactly (48 kHz -> 16 kHz via resample_poly,
   down=3), since openWakeWord's models are trained on 16 kHz audio.
 - predict() is called on every unlocked, off-cooldown chunk, gated or not.
@@ -69,6 +64,8 @@ import webrtcvad
 from scipy.signal import resample_poly
 from openwakeword.model import Model
 
+from core.model_paths import model_path
+
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -91,10 +88,7 @@ _VAD_SPEECH_FRACTION = 0.4
 
 # Local copies of the shared openWakeWord support models, used only if
 # present — see module docstring for how to fetch them once.
-_OWW_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "models", "openwakeword",
-)
+_OWW_DIR = model_path("openwakeword")
 _MELSPEC_LOCAL   = os.path.join(_OWW_DIR, "melspectrogram.onnx")
 _EMBEDDING_LOCAL = os.path.join(_OWW_DIR, "embedding_model.onnx")
 _HAVE_LOCAL_SUPPORT_MODELS = os.path.isfile(_MELSPEC_LOCAL) and os.path.isfile(_EMBEDDING_LOCAL)
@@ -108,7 +102,7 @@ class WakeWordEngine:
     int16 audio chunks.
 
     Usage:
-        wake = WakeWordEngine(model_path="models/wake_word/hey_jarvis_v0.1.onnx")
+        wake = WakeWordEngine(model_path="~/.local/share/thashu/models/openwakeword/hey_jarvis_v0.1.onnx")
         if wake.process(chunk):
             ...  # wake word heard
 
@@ -136,7 +130,7 @@ class WakeWordEngine:
             oww_kwargs["embedding_model_path"] = _EMBEDDING_LOCAL
         else:
             print(
-                "[WAKE] Warning: models/openwakeword/{melspectrogram,embedding_model}.onnx "
+                "[WAKE] Warning: local openWakeWord support models are missing from the configured model directory "
                 "not found. Falling back to openWakeWord's default support-model path — "
                 "this may try to download them over the network on first use. See the "
                 "module docstring in wake_word.py to fetch them once and go fully offline."
