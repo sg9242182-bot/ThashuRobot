@@ -21,7 +21,7 @@
 
 | GPIO | Function | Direction | Hardware |
 |---:|---|---|---|
-| 32 | HC-SR04 TRIG | OUT | HC-SR04 |
+| 2 | Unassigned (boot-strap pin; avoid use) | — | ESP32 |
 | 4 | Front-left ToF X | OUT | VL53LDK |
 | 5 | Camera PAN servo signal | OUT | MG90S |
 | 13 | TA6586 module 1 D0 (motor channel A input 1) | OUT | Motor driver |
@@ -154,7 +154,7 @@ GPIO5 is used for PAN after successful functional and cold-boot validation. GPIO
 - [x] No fixed-position jitter observed
 - [x] Cold-boot test passed on GPIO5
 
-GPIO2 was the previous PAN signal and failed; it is now reassigned to HC-SR04 TRIG.
+GPIO2 was previously used as the PAN signal and then for HC-SR04 TRIG; the current map leaves GPIO2 unused and assigns TRIG to GPIO32.
 
 ### TILT — previous GPIO15; candidate GPIO12
 The following tests passed on GPIO15 before reassignment and do not validate GPIO12:
