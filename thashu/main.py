@@ -33,6 +33,7 @@ GRACE_PERIOD       = 4.0
 SAMPLE_RATE        = 48000
 BLOCK_SIZE         = 5460
 FORWARD_COMMAND_DURATION_SECONDS = 30.0
+TURN_COMMAND_DURATION_SECONDS = 1.0
 
 # ── Shutdown Button ───────────────────────────────────────────────────────────
 BUTTON_PIN = 17
@@ -188,7 +189,7 @@ def _auto_stop_motion(generation):
     if sequence is None:
         print("[COMMAND] Timed motor STOP could not be sent; ESP32 watchdog remains the fallback")
     else:
-        print(f"[COMMAND] Forward test timeout; STOP sent (sequence {sequence})")
+        print(f"[COMMAND] Movement timeout; STOP sent (sequence {sequence})")
 
 
 def start_bounded_motion(direction, speed):
@@ -215,8 +216,13 @@ def start_bounded_motion(direction, speed):
         if sequence is None:
             return None
 
+        duration = (
+            TURN_COMMAND_DURATION_SECONDS
+            if direction in ("LEFT", "RIGHT")
+            else FORWARD_COMMAND_DURATION_SECONDS
+        )
         _motion_timer = threading.Timer(
-            FORWARD_COMMAND_DURATION_SECONDS,
+            duration,
             _auto_stop_motion,
             args=(generation,),
         )
@@ -433,7 +439,8 @@ def main():
                     direction_name = direction.lower().replace("_", " ")
                     print(
                         f"[COMMAND] Explicit {direction_name.upper()} recognized "
-                        f"(PWM 200); auto-stop in {FORWARD_COMMAND_DURATION_SECONDS:.0f}s"
+                        f"(PWM 200); auto-stop in "
+                        f"{TURN_COMMAND_DURATION_SECONDS if direction in ('LEFT', 'RIGHT') else FORWARD_COMMAND_DURATION_SECONDS:.0f}s"
                     )
                     move_sequence = start_bounded_motion(direction, 200)
                     if move_sequence is None:
