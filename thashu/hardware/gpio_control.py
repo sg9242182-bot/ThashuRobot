@@ -234,6 +234,7 @@ class GPIOControl:
                 if line:
                     self._incoming.put(line)
                     if line.startswith(("EVENT|", "FAULT|")):
+                        print(f"[ESP32] {line}")
                         self._events.put(line)
             except (serial.SerialException, OSError) as exc:
                 self._disconnect(f"read failed: {exc}")
