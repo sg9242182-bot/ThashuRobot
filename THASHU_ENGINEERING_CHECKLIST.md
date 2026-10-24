@@ -356,7 +356,7 @@ Acceptance:
 
 Phase 3 — Voice → Command → Hardware
 
-Status: IN PROGRESS — voice STOP dispatch passed a stationary Pi/ESP32 test; physical stop-during-motion and remaining movement-command work are pending.
+Status: IN PROGRESS — stationary voice STOP dispatch passed; a bounded forward command is implemented for active-motion STOP testing. Movement and safety acceptance remain pending.
 
 Tasks:
 
@@ -372,7 +372,7 @@ Tasks:
 
 \[ ] Validate unsafe command rejection.
 
-Implementation note (2026-10-23): `thashu/core/decision.py` now recognizes a bounded set of explicit STOP phrases instead of matching any incidental use of “stop”. `thashu/main.py` dispatches those phrases through `MotorController.stop()` before Brain/LLM handling, and reports whether the serial frame could be sent. `thashu/hardware/motors.py` returns the transport sequence result. No movement commands were changed. User-reported Pi test (2026-10-25): voice STOP recognition and command dispatch passed with the robot stationary. This confirms the voice-to-ESP32 dispatch path; physically stopping motors during active motion and no-link behavior remain unverified.
+Implementation note (2026-10-23): `thashu/core/decision.py` now recognizes a bounded set of explicit STOP phrases instead of matching any incidental use of “stop”. `thashu/main.py` dispatches those phrases through `MotorController.stop()` before Brain/LLM handling, and reports whether the serial frame could be sent. `thashu/hardware/motors.py` returns the transport sequence result. No movement commands were changed. User-reported Pi test (2026-10-25): voice STOP recognition and command dispatch passed with the robot stationary. A strictly matched forward command now sends PWM 100 and schedules a Pi-side STOP after 12 seconds; an explicit STOP cancels the timer and sends STOP immediately. ESP32 front/rear safety checks remain authoritative. Active-motion STOP, movement ACK/rejection behavior, and no-link behavior still require hardware validation.
 
 Acceptance:
 
