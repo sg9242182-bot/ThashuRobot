@@ -47,6 +47,7 @@ class GPIOControl:
         self._next_sequence = 1
 
         self._incoming = queue.Queue()
+        self._events = queue.Queue()
         self._last_heartbeat = 0.0
         self._last_connect_attempt = 0.0
         self._stop_event = threading.Event()
@@ -189,6 +190,15 @@ class GPIOControl:
             except queue.Empty:
                 return messages
 
+    def drain_events(self):
+        """Return queued ESP32 EVENT/FAULT lines for high-level handling."""
+        events = []
+        while True:
+            try:
+                events.append(self._events.get_nowait())
+            except queue.Empty:
+                return events
+
     # ------------------------------------------------------------------
     # Background transport
     # ------------------------------------------------------------------
@@ -223,6 +233,8 @@ class GPIOControl:
                 line = raw.decode("ascii", errors="replace").strip()
                 if line:
                     self._incoming.put(line)
+                    if line.startswith(("EVENT|", "FAULT|")):
+                        self._events.put(line)
             except (serial.SerialException, OSError) as exc:
                 self._disconnect(f"read failed: {exc}")
             except Exception as exc:
