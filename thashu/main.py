@@ -18,7 +18,7 @@ from core.event_bus       import EventBus
 from vision.vision_core   import VisionCore
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
-from core.decision        import is_stop_command, is_forward_command
+from core.decision        import get_forward_speed, is_stop_command
 from core.model_paths import model_path, project_path
 
 # ── Sounds ────────────────────────────────────────────────────────────────────
@@ -32,7 +32,8 @@ SILENCE_TIMEOUT    = 0.8
 GRACE_PERIOD       = 4.0
 SAMPLE_RATE        = 48000
 BLOCK_SIZE         = 5460
-MOTOR_TEST_SPEED = 100
+MOTOR_SPEED_PRESETS = {"slow": 150, "medium": 200, "fast": 255}
+DEFAULT_FORWARD_SPEED = "medium"
 MOTOR_TEST_DURATION_SECONDS = 12.0
 
 # ── Shutdown Button ───────────────────────────────────────────────────────────
@@ -192,7 +193,7 @@ def _auto_stop_motion(generation):
         print(f"[COMMAND] Forward test timeout; STOP sent (sequence {sequence})")
 
 
-def start_bounded_forward():
+def start_bounded_forward(speed):
     global _motion_timer, _motion_generation
 
     with _motion_lock:
@@ -202,7 +203,7 @@ def start_bounded_forward():
 
         _motion_generation += 1
         generation = _motion_generation
-        sequence = motors.forward(MOTOR_TEST_SPEED)
+        sequence = motors.forward(speed)
         if sequence is None:
             return None
 
@@ -373,18 +374,22 @@ def main():
                     else:
                         print(f"[COMMAND] STOP sent to ESP32 (sequence {stop_sequence})")
                         response = "Stopping."
-                elif is_forward_command(text):
+                elif (forward_speed := get_forward_speed(text)) is not None:
+                    speed_name, pwm = forward_speed
                     print(
-                        f"[COMMAND] Explicit FORWARD recognized at PWM {MOTOR_TEST_SPEED}; "
-                        f"auto-stop in {MOTOR_TEST_DURATION_SECONDS:.0f}s"
+                        f"[COMMAND] Explicit FORWARD recognized at {speed_name} speed "
+                        f"(PWM {pwm}); auto-stop in {MOTOR_TEST_DURATION_SECONDS:.0f}s"
                     )
-                    move_sequence = start_bounded_forward()
+                    move_sequence = start_bounded_forward(pwm)
                     if move_sequence is None:
                         print("[COMMAND] FORWARD could not be sent; ESP32 link is unavailable")
                         response = "I couldn't reach the motor controller, so I can't move."
                     else:
                         print(f"[COMMAND] FORWARD sent to ESP32 (sequence {move_sequence})")
-                        response = f"Forward command sent for up to {MOTOR_TEST_DURATION_SECONDS:.0f} seconds."
+                        response = (
+                            f"Moving forward at {speed_name} speed for up to "
+                            f"{MOTOR_TEST_DURATION_SECONDS:.0f} seconds."
+                        )
                 else:
                     response = brain.process(text)
 
