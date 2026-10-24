@@ -39,7 +39,6 @@ _FORWARD_PHRASES = {
     "go forward",
     "move forward",
     "drive forward",
-    "go ahead",
     "move ahead",
     "drive ahead",
     "please go forward",
