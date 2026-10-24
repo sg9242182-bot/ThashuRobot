@@ -32,7 +32,7 @@ SILENCE_TIMEOUT    = 0.8
 GRACE_PERIOD       = 4.0
 SAMPLE_RATE        = 48000
 BLOCK_SIZE         = 5460
-MOTOR_TEST_DURATION_SECONDS = 12.0
+FORWARD_COMMAND_DURATION_SECONDS = 30.0
 
 # ── Shutdown Button ───────────────────────────────────────────────────────────
 BUTTON_PIN = 17
@@ -206,7 +206,7 @@ def start_bounded_forward(speed):
             return None
 
         _motion_timer = threading.Timer(
-            MOTOR_TEST_DURATION_SECONDS,
+            FORWARD_COMMAND_DURATION_SECONDS,
             _auto_stop_motion,
             args=(generation,),
         )
@@ -403,7 +403,7 @@ def main():
                     speed_name, pwm = forward_speed
                     print(
                         f"[COMMAND] Explicit FORWARD recognized at {speed_name} speed "
-                        f"(PWM {pwm}); auto-stop in {MOTOR_TEST_DURATION_SECONDS:.0f}s"
+                        f"(PWM {pwm}); auto-stop in {FORWARD_COMMAND_DURATION_SECONDS:.0f}s"
                     )
                     move_sequence = start_bounded_forward(pwm)
                     if move_sequence is None:
@@ -413,7 +413,7 @@ def main():
                         print(f"[COMMAND] FORWARD sent to ESP32 (sequence {move_sequence})")
                         response = (
                             f"Trying to move forward at {speed_name} speed for up to "
-                            f"{MOTOR_TEST_DURATION_SECONDS:.0f} seconds."
+                            f"{FORWARD_COMMAND_DURATION_SECONDS:.0f} seconds."
                         )
                 else:
                     response = brain.process(text)
