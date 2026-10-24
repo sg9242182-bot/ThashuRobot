@@ -412,7 +412,7 @@ def main():
                     else:
                         print(f"[COMMAND] FORWARD sent to ESP32 (sequence {move_sequence})")
                         response = (
-                            f"Moving forward at {speed_name} speed for up to "
+                            f"Trying to move forward at {speed_name} speed for up to "
                             f"{MOTOR_TEST_DURATION_SECONDS:.0f} seconds."
                         )
                 else:
