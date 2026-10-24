@@ -32,8 +32,6 @@ SILENCE_TIMEOUT    = 0.8
 GRACE_PERIOD       = 4.0
 SAMPLE_RATE        = 48000
 BLOCK_SIZE         = 5460
-MOTOR_SPEED_PRESETS = {"slow": 150, "medium": 200, "fast": 255}
-DEFAULT_FORWARD_SPEED = "medium"
 MOTOR_TEST_DURATION_SECONDS = 12.0
 
 # ── Shutdown Button ───────────────────────────────────────────────────────────
