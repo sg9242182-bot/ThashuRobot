@@ -34,7 +34,7 @@ def is_stop_command(user_input: str) -> bool:
     return normalized in _STOP_PHRASES
 
 
-_FORWARD_PHRASES = {
+_FORWARD_MEDIUM_PHRASES = {
     "forward",
     "go forward",
     "move forward",
@@ -44,13 +44,67 @@ _FORWARD_PHRASES = {
     "please go forward",
     "please move forward",
     "please drive forward",
+    "forward medium",
+    "medium forward",
+    "move forward medium",
+    "move forward at medium speed",
+    "move forward at normal speed",
+    "go forward at medium speed",
+    "drive forward at medium speed",
+}
+_FORWARD_SLOW_PHRASES = {
+    "slow forward",
+    "forward slow",
+    "forward slowly",
+    "move forward slow",
+    "move forward slowly",
+    "move slowly forward",
+    "move forward at slow speed",
+    "move forward at a slow speed",
+    "go forward slowly",
+    "go forward at slow speed",
+    "drive forward slowly",
+    "drive forward at slow speed",
+}
+_FORWARD_FAST_PHRASES = {
+    "fast forward",
+    "forward fast",
+    "move forward fast",
+    "move forward quickly",
+    "move quickly forward",
+    "move forward at fast speed",
+    "move forward at a fast speed",
+    "go forward fast",
+    "go forward quickly",
+    "go forward at fast speed",
+    "drive forward fast",
+    "drive forward quickly",
+    "drive forward at fast speed",
+}
+_FORWARD_SPEEDS = {
+    "slow": 150,
+    "medium": 200,
+    "fast": 255,
 }
 
 
-def is_forward_command(user_input: str) -> bool:
-    """Accept only explicit forward commands; never infer motion from a question."""
+def get_forward_speed(user_input: str):
+    """Return (speed name, PWM) for a strictly matched forward command, else None."""
     normalized = re.sub(r"[^a-z0-9]+", " ", (user_input or "").lower()).strip()
-    return normalized in _FORWARD_PHRASES
+    if normalized in _FORWARD_SLOW_PHRASES:
+        level = "slow"
+    elif normalized in _FORWARD_FAST_PHRASES:
+        level = "fast"
+    elif normalized in _FORWARD_MEDIUM_PHRASES:
+        level = "medium"
+    else:
+        return None
+    return level, _FORWARD_SPEEDS[level]
+
+
+def is_forward_command(user_input: str) -> bool:
+    """Accept only explicit forward phrases with an optional recognized speed."""
+    return get_forward_speed(user_input) is not None
 
 
 def decide(user_input: str, context=None) -> str:
