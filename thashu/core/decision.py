@@ -33,6 +33,27 @@ def is_stop_command(user_input: str) -> bool:
     normalized = re.sub(r"[^a-z0-9]+", " ", (user_input or "").lower()).strip()
     return normalized in _STOP_PHRASES
 
+
+_FORWARD_PHRASES = {
+    "forward",
+    "go forward",
+    "move forward",
+    "drive forward",
+    "go ahead",
+    "move ahead",
+    "drive ahead",
+    "please go forward",
+    "please move forward",
+    "please drive forward",
+}
+
+
+def is_forward_command(user_input: str) -> bool:
+    """Accept only explicit forward commands; never infer motion from a question."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", (user_input or "").lower()).strip()
+    return normalized in _FORWARD_PHRASES
+
+
 def decide(user_input: str, context=None) -> str:
     """
     Decision logic for Thashu
