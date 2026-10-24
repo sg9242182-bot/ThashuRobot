@@ -18,7 +18,7 @@ from core.event_bus       import EventBus
 from vision.vision_core   import VisionCore
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
-from core.decision        import is_stop_command
+from core.decision        import is_stop_command, is_forward_command
 from core.model_paths import model_path, project_path
 
 # ── Sounds ────────────────────────────────────────────────────────────────────
@@ -32,6 +32,8 @@ SILENCE_TIMEOUT    = 0.8
 GRACE_PERIOD       = 4.0
 SAMPLE_RATE        = 48000
 BLOCK_SIZE         = 5460
+MOTOR_TEST_SPEED = 100
+MOTOR_TEST_DURATION_SECONDS = 12.0
 
 # ── Shutdown Button ───────────────────────────────────────────────────────────
 BUTTON_PIN = 17
@@ -53,6 +55,9 @@ vad    = VoiceActivityDetector()
 attn   = AttentionSystem()
 vision = VisionCore()
 eyes   = Eyes()
+_motion_timer = None
+_motion_generation = 0
+_motion_lock = threading.Lock()
 event_bus.subscribe(
     "RUNTIME_STATE_CHANGED",
     vision.on_runtime_state_changed,
@@ -170,6 +175,57 @@ def transition_runtime(target_state):
     print(f"[STATE] {previous.value} -> {current.value}")
 
     return current
+
+
+def _auto_stop_motion(generation):
+    global _motion_timer
+
+    with _motion_lock:
+        if generation != _motion_generation:
+            return
+        _motion_timer = None
+        sequence = motors.stop()
+
+    if sequence is None:
+        print("[COMMAND] Timed motor STOP could not be sent; ESP32 watchdog remains the fallback")
+    else:
+        print(f"[COMMAND] Forward test timeout; STOP sent (sequence {sequence})")
+
+
+def start_bounded_forward():
+    global _motion_timer, _motion_generation
+
+    with _motion_lock:
+        if _motion_timer is not None:
+            _motion_timer.cancel()
+            _motion_timer = None
+
+        _motion_generation += 1
+        generation = _motion_generation
+        sequence = motors.forward(MOTOR_TEST_SPEED)
+        if sequence is None:
+            return None
+
+        _motion_timer = threading.Timer(
+            MOTOR_TEST_DURATION_SECONDS,
+            _auto_stop_motion,
+            args=(generation,),
+        )
+        _motion_timer.daemon = True
+        _motion_timer.start()
+        return sequence
+
+
+def stop_motion():
+    global _motion_timer, _motion_generation
+
+    with _motion_lock:
+        _motion_generation += 1
+        if _motion_timer is not None:
+            _motion_timer.cancel()
+            _motion_timer = None
+        return motors.stop()
+
 
 # ── Main loop ──────────────────────────────────────────────────────────────────
 def main():
@@ -310,13 +366,25 @@ def main():
 
                 if is_stop_command(text):
                     print("[COMMAND] Explicit STOP recognized; sending directly to ESP32")
-                    stop_sequence = motors.stop()
+                    stop_sequence = stop_motion()
                     if stop_sequence is None:
                         print("[COMMAND] STOP could not be sent; ESP32 link is unavailable")
                         response = "I couldn't reach the motor controller, so I can't confirm the stop."
                     else:
                         print(f"[COMMAND] STOP sent to ESP32 (sequence {stop_sequence})")
                         response = "Stopping."
+                elif is_forward_command(text):
+                    print(
+                        f"[COMMAND] Explicit FORWARD recognized at PWM {MOTOR_TEST_SPEED}; "
+                        f"auto-stop in {MOTOR_TEST_DURATION_SECONDS:.0f}s"
+                    )
+                    move_sequence = start_bounded_forward()
+                    if move_sequence is None:
+                        print("[COMMAND] FORWARD could not be sent; ESP32 link is unavailable")
+                        response = "I couldn't reach the motor controller, so I can't move."
+                    else:
+                        print(f"[COMMAND] FORWARD sent to ESP32 (sequence {move_sequence})")
+                        response = f"Forward command sent for up to {MOTOR_TEST_DURATION_SECONDS:.0f} seconds."
                 else:
                     response = brain.process(text)
 
