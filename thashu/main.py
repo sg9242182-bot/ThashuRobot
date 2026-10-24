@@ -248,8 +248,7 @@ def process_safety_events():
             announce_safety_message("I stopped because an obstacle was detected.")
         elif event == "EVENT|0|BLOCKED|OBSTACLE":
             announce_safety_message("I can't move because an obstacle was detected.")
-        elif event.startswith("FAULT|"):
-            print(f"[ESP32] {event}")
+        # EVENT and FAULT lines are logged immediately by GPIOControl's reader thread.
 
 
 # ── Main loop ──────────────────────────────────────────────────────────────────
@@ -431,6 +430,10 @@ def main():
                     tts_start = time.time()
 
                     speak(response)
+
+                    # A safety stop can arrive while this confirmation is playing.
+                    # Handle it before reopening the microphone or returning to IDLE.
+                    process_safety_events()
 
                     tts_time = time.time() - tts_start
                     print(f"[TIME] TTS = {tts_time:.2f}s")
