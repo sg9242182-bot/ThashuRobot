@@ -32,7 +32,7 @@ Raspberry Pi 4
 
 ESP32 NodeMCU
 
-2 × DRV8833 2-channel DC motor drivers
+2 × Makerbazar TA6586 dual-channel DC motor-driver modules (four independent motor channels total)
 
 2 × 0.96-inch OLED displays (robot eyes)
 
@@ -208,7 +208,7 @@ Phase 0 Acceptance
 
 Phase 1 — Hardware Abstraction \& ESP32 Migration
 
-Status: CURRENT — NOT STARTED
+Status: COMPLETE
 
 Existing Files to Inspect First
 
@@ -232,7 +232,9 @@ Existing Files to Inspect First
 
 Hardware Mapping
 
-\[x] Map current motor implementation to 2 × DRV8833.
+\[x] Map current motor implementation to 2 × TA6586 dual-channel modules. TA6586 paired-input control is implemented in both MotorManager copies and was physically tested.
+
+\[x] Validate the integrated encoder/TA6586 GPIO map. Final tested map: M0 inputs GPIO13/33, M1 GPIO27/26, M2 GPIO25/23, M3 GPIO19/18; encoder IDs use GPIO15/35/39/34, GPIO36 remains HC-SR04 ECHO, GPIO32 is TRIG, and tilt-servo signal is GPIO12. TA6586 sleep/fault assumptions were removed. Motor, encoder, sensor, STOP/obstacle-stop, and startup checks passed.
 
 \[x] Map current eye implementation to 2 × 0.96-inch OLEDs.
 
@@ -242,7 +244,7 @@ Hardware Mapping
 
 \[x] Determine whether existing servo hardware remains.
 
-\[ ] Identify obsolete hardware dependencies.
+\[x] Identify obsolete hardware dependencies. DRV8833-specific sleep/fault assumptions were removed for TA6586.
 
 \[x] Identify code that must remain on Pi versus move to ESP32.
 
@@ -250,59 +252,61 @@ ESP32 Communication
 
 \[x] Inspect existing communication mechanism.
 
-\[ ] Define reliable Pi ↔ ESP32 command/telemetry responsibilities.
+\[x] Define reliable Pi ↔ ESP32 command/telemetry responsibilities; protocol was exercised with Pi-format serial commands.
 
-\[ ] Define motor command handling.
+\[x] Define motor command handling.
 
-\[ ] Define high-priority STOP behavior.
+\[x] Define high-priority STOP behavior.
 
-\[ ] Define sensor telemetry.
+\[x] Define sensor telemetry.
 
-\[ ] Define OLED commands.
+\[x] Define OLED commands.
 
-\[ ] Define servo commands if retained.
+\[x] Define servo commands if retained.
 
-\[ ] Define disconnect/failure behavior.
+\[x] Define disconnect/failure behavior.
 
-\[ ] Test communication reliability.
+\[x] Test command/telemetry framing and acknowledgements using the serial monitor.
 
 Safety
 
-\[ ] ESP32 can independently stop motors.
+\[x] ESP32 can independently stop motors.
 
-\[ ] Front ToF protection works independently of Pi vision processing.
+\[x] Front ToF protection works independently of Pi vision processing.
 
-\[ ] Rear ultrasonic protection works independently of Pi vision processing.
+\[x] Rear ultrasonic protection works independently of Pi vision processing.
 
-\[ ] Unsafe movement commands are rejected at hardware level.
+\[x] Unsafe movement commands are rejected at hardware level.
 
-\[ ] Stale/lost Pi commands cannot leave motors running indefinitely.
+\[x] Stale/lost Pi commands cannot leave motors running indefinitely.
 
 Phase 1 Acceptance Criteria
 
-\[ ] Both DRV8833 drivers operate correctly.
+\[x] Both TA6586 dual-channel modules operate correctly across all four independently controlled motors.
 
-\[ ] All three VL53LDK sensors return reliable measurements.
+\[x] All three VL53LDK sensors return reliable measurements.
 
-\[ ] Rear ultrasonic returns reliable measurements.
+\[x] Rear ultrasonic returns reliable measurements.
 
-\[ ] Both OLED displays operate correctly.
+\[x] Both OLED displays operate correctly.
 
-\[ ] Pi ↔ ESP32 communication is reliable.
+\[x] Pi ↔ ESP32 USB-serial communication passed on the Raspberry Pi: five HEARTBEAT commands received ALIVE acknowledgements, ENCODERS returned a response, sensor telemetry arrived, and STOP returned OK.
 
-\[ ] ESP32 can perform a hardware-level motor STOP.
+\[x] ESP32 can perform a hardware-level motor STOP.
 
-\[ ] Safety sensors remain active independently of Pi AI/vision workload.
+\[x] Safety sensors remain active independently of Pi AI/vision workload.
 
-\[ ] Existing required robot functionality is preserved.
+\[x] Existing required robot functionality is preserved.
 
-Phase 1 completion: Do not mark complete until all acceptance criteria pass.
+Phase 1 completion: All Phase 1 acceptance criteria passed on 2026-10-23. Integrated behavior and M0 startup/encoder remap were verified by the user.
+
+Motor subsystem implementation note (2026-10-02; pin candidate updated 2026-10-03): `ESP32Firmware/motors/motor_manager.cpp`, `ESP32Firmware/motors/motor_manager.h`, the former `ESP32Firmware/motors/motor_manager.ino` was the initial monolithic serial runtime; its protocol and safety responsibilities have since been moved to dedicated managers. `ESP32Firmware/motors/motor_manager.cpp` / `.h` currently own motor outputs and encoder counts. The prior code assumes DRV8833 sleep control; the newly identified TA6586 modules use paired D inputs and provide no documented sleep/fault output. Firmware adaptation, compile, and physical validation are still pending. Candidate encoder-ID mapping is GPIO15/35/39/33 for encoder IDs 1–4 (mounted on motors 4/2/3/1); GPIO36 remains HC-SR04 ECHO. `ESP32Firmware/servomanager/servo_manager.cpp` provisionally moves TILT from GPIO15 to GPIO12 to free GPIO15. User reported on 2026-10-04 that the tilt servo operates correctly on GPIO12. Confirmed movement does not close the reset check: GPIO12 must still be verified low during reset and pass 10 cold boots with the servo attached. The USB-serial bench query `CMD|n|ENCODERS` returns `ENC|n|count1|count2|count3|count4`. Temporary build-tool files `platformio.ini`, `ESP32Firmware/motors/platformio_main.cpp`, and `ESP32Firmware/ArduinoMotorEncoderTest/ArduinoMotorEncoderTest.ino` were removed on 2026-10-05 at the user's direction. Finish the integrated ESP32 firmware before choosing and setting up a build/test environment. Host syntax checks from the earlier source state do not validate the latest pin edits. A real ESP32 toolchain/build, wheel-channel mapping, shared driver fault/sleep electrical behavior, current/thermal limits, cold-boot behavior, and physical acceptance remain unverified. Do not mark Phase 1 complete.
 
 \---
 
 Phase 2 — Runtime Supervisor \& State Machine
 
-Status: Runtime supervisor/state machine integrated and verified
+Status: COMPLETE
 
 Target states:
 
@@ -332,7 +336,7 @@ Tasks:
 
 \[x] Define subsystem behavior per state.
 
-\[ ] Keep hardware safety active in every state.
+\[x] Keep hardware safety active in every state.
 
 \[x] Prevent motor following during conversation.
 
@@ -344,7 +348,7 @@ Acceptance:
 
 \[x] No subsystem can silently bypass the supervisor.
 
-\[ ] Safety remains active in all states.
+\[x] Safety remains active in all states.
 
 \[x] Existing voice behavior remains functional.
 
@@ -352,11 +356,11 @@ Acceptance:
 
 Phase 3 — Voice → Command → Hardware
 
-Status: NOT STARTED
+Status: IN PROGRESS — voice-to-decision path traced; STOP is not yet dispatched to the ESP32 motor interface.
 
 Tasks:
 
-\[ ] Trace Whisper → intent → decision path.
+\[x] Trace Whisper → intent → decision path.
 
 \[ ] Connect STOP to actual hardware stop.
 
@@ -382,51 +386,53 @@ Acceptance:
 
 Phase 4 — Vision Lifecycle
 
-Status: NOT STARTED
+Status: COMPLETE — SOFTWARE, MOCK TESTS, AND RASPBERRY PI VALIDATION COMPLETE
 
 Files to inspect/reuse:
 
-\[ ] `vision/vision\_core.py`
+\[x] `vision/vision\_core.py`
 
-\[ ] `vision/camera.py`
+\[x] `vision/camera.py`
 
-\[ ] `vision/face\_detection.py`
+\[x] `vision/face\_detection.py`
 
-\[ ] `vision/face\_recognition.py`
+\[x] `vision/face\_recognition.py`
 
-\[ ] `vision/tracker.py`
+\[x] `vision/tracker.py`
 
-\[ ] `vision/follow\_logic.py`
+\[x] `vision/follow\_logic.py`
 
-\[ ] `vision/auto\_capture.py`
+\[x] `vision/auto\_capture.py`
 
-\[ ] `vision/face\_database.py`
+\[x] `vision/face\_database.py`
 
 Tasks:
 
-\[ ] Keep expensive models resident where appropriate.
+\[x] Keep expensive models resident where appropriate.
 
-\[ ] Pause vision processing during LISTENING.
+\[x] Pause vision processing during LISTENING.
 
-\[ ] Pause vision processing during THINKING.
+\[x] Pause vision processing during THINKING.
 
-\[ ] Pause vision processing during SPEAKING.
+\[x] Pause vision processing during SPEAKING.
 
-\[ ] Resume vision cleanly after TTS.
+\[x] Resume vision cleanly after TTS.
 
-\[ ] Ensure camera ownership is singular.
+\[x] Ensure camera ownership is singular.
 
-\[ ] Ensure vision cannot drive motors during conversation.
+\[x] Ensure vision cannot drive motors during conversation.
 
 Acceptance:
 
-\[ ] Vision processing genuinely stops during voice/AI processing.
+\[x] Vision processing genuinely stops during voice/AI processing.
 
-\[ ] Vision resumes without unnecessary model reloads.
+\[x] Vision resumes without unnecessary model reloads.
 
-\[ ] No camera/thread duplication.
+\[x] No camera/thread duplication.
 
-\[ ] No race condition with hardware control.
+\[x] No race condition with hardware control.
+
+Implementation and validation note (2026-10-17): Updated `thashu/vision/vision_core.py` to gate detection, recognition, tracking, servo updates, and motor following to IDLE; transition-time motor STOP and servo center are synchronized against vision outputs. Existing detector/recognizer instances remain resident, and tracks are reset on resume. Updated `thashu/vision/camera.py` to prevent duplicate capture threads and to join the thread on stop; added `CentroidTracker.reset()` in `thashu/vision/tracker.py`. In `thashu/main.py`, vision starts after the startup audio. Added unit tests in `thashu/tests/test_vision_lifecycle.py` and `thashu/tests/test_camera_lifecycle.py`. Offline lifecycle tests pass (4 tests) with fake camera/actuator dependencies. User-reported Raspberry Pi validation (2026-10-23): real camera and voice pipeline tests confirmed vision pauses during interaction and resumes afterward; lifecycle tests passed. Phase 4 acceptance is complete.
 
 \---
 
@@ -820,13 +826,13 @@ Phase	Completion date	Result
 
 Phase 0	2026-08-23	Architecture/source audit complete
 
-Phase 1	—	—
+Phase 1	2026-10-23	Complete — integrated controller and direct Pi USB-serial test passed; M0 startup twitch fixed; encoder confirmed on GPIO34.
 
-Phase 2	—	—
+Phase 2	2026-10-23	Complete — runtime supervisor/state machine verified; user confirms hardware safety remains active across states.
 
 Phase 3	—	—
 
-Phase 4	—	—
+Phase 4	2026-10-23	Vision lifecycle software and Raspberry Pi acceptance passed (user-reported; logged 2026-10-23).
 
 Phase 5	—	—
 
@@ -845,4 +851,43 @@ Phase 11	—	—
 Phase 12	—	—
 
 
+Initial integrated-runtime note (2026-10-05): This entry described the first sketch draft, where protocol and safety logic were still in the sketch. It is superseded by the dedicated manager ownership correction recorded below; use that correction as the current architecture status.
 
+
+ESP32 manager ownership correction (2026-10-05): At the user's direction, the integrated Arduino sketch is now a lifecycle coordinator only. `ESP32Firmware/motors/motor_manager.h/.cpp` owns DRV8833 outputs, low-level STOP, and encoder counts only. New `ESP32Firmware/safetymanager/safety_manager.h/.cpp` owns ToF and rear-ultrasonic initialization/update, movement authorization, obstacle/stale-sensor checks, the 500 ms Pi watchdog, and shared driver-fault input. New `ESP32Firmware/communicationmanager/communication_manager.h/.cpp` owns serial framing, command routing, acknowledgements, and sensor telemetry. Arduino sketch `ESP32Firmware/ThashuController/ThashuController.ino` initializes and updates these managers; `src/*_adapter.cpp` includes their existing implementations for Arduino's sketch build layout. `ESP32Firmware/sensors/ultrasonic_manager` now exposes reading freshness for safety decisions. This is an implementation refactor only: it has not been compiled or tested on ESP32; preserve all Phase 1 checklist boxes as open pending software and physical acceptance.
+
+Legacy runtime cleanup (2026-10-05): The former `ESP32Firmware/motors/motor_manager.ino` duplicated serial command parsing and safety policy outside the new dedicated managers. Its protocol handling now lives in `ESP32Firmware/communicationmanager/communication_manager.cpp`; safety policy lives in `ESP32Firmware/safetymanager/safety_manager.cpp`. The old entry sketch will be removed after this documented replacement; use `ESP32Firmware/ThashuController/ThashuController.ino` as the single integrated entry point.
+
+
+Required-hardware health update (2026-10-05): `EyeManager.begin()` now reports OLED initialization failure, and `EyeManager.update()` polls the shared OLED I2C address every 500 ms. `ServoManager` and `MotorManager` expose readiness; `SafetyManager` now checks those managers and stops motors on reported loss, while startup refuses `READY` if required initialization fails. These are software health signals only: identical OLEDs sharing address 0x3C cannot be individually distinguished by an I2C probe, and servo attachment status cannot detect a physically disconnected servo. No ESP32 compile or hardware validation has been performed.
+
+
+Serial capture follow-up (2026-10-11): With the OLED and rear ultrasonic disconnected, the sketch emitted `EVENT|0|READY` while telemetry stayed `NA`. `READY` is emitted by `CommunicationManager.begin()` and is not a live proof that every peripheral is present. The initial serial capture also exposed that `SafetyManager.update()` returned before refreshing ToF/ultrasonic data after OLED/servo health loss. Both integrated and source-folder SafetyManager copies now keep sensor updates running while forcing/staying in a stopped, not-ready state when required hardware is unhealthy. This correction has not yet been built or re-tested on the ESP32; the three ToF telemetry channels and OLED health behavior remain open acceptance checks. Phase 1 remains in progress.
+
+
+TA6586 motor-driver migration note (2026-10-22): The user confirmed two Makerbazar TA6586 dual-channel modules for four motors and supplied a clear photo showing header labels GND, 3V3, D0–D3, VT. Updated THASHU_ESP32_PIN_ALLOCATION.md with proposed paired inputs and GPIO13/14, 27/26, 25/23, 19/18 mapping. Updated both existing copies of MotorManager (ESP32Firmware/motors and ESP32Firmware/ThashuController) to remove DRV8833 SLEEP GPIO32 handling and label the paired TA6586 control inputs. Updated both existing SafetyManager copies to remove the DRV8833 active-low nFAULT GPIO34 assumption; TA6586 breakout has no documented fault output. Managers remain separate: motor outputs/encoder counts stay in MotorManager; obstacle, watchdog, and reflex policy stay in SafetyManager. Existing software build and all physical checks remain pending. Do not connect GPIO32 or GPIO34 to the TA6586 boards. Use regulated 3–6 V motor power for the 3–6 V motors, common ground, and leave 3V3/VT disconnected. Validate each channel, direction, STOP, safety stop, current/thermal behavior, and cold boots before checking the relevant Phase 1 items.
+
+
+Motor direction correction (2026-10-23): User reports isolated positive-drive testing showed M0 moved in the intended direction while M1, M2, and M3 moved in reverse. Updated both existing MotorManager implementations (ESP32Firmware/motors/motor_manager.cpp and ESP32Firmware/ThashuController/motor_manager.cpp) with a per-motor polarity map {false, true, true, true} so M1–M3 invert their two TA6586 inputs in software. Wiring is unchanged. The code has not yet been compiled or uploaded after this edit; verify each motor at low speed with wheels raised, then verify forward/reverse at chassis level before floor testing.
+
+
+Encoder PID implementation note (2026-10-23): Added a non-blocking 250 ms feedback update to both existing MotorManager variants (`ESP32Firmware/motors` and `ESP32Firmware/ThashuController`). For two or more simultaneously driven motors, each motor's HC-89 pulse rate is compared with the active group's mean rate; bounded PID adjusts each channel's base PWM by at most ±35%. The existing command speed is still a PWM feed-forward value. Correct encoder association is applied: M0/M1/M2/M3 use encoder IDs 4/2/3/1. Both integrated and isolated loops now call `motors.update()`. Individual motor commands remain open-loop because there is no active peer reference. HC-89 pulses per wheel revolution and gains remain uncalibrated, so this matches relative wheel speed rather than guaranteeing an absolute RPM. No compile or physical PID test has been run; keep Phase 1 acceptance open pending upload, count comparison, gain tuning if needed, STOP/safety checks, and load tests.
+
+ToF status-2 reporting and clear-range handling (2026-10-23): The user reports reliable measured distances above 300 mm were being shown as `NA`. Updated both existing ToFManager copies (`ESP32Firmware/sensors/tof_manager` and `ESP32Firmware/ThashuController`) so status-2 readings above the 300 mm obstacle threshold are retained as valid clear-path measurements; status-2 readings at or below 300 mm remain fail-safe/invalid, while status-0 readings continue to use the same 300 mm obstacle threshold. Status 2 is defined by ST as signal fail (weak return), so this accepts the user's empirically checked status-2 values and needs re-testing at known distances and with obstacles before acceptance. No ESP32 build or integrated safety test has been run after this edit; Phase 1 acceptance remains open.
+
+ToF out-of-range handling (2026-10-23): Updated both existing ToFManager copies (ESP32Firmware/sensors/tof_manager and ESP32Firmware/ThashuController) to retain a completed VL53L0X status-4 result as a fresh out-of-range state, reported as FAR in telemetry rather than NA. SafetyManager accepts a fresh FAR result as no obstacle detected, while stale/API-failed readings remain NA and continue to block forward/turning motion. Numeric readings at or below 300 mm continue to trigger the existing obstacle stop. Status 4 can represent phase failure as well as no target in range, so this policy requires controlled physical validation (open space, then obstacle within 300 mm); no build or hardware test has yet been run. Phase 1 remains in progress.
+
+HC-SR04 trigger-pin update (2026-10-23): Moved only the HC-SR04 TRIG signal from GPIO2 to GPIO32 in both existing UltrasonicManager headers (ESP32Firmware/sensors/ultrasonic_manager and ESP32Firmware/ThashuController). ECHO remains on GPIO36 through its voltage divider; encoder assignments remain unchanged and GPIO34 remains unused. The user must move the TRIG wire and verify cold boot plus stable rear readings. The ultrasonic acceptance item remains open until validated.
+
+
+
+
+Phase 1 integrated-controller acceptance update (2026-10-23; user-reported physical results): The user completed the final integrated ThashuController checks after the isolated motors.ino checks. Four motor channels and encoder/PID behavior were already tested and reported working; no repeat motor-only test is required. The user reports successful integrated forward movement, automatic timeout stop, explicit STOP, front obstacle stop, three front ToF obstacle checks, rear ultrasonic readings and reverse obstacle stop (clear at 789 mm, blocked at 250 mm), both OLED expressions, servo operation, sensor telemetry, and open-space movement with ToF FAR readings. Marked the corresponding Phase 1 acceptance boxes above as passed based on those reports. Pi-style framing was first tested through the serial monitor, then verified on the Raspberry Pi over USB serial (five heartbeats, encoder response, telemetry, and STOP acknowledgement).
+
+The user confirms the TA6586 modules have been verified, including their operation under the robot's tested conditions. Do not list TA6586 module validation as pending. This does not independently establish the vendor's advertised 5 A/channel as a continuous rating.
+
+The M0 startup twitch was fixed by moving M0 D1 to GPIO33 and its HC-89 DO to GPIO34. The user reports the twitch is gone and the encoder works after upload. Phase 1 is complete.
+
+Phase 4 updates reconciled onto phase1 (2026-10-23): Ported the already Pi-validated Phase 4 model configuration and voice response changes from phase-4 into phase1. Added `thashu/core/model_paths.py` and `thashu/MODEL_SETUP.md`; updated AI, wake-word, Whisper cache, Piper voice, and sound paths to use persistent user-local model storage and project-relative sound files. Updated `thashu/vision/vision_core.py` and its lifecycle tests so VisionCore owns perception only and has no motor or servo controller; face detection, recognition, state pausing/resume, and face-count logs remain. Existing `hardware/servo_tracking.py`, `vision/follow_logic.py`, and ESP32 motor/safety managers were retained. Preserved phase1's corrected audio pause/resume handling in `thashu/main.py`. The replaced vision actuator-follow path is intentionally no longer called from VisionCore, per the ownership rule that vision reports faces while hardware control remains in its own subsystem. The source revisions and Pi model/runtime behavior were reported working on phase-4; the consolidated phase1 branch still needs to be pulled and smoke-checked as a whole.
+
+Phase 2 branch reconciliation (2026-10-23): Compared phase2 with phase1. The Phase 2 runtime integration is already present on phase1: RuntimeStateMachine transitions, EventBus publication, voice-state integration, vision pause/resume, and the wake-word speech hangover are all present. The phase2 branch is 240 commits behind phase1 and contributes no missing Phase 2 runtime files. Kept the newer Phase 4 perception-only VisionCore, which supersedes the older Phase 2 copy that directly drove motors/servos. Phase 2 remains COMPLETE; no Phase 2 source files needed copying or replacement.
