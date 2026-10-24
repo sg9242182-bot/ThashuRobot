@@ -16,7 +16,7 @@ class MotorController:
         return s
 
     def forward(self, speed=None):
-        self.gpio.send(f"MOTOR|FORWARD|{self._speed(speed)}")
+        return self.gpio.send(f"MOTOR|FORWARD|{self._speed(speed)}")
 
     def backward(self, speed=None):
         self.gpio.send(f"MOTOR|BACKWARD|{self._speed(speed)}")
