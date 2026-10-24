@@ -73,12 +73,38 @@ void SafetyManager::update() {
         return;
     }
     if (millis() - lastPiFrameMs >= PI_WATCHDOG_MS) watchdogExpired = true;
-    if (watchdogExpired ||
-        (activeMotion != STOPPED &&
-         !allowMotion(activeMotion, 1))) {
+    if (watchdogExpired) {
+        motors->stop();
+        activeMotion = STOPPED;
+        return;
+    }
+    if (activeMotion != STOPPED && !allowMotion(activeMotion, 1)) {
+        if (obstacleDetectedFor(activeMotion)) obstacleStopPending = true;
         motors->stop();
         activeMotion = STOPPED;
     }
+}
+
+bool SafetyManager::obstacleDetectedFor(Motion motion) const {
+    if (!tof || !rear) return false;
+
+    if (motion == FORWARD || motion == TURNING) {
+        for (uint8_t i = 0; i < 3; ++i) {
+            const ToFManager::SensorId sensor = FRONT_IDS[i];
+            if (tof->isFresh(sensor) && tof->isObstacleDetected(sensor)) return true;
+        }
+    }
+    if ((motion == REVERSE || motion == TURNING) &&
+        rear->isFresh() && rear->isValid() && rear->isObstacleDetected()) {
+        return true;
+    }
+    return false;
+}
+
+bool SafetyManager::consumeObstacleStop() {
+    const bool pending = obstacleStopPending;
+    obstacleStopPending = false;
+    return pending;
 }
 
 bool SafetyManager::requiredHardwareReady() const {
