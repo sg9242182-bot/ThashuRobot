@@ -18,6 +18,8 @@ public:
     void notePiFrame();
     bool allowMotion(Motion motion, uint8_t speed) const;
     void setActiveMotion(Motion motion, uint8_t speed);
+    bool obstacleDetectedFor(Motion motion) const;
+    bool consumeObstacleStop();
     bool ready() const;
 
 private:
@@ -32,6 +34,7 @@ private:
     unsigned long lastPiFrameMs = 0;
     bool watchdogExpired = true;
     bool initialized = false;
+    bool obstacleStopPending = false;
     Motion activeMotion = STOPPED;
     bool frontClear() const;
     bool rearClear() const;
