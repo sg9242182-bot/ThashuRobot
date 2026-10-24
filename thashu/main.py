@@ -17,11 +17,12 @@ from core.state           import RuntimeState, RuntimeStateMachine
 from core.event_bus       import EventBus
 from vision.vision_core   import VisionCore
 from hardware.eyes        import Eyes
+from core.model_paths import model_path, project_path
 
 # ── Sounds ────────────────────────────────────────────────────────────────────
-SOUND_STARTUP   = "/home/tharun/thashu/sounds/startup.wav"
-SOUND_YES       = "/home/tharun/thashu/sounds/yes.wav"
-SOUND_NOT_HEARD = "/home/tharun/thashu/sounds/not_heard.wav"
+SOUND_STARTUP   = project_path("sounds", "startup.wav")
+SOUND_YES       = project_path("sounds", "yes.wav")
+SOUND_NOT_HEARD = project_path("sounds", "not_heard.wav")
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 MAX_RECORD_SECONDS = 10
@@ -41,7 +42,7 @@ event_bus = EventBus()
 brain  = Brain()
 audio  = AudioManager(sample_rate=SAMPLE_RATE, blocksize=BLOCK_SIZE)
 wake = WakeWordEngine(
-    model_path="models/wake_word/hey_jarvis_v0.1.onnx",
+    model_path=model_path("openwakeword", "hey_jarvis_v0.1.onnx"),
     threshold=0.5,
     cooldown=4.0
 )
@@ -172,7 +173,6 @@ def main():
     print("[SYSTEM] Jarvis started")
 
     # Start systems
-    vision.start()
     audio.start()
 
     # ── Start shutdown button monitor ───────────────────────────────────────
@@ -202,6 +202,8 @@ def main():
     print("[SYSTEM] ── Ready. Say 'Hey Thashu'")
 
     eyes.idle()
+    # Start autonomous following only after the startup audio has finished.
+    vision.start()
 
 
 
