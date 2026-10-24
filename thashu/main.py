@@ -18,7 +18,7 @@ from core.event_bus       import EventBus
 from vision.vision_core   import VisionCore
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
-from core.decision        import get_forward_speed, is_stop_command
+from core.decision        import get_forward_speed, get_direction_command, is_stop_command
 from core.model_paths import model_path, project_path
 
 # ── Sounds ────────────────────────────────────────────────────────────────────
@@ -191,8 +191,18 @@ def _auto_stop_motion(generation):
         print(f"[COMMAND] Forward test timeout; STOP sent (sequence {sequence})")
 
 
-def start_bounded_forward(speed):
+def start_bounded_motion(direction, speed):
     global _motion_timer, _motion_generation
+
+    motor_commands = {
+        "FORWARD": motors.forward,
+        "BACKWARD": motors.backward,
+        "LEFT": motors.left,
+        "RIGHT": motors.right,
+    }
+    command = motor_commands.get(direction)
+    if command is None:
+        return None
 
     with _motion_lock:
         if _motion_timer is not None:
@@ -201,7 +211,7 @@ def start_bounded_forward(speed):
 
         _motion_generation += 1
         generation = _motion_generation
-        sequence = motors.forward(speed)
+        sequence = command(speed)
         if sequence is None:
             return None
 
@@ -213,6 +223,10 @@ def start_bounded_forward(speed):
         _motion_timer.daemon = True
         _motion_timer.start()
         return sequence
+
+
+def start_bounded_forward(speed):
+    return start_bounded_motion("FORWARD", speed)
 
 
 def stop_motion():
@@ -245,9 +259,9 @@ def announce_safety_message(message):
 def process_safety_events():
     for event in motors.gpio.drain_events():
         if event == "EVENT|0|STOP|OBSTACLE":
-            announce_safety_message("I stopped because an obstacle was detected.")
+            announce_safety_message("Obstacle detected. Stopping.")
         elif event == "EVENT|0|BLOCKED|OBSTACLE":
-            announce_safety_message("I can't move because an obstacle was detected.")
+            announce_safety_message("Obstacle ahead. I can't move.")
         # EVENT and FAULT lines are logged immediately by GPIOControl's reader thread.
 
 
@@ -404,16 +418,34 @@ def main():
                         f"[COMMAND] Explicit FORWARD recognized at {speed_name} speed "
                         f"(PWM {pwm}); auto-stop in {FORWARD_COMMAND_DURATION_SECONDS:.0f}s"
                     )
-                    move_sequence = start_bounded_forward(pwm)
+                    move_sequence = start_bounded_motion("FORWARD", pwm)
                     if move_sequence is None:
                         print("[COMMAND] FORWARD could not be sent; ESP32 link is unavailable")
                         response = "I couldn't reach the motor controller, so I can't move."
                     else:
                         print(f"[COMMAND] FORWARD sent to ESP32 (sequence {move_sequence})")
-                        response = (
-                            f"Trying to move forward at {speed_name} speed for up to "
-                            f"{FORWARD_COMMAND_DURATION_SECONDS:.0f} seconds."
-                        )
+                        response = {
+                            "slow": "Forward slowly.",
+                            "medium": "Moving forward.",
+                            "fast": "Forward quickly.",
+                        }[speed_name]
+                elif (direction := get_direction_command(text)) is not None:
+                    direction_name = direction.lower().replace("_", " ")
+                    print(
+                        f"[COMMAND] Explicit {direction_name.upper()} recognized "
+                        f"(PWM 200); auto-stop in {FORWARD_COMMAND_DURATION_SECONDS:.0f}s"
+                    )
+                    move_sequence = start_bounded_motion(direction, 200)
+                    if move_sequence is None:
+                        print(f"[COMMAND] {direction_name.upper()} could not be sent; ESP32 link is unavailable")
+                        response = "I couldn't reach the motor controller."
+                    else:
+                        print(f"[COMMAND] {direction_name.upper()} sent to ESP32 (sequence {move_sequence})")
+                        response = {
+                            "BACKWARD": "Moving backward.",
+                            "LEFT": "Turning left.",
+                            "RIGHT": "Turning right.",
+                        }[direction]
                 else:
                     response = brain.process(text)
 
