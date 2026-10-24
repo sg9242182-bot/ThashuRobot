@@ -1,14 +1,14 @@
 """
 speech_to_text.py — Thashu Voice Pipeline
-Transcribes int16 audio at 48 kHz using faster-whisper (Whisper tiny, int8).
+Transcribes int16 audio at 48 kHz using faster-whisper (Whisper tiny.en, int8).
 
 Key design decisions:
 - Lazy model load (first call, not import time) — avoids crashing the entire
   voice system if faster-whisper is unavailable.
 - Minimum audio length guard — prevents hallucination on very short clips.
 - Input dtype check — refuses to silently process pre-normalized float32.
-- compute_type="int8" + model="tiny" is correct for Pi 4; see notes on
-  hallucination risk in model selection comment.
+- English-only tiny.en is selected because this application transcribes English;
+  it preserves the tiny model size while favoring English transcription.
 """
 
 import os
@@ -29,11 +29,10 @@ RESAMPLE_DOWN = INPUT_RATE // TARGET_RATE   # = 3
 # Whisper pads short clips heavily and hallucinates on sub-500ms input.
 MIN_SAMPLES_48K = INPUT_RATE // 2   # 24 000 samples = 0.5 s
 
-# Model selection note:
-#   "tiny"  int8 — fastest, most likely to hallucinate on short/quiet input.
-#   "base"  int8 — ~2× slower but noticeably more accurate; still runs on Pi 4.
-# Change MODEL_SIZE to "base" if STT quality is poor.
-MODEL_SIZE    = "tiny"
+# English-only Whisper variants tend to perform better for English speech,
+# especially at tiny/base sizes. Move to "base.en" only if Pi testing shows
+# that tiny.en still misses common phrases and the added latency is acceptable.
+MODEL_SIZE    = "tiny.en"
 COMPUTE_TYPE  = "int8"
 
 
