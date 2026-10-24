@@ -121,9 +121,9 @@ curl -fL 'https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/less
 curl -fL 'https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/low/en_US-lessac-low.onnx.json' -o "$THASHU_MODELS_DIR/piper/en_US-lessac-low.onnx.json"
 ```
 
-### Whisper tiny
+### Whisper tiny.en
 
-The application downloads Whisper tiny into `$THASHU_MODELS_DIR/whisper/` when speech recognition initializes. To fetch it now:
+The application downloads Whisper tiny.en into `$THASHU_MODELS_DIR/whisper/` when speech recognition initializes. To fetch it now:
 
 ```bash
 python -c 'from voice.speech_to_text import _get_model; _get_model()'
