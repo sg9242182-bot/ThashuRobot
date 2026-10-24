@@ -226,8 +226,7 @@ def stop_motion():
         return motors.stop()
 
 
-def announce_obstacle_stop():
-    message = "I stopped because an obstacle was detected."
+def announce_safety_message(message):
     print(f"[SAFETY] {message}")
     wake.lock()
     audio.pause()
@@ -236,7 +235,7 @@ def announce_obstacle_stop():
         speak(message)
         time.sleep(0.6)
     except Exception as exc:
-        print(f"[SAFETY] Could not speak obstacle stop: {exc}")
+        print(f"[SAFETY] Could not speak safety message: {exc}")
     finally:
         audio.resume()
         wake.unlock()
@@ -246,7 +245,9 @@ def announce_obstacle_stop():
 def process_safety_events():
     for event in motors.gpio.drain_events():
         if event == "EVENT|0|STOP|OBSTACLE":
-            announce_obstacle_stop()
+            announce_safety_message("I stopped because an obstacle was detected.")
+        elif event == "EVENT|0|BLOCKED|OBSTACLE":
+            announce_safety_message("I can't move because an obstacle was detected.")
         elif event.startswith("FAULT|"):
             print(f"[ESP32] {event}")
 
