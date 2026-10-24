@@ -63,7 +63,7 @@ void CommunicationManager::handle(char* line) {
             const bool obstacleDetected = safety->obstacleDetectedFor(motion);
             motors->stop(); safety->setActiveMotion(SafetyManager::STOPPED, 0);
             acknowledge(sequence, "ERROR|SAFETY_STOP");
-            if (obstacleDetected) Serial.println("EVENT|0|STOP|OBSTACLE");
+            if (obstacleDetected) Serial.println("EVENT|0|BLOCKED|OBSTACLE");
             return;
         }
         if (speed == 0) motors->stop();
