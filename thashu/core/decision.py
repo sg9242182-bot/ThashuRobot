@@ -102,6 +102,34 @@ def get_forward_speed(user_input: str):
     return level, _FORWARD_SPEEDS[level]
 
 
+_DIRECTION_COMMANDS = {
+    "backward": "BACKWARD",
+    "go backward": "BACKWARD",
+    "move backward": "BACKWARD",
+    "drive backward": "BACKWARD",
+    "back up": "BACKWARD",
+    "go back": "BACKWARD",
+    "move back": "BACKWARD",
+    "reverse": "BACKWARD",
+    "turn left": "LEFT",
+    "turn to the left": "LEFT",
+    "rotate left": "LEFT",
+    "spin left": "LEFT",
+    "left turn": "LEFT",
+    "turn right": "RIGHT",
+    "turn to the right": "RIGHT",
+    "rotate right": "RIGHT",
+    "spin right": "RIGHT",
+    "right turn": "RIGHT",
+}
+
+
+def get_direction_command(user_input: str):
+    """Return a deterministic reverse/turn action for an exact spoken phrase."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", (user_input or "").lower()).strip()
+    return _DIRECTION_COMMANDS.get(normalized)
+
+
 def is_forward_command(user_input: str) -> bool:
     """Accept only explicit forward phrases with an optional recognized speed."""
     return get_forward_speed(user_input) is not None
