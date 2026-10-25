@@ -440,7 +440,7 @@ Implementation and validation note (2026-10-17): Updated `thashu/vision/vision_c
 
 Phase 5 — Commanded Follow Mode & Face Tracking
 
-Status: IN PROGRESS — architecture audit complete; existing-code integration and software validation are underway. Target-distance calibration, obstacle-reroute validation, and physical acceptance remain open.
+Status: IN PROGRESS — architecture audit and servo-only follow implementation are complete; Pi hardware validation, calibrated chassis following, obstacle rerouting, and physical acceptance remain open.
 
 Architecture audit (2026-10-25):
 - `VisionCore` is perception-only and pauses inference outside IDLE, preserving Phase 4. It currently publishes face boxes/names/presence, but not track IDs or observation timestamps.
@@ -478,12 +478,12 @@ Movement, servo, and safety behavior:
 - Manual movement commands must have a defined precedence: stop follow before taking manual control; STOP always wins. Follow mode must never override voice STOP or a safety stop.
 - Do not store face images, embeddings, or identity associations for follow mode unless a separate user-approved memory requirement explicitly authorizes it.
 
-Existing files to inspect/reuse before editing:
-- `thashu/main.py` and `core/state.py` / supervisor integration
-- `thashu/vision/vision_core.py`, `vision/tracker.py`, `vision/follow_logic.py`
-- `thashu/hardware/servo_tracking.py`, `hardware/motors.py`, `hardware/gpio_control.py`
-- ESP32 servo, motor, communication, and safety managers
-- Existing voice parsing, event, and test patterns
+Existing files inspected/reused:
+- \\[x] `thashu/main.py` and `core/state.py` / supervisor integration
+- \\[x] `thashu/vision/vision_core.py`, `vision/tracker.py`, `vision/follow_logic.py`
+- \\[x] `thashu/hardware/servo_tracking.py`, `hardware/motors.py`, `hardware/gpio_control.py`
+- \\[x] ESP32 servo, motor, communication, and safety managers
+- \\[x] Existing voice parsing, event, and test patterns
 
 Required failure and interaction cases:
 - startup/restart while follow was active; follow must remain OFF after reboot
@@ -515,6 +515,19 @@ Acceptance:
 \[ ] Vision remains perception-only; hardware commands use existing controller interfaces and ESP32 safety.
 \[ ] Voice interaction, manual commands, STOP, stale sensors, camera faults, and serial loss all preempt or safely stop following. An obstacle triggers an immediate stop, then only a fresh-sensor-verified bounded reroute; when no safe route can be verified, the robot remains stopped and reports why.
 \[ ] Automated tests, Pi integration tests, and controlled physical acceptance pass; no checklist box is checked from code inspection alone.
+
+
+Implementation snapshot (2026-10-26): Reused existing files; no new runtime module was introduced.
+- `thashu/core/decision.py`: added exact “follow me”, “stop following”, and unique left/center/right selection phrases. These dispatch deterministically before Brain/LLM.
+- `thashu/vision/follow_logic.py`: added OFF-by-default follow session state, fresh-frame checks, unique target selection, no silent target transfer, and one-shot stop/notice decisions. Any target loss, ambiguity, or stale frame requires an explicit reselection; no face images or embeddings are stored.
+- `thashu/vision/tracker.py`: added bounded centroid association plus overlap/crossing ambiguity flags.
+- `thashu/vision/vision_core.py` and `thashu/vision/camera.py`: publish short-lived face track IDs, ambiguity, frame dimensions, and capture timestamps; clear failed/stale camera frames. VisionCore remains perception-only and IDLE-gated.
+- `thashu/hardware/servo_tracking.py`: align Pi pan/tilt bounds with ESP32 ServoManager limits.
+- `thashu/main.py`: integrate explicit follow commands, servo tracking only while follow mode is enabled and runtime is IDLE, stop follow before any voice interaction, and stop/report on controller-link loss. Multiple faces prompt for a unique left/center/right choice.
+- `thashu/tests/test_follow_mode.py`: added exact-command, target-selection, ambiguity, target-loss, stale-frame, and tracker tests.
+- `thashu/tests/test_vision_lifecycle.py`: verifies published short-lived track IDs and capture freshness while preserving the no-actuator VisionCore contract.
+- Verification on a temporary mirror of the branch source: Python compile checks passed; 10 follow-mode tests passed; 5 vision lifecycle tests passed. Raspberry Pi camera/servo tests have not been run.
+- Chassis motion is intentionally absent from this implementation tranche. No verified mapping connects the selected face to a fixed ToF beam or a safe follow-distance band. The existing ESP32 interlocks also require all front ToFs and rear sonar clear for turns. Implement and physically validate short motion leases, target-distance hysteresis, sensor-verified retreat/turn/recheck rerouting, and no-safe-route stop/report before enabling wheel follow. Do not mark chassis-follow or obstacle-reroute acceptance complete.
 
 \---
 
