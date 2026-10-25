@@ -339,6 +339,7 @@ def announce_follow_notice(notice):
         "target_ambiguous": "I can't tell which person you selected. Following is stopped; say follow me again to choose.",
         "reselect_target": "I couldn't safely reacquire the same person. Say follow me again to select a target.",
         "stale_frame": "The camera feed is stale, so I stopped following.",
+        "link_lost": "I lost the motor and servo controller connection, so follow mode stopped.",
     }
     message = messages.get(notice)
     if not message:
@@ -367,6 +368,12 @@ def update_follow_from_vision(snapshot):
         print(f"[FOLLOW] No safe target action; STOP sent (sequence {sequence})")
     target = decision["target"]
     if target is not None:
+        if not motors.gpio.is_connected():
+            follow_logic.stop()
+            sequence = stop_motion()
+            print(f"[FOLLOW] Controller link lost; follow stopped (STOP sequence {sequence})")
+            announce_follow_notice("link_lost")
+            return
         frame_w, frame_h = snapshot.get("frame_size", (640, 480))
         x, y = target["center"]
         servo_tracker.update(x, y, frame_w, frame_h)
