@@ -115,6 +115,12 @@ class VisionCore:
             self._running = False
             self._processing_enabled.clear()
             self.camera.stop()
+            with self._lock:
+                self.current_faces = []
+                self.current_names.clear()
+                self.current_tracks = []
+                self.latest_frame_at = None
+                self.person_present = False
             thread = self._thread
 
         if thread is not None and thread is not threading.current_thread():
