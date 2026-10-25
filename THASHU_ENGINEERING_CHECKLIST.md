@@ -356,7 +356,7 @@ Acceptance:
 
 Phase 3 — Voice → Command → Hardware
 
-Status: IN PROGRESS — stationary voice STOP dispatch passed; a bounded forward command is implemented for active-motion STOP testing. Movement and safety acceptance remain pending.
+Status: COMPLETE — Phase 3 movement, STOP, and safety acceptance verified by the user on the Raspberry Pi/robot (2026-10-25).
 
 Tasks:
 
@@ -368,21 +368,21 @@ Tasks:
 
 \[x] Keep the LLM out of the actuator command path; voice STOP dispatch is deterministic.
 
-\[ ] Validate movement commands.
+\[x] Validate movement commands — forward, backward, left, right, and slow/medium/fast operation verified by the user.
 
-\[ ] Validate unsafe command rejection.
+\[x] Validate unsafe command rejection — obstacle stops and safety rejection behavior verified by the user.
 
-Implementation note (2026-10-23): `thashu/core/decision.py` now recognizes a bounded set of explicit STOP phrases instead of matching any incidental use of “stop”. `thashu/main.py` dispatches those phrases through `MotorController.stop()` before Brain/LLM handling, and reports whether the serial frame could be sent. `thashu/hardware/motors.py` returns the transport sequence result. No movement commands were changed. User-reported Pi test (2026-10-25): voice STOP recognition and command dispatch passed with the robot stationary. Strictly matched forward commands now use Pi-side PWM presets: slow 150, medium 200, and fast 255; plain “forward” defaults to medium. Commands schedule a Pi-side STOP after 30 seconds, and explicit STOP cancels the timer and sends STOP immediately. ESP32 obstacle protection can stop motion sooner. PWM 100 was unreliable in the user's motor tests, so the slow preset starts above it. These are PWM levels, not calibrated wheel speeds; verify all four motors start reliably at slow and retain the desired speed separation on the chassis. ESP32 encoder PID and front/rear safety checks remain authoritative. The ESP32 emits `EVENT|0|STOP|OBSTACLE` when an obstacle stops active motion and `EVENT|0|BLOCKED|OBSTACLE` when an obstacle prevents motion from starting. Pi GPIOControl queues these events; main.py speaks the matching stopped/blocked report. The user must verify the spoken reports for front and rear obstacle cases on hardware. Active-motion STOP, movement ACK/rejection behavior, and no-link behavior still require hardware validation. Whisper was switched from multilingual `tiny` to English-only `tiny.en` after the user observed an incorrect transcript for “move forward”; verify normal speech and movement phrases on the Pi because no hardware transcript retest has run yet.
+Implementation note (2026-10-23): `thashu/core/decision.py` now recognizes a bounded set of explicit STOP phrases instead of matching any incidental use of “stop”. `thashu/main.py` dispatches those phrases through `MotorController.stop()` before Brain/LLM handling, and reports whether the serial frame could be sent. `thashu/hardware/motors.py` returns the transport sequence result. No movement commands were changed. User-reported Pi test (2026-10-25): voice STOP recognition and command dispatch passed with the robot stationary. Strictly matched forward commands now use Pi-side PWM presets: slow 150, medium 200, and fast 255; plain “forward” defaults to medium. Commands schedule a Pi-side STOP after 30 seconds, and explicit STOP cancels the timer and sends STOP immediately. ESP32 obstacle protection can stop motion sooner. PWM 100 was unreliable in the user's motor tests, so the slow preset starts above it. These are PWM levels, not calibrated wheel speeds; verify all four motors start reliably at slow and retain the desired speed separation on the chassis. ESP32 encoder PID and front/rear safety checks remain authoritative. The ESP32 emits `EVENT|0|STOP|OBSTACLE` when an obstacle stops active motion and `EVENT|0|BLOCKED|OBSTACLE` when an obstacle prevents motion from starting. Pi GPIOControl queues these events; main.py speaks the matching stopped/blocked report. User-reported Raspberry Pi/robot validation (2026-10-25): movement commands for forward, backward, left, and right worked, including the Whisper turn-phrase aliases; slow/medium/fast presets and the 30-second automatic stop were confirmed. An obstacle stopped active movement and Thashu announced the reason; voice STOP during motion stopped the motors and vision did not restart them. Unsafe movement was rejected under the tested safety conditions with an audible explanation. The user confirms all four Phase 3 acceptance criteria passed. The Pi serial reconnect behavior had earlier shown repeated two-second receive-silence reconnects; that was not part of this Phase 3 acceptance confirmation and remains a separate reliability item if it recurs.
 
 Acceptance:
 
-\[ ] Voice STOP physically stops motors.
+\[x] Voice STOP physically stops motors.
 
-\[ ] STOP cannot be overridden by vision following.
+\[x] STOP cannot be overridden by vision following.
 
-\[ ] Movement commands reach ESP32 correctly.
+\[x] Movement commands reach ESP32 correctly.
 
-\[ ] Safety restrictions are enforced.
+\[x] Safety restrictions are enforced.
 
 \---
 
@@ -832,7 +832,7 @@ Phase 1	2026-10-23	Complete — integrated controller and direct Pi USB-serial t
 
 Phase 2	2026-10-23	Complete — runtime supervisor/state machine verified; user confirms hardware safety remains active across states.
 
-Phase 3	—	—
+Phase 3	2026-10-25	Complete — movement directions and speeds, bounded auto-stop, active voice STOP, vision non-override, obstacle stop announcements, and unsafe command rejection verified by user.
 
 Phase 4	2026-10-23	Vision lifecycle software and Raspberry Pi acceptance passed (user-reported; logged 2026-10-23).
 
