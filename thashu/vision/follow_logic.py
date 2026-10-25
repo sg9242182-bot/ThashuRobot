@@ -25,6 +25,7 @@ class FollowLogic:
         self._lost_since = None
         self._reacquire_frames = 0
         self._notice_latched = set()
+        self._stop_latched = False
 
     def start(self):
         """Enable follow mode, but defer target choice until fresh perception arrives."""
@@ -35,6 +36,7 @@ class FollowLogic:
         self._lost_since = None
         self._reacquire_frames = 0
         self._notice_latched.clear()
+        self._stop_latched = False
 
     def stop(self):
         """Disable follow mode and discard the session target."""
@@ -46,6 +48,7 @@ class FollowLogic:
         self._lost_since = None
         self._reacquire_frames = 0
         self._notice_latched.clear()
+        self._stop_latched = False
         return was_enabled
 
     def request_region(self, region):
@@ -56,6 +59,7 @@ class FollowLogic:
         self.pending_region = region
         self.state = self.SELECTING_TARGET
         self._notice_latched.discard("selection_required")
+        self._notice_latched.discard("selection_not_unique")
         return True
 
     def _notice_once(self, key):
@@ -63,6 +67,11 @@ class FollowLogic:
             return None
         self._notice_latched.add(key)
         return key
+
+    def _request_stop_once(self, result):
+        if not self._stop_latched:
+            result["stop_motion"] = True
+            self._stop_latched = True
 
     @staticmethod
     def _region_for(face, frame_width):
@@ -92,8 +101,7 @@ class FollowLogic:
             return None, None
         size = snapshot.get("frame_size") or (self.frame_w, self.frame_h)
         width = int(size[0]) if size and size[0] else self.frame_w
-        faces = snapshot.get("faces") or []
-        return faces, width
+        return snapshot.get("faces") or [], width
 
     def _choose(self, faces, width, region=None):
         candidates = [
@@ -101,9 +109,7 @@ class FollowLogic:
             if self._valid_face(face)
             and (region is None or self._region_for(face, width) == region)
         ]
-        if len(candidates) != 1:
-            return None
-        return candidates[0]
+        return candidates[0] if len(candidates) == 1 else None
 
     def update(self, snapshot, runtime_idle=True, now=None):
         """Return a target/stop/notice decision from one perception snapshot.
@@ -112,12 +118,7 @@ class FollowLogic:
         target never gets replaced silently by another face.
         """
         now = time.monotonic() if now is None else now
-        result = {
-            "state": self.state,
-            "target": None,
-            "stop_motion": False,
-            "notice": None,
-        }
+        result = {"state": self.state, "target": None, "stop_motion": False, "notice": None}
         if not self.enabled:
             return result
         if not runtime_idle:
@@ -127,8 +128,16 @@ class FollowLogic:
 
         faces, width = self._fresh_faces(snapshot or {}, now)
         if faces is None:
-            result.update(stop_motion=self.state in (self.TRACKING, self.TARGET_LOST))
-            result["notice"] = self._notice_once("stale_frame")
+            if self.state in (self.TRACKING, self.TARGET_LOST):
+                if self.state == self.TRACKING:
+                    self.state = self.TARGET_LOST
+                    self._lost_since = now
+                    self._reacquire_frames = 0
+                self._request_stop_once(result)
+                result.update(
+                    state=self.state,
+                    notice=self._notice_once("stale_frame"),
+                )
             return result
 
         if self.state == self.WAITING_FOR_TARGET:
@@ -140,33 +149,28 @@ class FollowLogic:
                 self.target_id = selected["track_id"]
                 self.state = self.TRACKING
                 self._notice_latched.clear()
+                self._stop_latched = False
                 result.update(state=self.state, target=selected)
                 return result
             self.state = self.SELECTING_TARGET
-            result.update(
-                state=self.state,
-                notice=self._notice_once("selection_required"),
-            )
+            result.update(state=self.state, notice=self._notice_once("selection_required"))
             return result
 
         if self.state == self.SELECTING_TARGET:
             if self.pending_region is None:
-                result.update(
-                    notice=self._notice_once("selection_required"),
-                )
+                result.update(notice=self._notice_once("selection_required"))
                 return result
             selected = self._choose(faces, width, self.pending_region)
             self.pending_region = None
             if selected is None:
-                result.update(
-                    notice=self._notice_once("selection_not_unique"),
-                )
+                result.update(notice=self._notice_once("selection_not_unique"))
                 return result
             self.target_id = selected["track_id"]
             self.state = self.TRACKING
             self._lost_since = None
             self._reacquire_frames = 0
             self._notice_latched.clear()
+            self._stop_latched = False
             result.update(state=self.state, target=selected)
             return result
 
@@ -184,9 +188,9 @@ class FollowLogic:
             self.state = self.NEEDS_RESELECTION
             result.update(
                 state=self.state,
-                stop_motion=True,
                 notice=self._notice_once("target_ambiguous"),
             )
+            self._request_stop_once(result)
             return result
 
         if self.state == self.TRACKING:
@@ -194,13 +198,11 @@ class FollowLogic:
                 self.state = self.TARGET_LOST
                 self._lost_since = now
                 self._reacquire_frames = 0
-                result.update(
-                    state=self.state,
-                    stop_motion=True,
-                    notice=self._notice_once("target_lost"),
-                )
+                result.update(state=self.state, notice=self._notice_once("target_lost"))
+                self._request_stop_once(result)
                 return result
             self._notice_latched.discard("target_lost")
+            self._stop_latched = False
             result.update(state=self.state, target=matching)
             return result
 
@@ -212,6 +214,7 @@ class FollowLogic:
                     self._lost_since = None
                     self._reacquire_frames = 0
                     self._notice_latched.clear()
+                    self._stop_latched = False
                     result.update(state=self.state, target=matching)
                     return result
             elif self._lost_since is not None and now - self._lost_since >= self.TARGET_LOSS_GRACE_SECONDS:
@@ -222,7 +225,7 @@ class FollowLogic:
                     notice=self._notice_once("reselect_target"),
                 )
                 return result
-            result.update(state=self.state, stop_motion=True)
+            self._request_stop_once(result)
             return result
 
         return result
