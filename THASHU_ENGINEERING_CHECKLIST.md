@@ -440,7 +440,17 @@ Implementation and validation note (2026-10-17): Updated `thashu/vision/vision_c
 
 Phase 5 — Commanded Follow Mode & Face Tracking
 
-Status: PLANNED — requirements and edge cases are documented here; implementation must not begin until this phase scope is reviewed.
+Status: IN PROGRESS — architecture audit complete; existing-code integration and software validation are underway. Target-distance calibration, obstacle-reroute validation, and physical acceptance remain open.
+
+Architecture audit (2026-10-25):
+- `VisionCore` is perception-only and pauses inference outside IDLE, preserving Phase 4. It currently publishes face boxes/names/presence, but not track IDs or observation timestamps.
+- `CentroidTracker` uses nearest-centroid greedy matching with no distance gate or ambiguity signal. A crossing/overlap can silently change target identity. Existing `FollowLogic` chooses the largest face and is not safe for this phase; it is not currently wired into the Phase 4 `VisionCore` or main actuator path.
+- `ServoTracker` exists but is not instantiated by `main.py`. Its Pi angle limits (30–150°) differ from ESP32 `ServoManager` limits (45–135°); control must be clamped consistently before physical servo testing.
+- Voice movement handling in `main.py` is deterministic and exact-phrase based; no follow-mode command/state exists. `RuntimeStateMachine` already pauses vision outside IDLE, so follow must stop chassis motion on transition and require fresh target/sensor validation before resuming.
+- `GPIOControl` receives sensor telemetry but exposes no timestamped sensor snapshot for follow decisions. ESP32 `SafetyManager` is authoritative and fails closed: forward/turning require all three front ToF readings clear; reverse/turning require rear ultrasonic clear. Any alternate-route maneuver must stay within those interlocks; if the sensors cannot verify it, stop and report blocked.
+- Motor commands persist until STOP. The current Pi heartbeat is independent of command generation, so follow needs bounded command leases/automatic stops; ordinary heartbeat alone is not a movement lease.
+- The ToFs are fixed front sensors, and no verified mapping from a selected camera target to an individual ToF beam or calibrated follow-distance hysteresis is recorded. Therefore chassis follow must remain disabled until target-range mapping, limits, and short-step behavior pass physical calibration. Servo-only tracking can be validated independently.
+
 
 Purpose:
 Provide a deliberate, safe follow mode using the existing face-perception and actuator architecture. Face detection alone must never start movement or servo tracking. Follow mode starts only after an explicit voice command such as “follow me.”
