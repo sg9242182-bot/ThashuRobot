@@ -305,9 +305,11 @@ def announce_safety_message(message):
 def process_safety_events():
     for event in motors.gpio.drain_events():
         if event == "EVENT|0|STOP|OBSTACLE":
-            announce_safety_message("Obstacle detected. Stopping.")
+            # This is an asynchronous ESP32 safety event; announce it in IDLE too,
+            # without waiting for a wake word or an active conversation.
+            announce_safety_message("I stopped because an obstacle was detected.")
         elif event == "EVENT|0|BLOCKED|OBSTACLE":
-            announce_safety_message("Obstacle detected. I can't move.")
+            announce_safety_message("I can't move because an obstacle was detected.")
         # EVENT and FAULT lines are logged immediately by GPIOControl's reader thread.
 
 
