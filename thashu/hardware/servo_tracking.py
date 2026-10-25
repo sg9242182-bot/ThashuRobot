@@ -10,10 +10,10 @@ class ServoTracker:
         self.pan  = 90.0
         self.tilt = 90.0
  
-        self.pan_min  = 30
-        self.pan_max  = 150
-        self.tilt_min = 50
-        self.tilt_max = 130
+        self.pan_min  = 45
+        self.pan_max  = 135
+        self.tilt_min = 30
+        self.tilt_max = 135
  
         self.smooth   = 0.3
         self.max_step = 6
