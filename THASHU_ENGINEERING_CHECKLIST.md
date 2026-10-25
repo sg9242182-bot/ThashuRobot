@@ -464,7 +464,7 @@ Movement, servo, and safety behavior:
 - Servo tracking must have calibrated direction, center/dead zones, hard angle limits, rate limits, smoothing, and loss-of-target behavior; it must not oscillate or drive into mechanical stops.
 - Chassis movement requires a reliable target-distance estimate and calibrated follow-distance hysteresis. Face-box size alone is not accepted as a safe distance measurement without calibration. If distance cannot be established or validated, ship servo-only tracking and keep chassis follow disabled until that requirement passes.
 - Define bounded follow speed/acceleration and command refresh/lease behavior. Loss of target, stale camera frames, stale sensor data, ESP32 link loss, invalid safety readings, STOP, or controller errors must stop chassis motion; no stale command may persist.
-- Front ToF and rear ultrasonic checks remain in force. A safety stop must cancel follow movement, be logged once, and be announced without repeated spam.
+- Front ToF and rear ultrasonic checks remain in force. When an obstacle blocks the current route, the ESP32 must stop motion immediately. Follow mode may then attempt a bounded reroute around the obstacle, like a cautious obstacle-avoiding robot, only after the candidate route is positively checked by fresh sensor coverage. Use the three front ToF readings to compare left/center/right clearance; never assume an unseen side path is clear. If the geometry requires turning or reversing, validate the swept path with available sensors before moving; rear ultrasonic is required before any reverse motion. Use low bounded speed, short motion leases, and re-check sensors after each short step. Preserve the selected person target and do not reacquire a different person during rerouting. If no verified safe route is available, readings are stale/ambiguous, target identity is uncertain, or the route cannot be checked, remain stopped, announce that the obstacle blocks following, and wait for a clear path or explicit human intervention. Never route around an obstacle by bypassing ESP32 interlocks, stale-sensor checks, STOP, or manual-control precedence. A safety stop/reroute event must be logged and announced once without repeated spam.
 - Manual movement commands must have a defined precedence: stop follow before taking manual control; STOP always wins. Follow mode must never override voice STOP or a safety stop.
 - Do not store face images, embeddings, or identity associations for follow mode unless a separate user-approved memory requirement explicitly authorizes it.
 
@@ -482,7 +482,7 @@ Required failure and interaction cases:
 - STOP during servo tracking and during chassis movement
 - explicit manual command while following
 - wake/listen/think/speak transitions while following; motion stops and does not resume without fresh validation
-- obstacle stop, invalid/stale ToF or ultrasonic reading, and ESP32 serial loss/recovery
+- obstacle stop followed by a sensor-verified bounded left/right reroute, no-safe-route fallback, invalid/stale ToF or ultrasonic reading, and ESP32 serial loss/recovery
 - camera, vision worker, servo, motor controller, or audio-command failure
 - repeated detections/events must not cause command/audio spam or rapid direction oscillation
 
@@ -491,7 +491,7 @@ Verification plan:
 - Mocked integration tests proving VisionCore emits perception only, no actuation occurs while mode is OFF, all actions use existing hardware controllers, STOP preempts following, and stale/lost target stops movement.
 - Pi camera tests with one and multiple people, including crossing/occlusion and explicit target selection.
 - Servo bench tests for direction, limits, center/dead zone, smoothing, and sustained tracking.
-- Wheels-raised chassis tests for bounded speed, follow-distance hysteresis, target loss, voice STOP, obstacles, stale sensors, and serial disconnect/recovery.
+- Wheels-raised chassis tests for bounded speed, follow-distance hysteresis, target loss, voice STOP, obstacle stop-and-reroute choices, side-path clearance checks, rear-clearance validation before reversing, no-safe-route fallback, stale sensors, and serial disconnect/recovery.
 - Controlled floor tests only after bench and safety tests pass; verify no target switching and no obstacle/sensor bypass.
 - Record actual Pi/ESP32 versions, tested sensor states, observed logs, and user-reported physical results before checking acceptance.
 
@@ -503,7 +503,7 @@ Acceptance:
 \[ ] Servo tracking passes direction, limits, stability, and target-loss tests.
 \[ ] Chassis following stays within validated distance/speed bounds; if distance estimation is not validated, chassis following remains disabled.
 \[ ] Vision remains perception-only; hardware commands use existing controller interfaces and ESP32 safety.
-\[ ] Voice interaction, manual commands, STOP, obstacle stops, stale sensors, camera faults, and serial loss all preempt or safely stop following.
+\[ ] Voice interaction, manual commands, STOP, stale sensors, camera faults, and serial loss all preempt or safely stop following. An obstacle triggers an immediate stop, then only a fresh-sensor-verified bounded reroute; when no safe route can be verified, the robot remains stopped and reports why.
 \[ ] Automated tests, Pi integration tests, and controlled physical acceptance pass; no checklist box is checked from code inspection alone.
 
 \---
