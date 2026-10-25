@@ -899,3 +899,6 @@ Movement voice update (2026-10-25): `thashu/main.py` now uses short fixed replie
 
 
 Motor command sequence-return fix (2026-10-25): `thashu/hardware/motors.py` now returns GPIOControl's serial sequence from `backward()`, `left()`, and `right()`, matching `forward()`. Previously those commands were sent but returned `None`, causing main.py to report a disconnected ESP32 and skip its bounded auto-stop timer. Pi software fix only; no ESP32 firmware change. Directional hardware acceptance remains pending.
+
+
+Motion ACK/safety diagnosis (2026-10-25): Updated `thashu/hardware/gpio_control.py` to associate command ACKs by sequence and log ESP32 errors. `thashu/main.py` now says movement began only after an `ACK|sequence|OK`; on missing/error ACK it cancels the Pi motion timer, sends STOP, and reports the reason. Both `ESP32Firmware/ThashuController/communication_manager.cpp` and `ESP32Firmware/communicationmanager/communication_manager.cpp` now distinguish a detected obstacle (`ERROR|OBSTACLE`) from invalid/stale safety sensor data (`ERROR|SENSOR_NOT_READY`); an actual blocked obstacle also retains the BLOCKED event for spoken reporting. This preserves fail-safe reverse behavior when rear ultrasonic data is unavailable. Pi tests, integrated ESP32 build/upload, and hardware validation remain pending; movement and safety acceptance boxes remain unchecked.
