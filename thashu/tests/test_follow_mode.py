@@ -2,6 +2,7 @@ import unittest
 
 from core.decision import get_follow_command
 from vision.follow_logic import FollowLogic
+from vision.tracker import CentroidTracker
 
 
 def face(track_id, x, ambiguous=False):
@@ -26,6 +27,25 @@ class FollowCommandTests(unittest.TestCase):
         self.assertEqual(get_follow_command("follow the person on the right"), "RIGHT")
         self.assertIsNone(get_follow_command("I want you to follow me later"))
         self.assertIsNone(get_follow_command("move forward"))
+
+
+class CentroidTrackerSafetyTests(unittest.TestCase):
+    def test_close_or_crossing_tracks_are_marked_ambiguous(self):
+        tracker = CentroidTracker(overlap_distance=70.0)
+        tracker.update([(130, 80, 170, 120), (230, 80, 270, 120)])
+        self.assertEqual(tracker.last_ambiguous_ids, set())
+
+        tracker.update([(150, 80, 190, 120), (210, 80, 250, 120)])
+        self.assertEqual(tracker.last_ambiguous_ids, {0, 1})
+
+    def test_large_jump_creates_new_track_instead_of_relabeling(self):
+        tracker = CentroidTracker(max_match_distance=100.0)
+        tracker.update([(0, 0, 40, 40)])
+        old_id = tracker.last_assignments[0]
+
+        tracker.update([(300, 0, 340, 40)])
+        self.assertNotEqual(tracker.last_assignments[0], old_id)
+        self.assertEqual(tracker.last_assignments[0], 1)
 
 
 class FollowLogicTests(unittest.TestCase):
