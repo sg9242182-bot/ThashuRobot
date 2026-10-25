@@ -95,8 +95,9 @@ class GPIOControl:
 
         # Keep the current device while it still exists, then prefer an ESP32
         # description. USB port numbers can change after a disconnect.
+        current_realpath = os.path.realpath(self._port) if self._port else None
         for device, _, _ in candidates:
-            if device == self._port:
+            if current_realpath and os.path.realpath(device) == current_realpath:
                 return self._stable_device_path(device)
         for device, description, manufacturer in candidates:
             if "esp32" in description or "espressif" in description or "esp32" in manufacturer:
