@@ -49,6 +49,9 @@ class VisionCore:
         self._tracker_reset_pending = False
         self.current_faces = []
         self.current_names = {}
+        self.current_tracks = []
+        self.latest_frame_at = None
+        self.frame_size = (640, 480)
         self.person_present = False
         self._reported_face_count = 0
 
@@ -78,6 +81,8 @@ class VisionCore:
         with self._lock:
             self.current_faces = []
             self.current_names.clear()
+            self.current_tracks = []
+            self.latest_frame_at = None
             self.person_present = False
             self._reported_face_count = 0
             self._tracker_reset_pending = True
@@ -124,25 +129,17 @@ class VisionCore:
         print("[VISION] Stopped")
 
     def get_state(self) -> dict:
-        """Thread-safe state read for main/brain."""
+        """Return perception and short-lived tracking metadata, never actuators."""
         with self._lock:
             persons = []
-            for (x1, y1, x2, y2) in self.current_faces:
-                cx = (x1 + x2) // 2
-                cy = (y1 + y2) // 2
-
-                closest_id = None
-                if self.current_names:
-                    closest_id = min(
-                        self.current_names.keys(),
-                        key=lambda i: abs(self.tracker.objects.get(i, (cx, cy))[0] - cx)
-                                    + abs(self.tracker.objects.get(i, (cx, cy))[1] - cy)
-                    )
-                name = self.current_names.get(closest_id, "Unknown") if closest_id else "Unknown"
-
+            for tracked in self.current_tracks:
+                track_id = tracked.get("track_id")
+                name = self.current_names.get(track_id, "Unknown")
                 persons.append({
-                    "bbox": (x1, y1, x2, y2),
-                    "center": (cx, cy),
+                    "bbox": tracked["bbox"],
+                    "center": tracked["center"],
+                    "track_id": track_id,
+                    "ambiguous": tracked.get("ambiguous", True),
                     "name": name,
                     "is_owner": name not in ("Unknown", None),
                 })
@@ -151,6 +148,8 @@ class VisionCore:
                 "faces": persons,
                 "names": dict(self.current_names),
                 "present": self.person_present,
+                "observed_at": self.latest_frame_at,
+                "frame_size": self.frame_size,
             }
 
     def _loop(self):
@@ -175,12 +174,21 @@ class VisionCore:
             if not self._processing_enabled.is_set():
                 continue
 
-            frame = self.camera.read()
+            if hasattr(self.camera, "read_with_timestamp"):
+                frame, frame_timestamp = self.camera.read_with_timestamp()
+            else:
+                frame = self.camera.read()
+                frame_timestamp = time.monotonic()
             if frame is None:
                 time.sleep(0.05)
                 continue
             if not self._processing_enabled.is_set():
                 continue
+
+            try:
+                frame_height, frame_width = frame.shape[:2]
+            except (AttributeError, TypeError, ValueError):
+                frame_width, frame_height = self.frame_size
 
             faces = self.detector.detect(frame)
             if not self._processing_enabled.is_set():
@@ -190,10 +198,14 @@ class VisionCore:
                 if not self._processing_enabled.is_set():
                     continue
                 tracked = self.tracker.update(faces)
+                assignments = dict(getattr(self.tracker, "last_assignments", {}) or {})
+                ambiguous_ids = set(getattr(self.tracker, "last_ambiguous_ids", set()) or ())
+                if not assignments and len(faces) == 1 and len(tracked) == 1:
+                    assignments[0] = next(iter(tracked))
 
             now = time.time()
             if now - last_recog > recog_interval and faces:
-                for (x1, y1, x2, y2) in faces:
+                for face_index, (x1, y1, x2, y2) in enumerate(faces):
                     if not self._processing_enabled.is_set():
                         break
                     face_img = frame[y1:y2, x1:x2]
@@ -201,17 +213,14 @@ class VisionCore:
                     if not self._processing_enabled.is_set():
                         break
 
-                    if embedding is not None and tracked:
-                        cx = (x1 + x2) // 2
-                        cy = (y1 + y2) // 2
-                        closest_id = min(
-                            tracked.keys(),
-                            key=lambda i: abs(tracked[i][0] - cx) + abs(tracked[i][1] - cy),
-                        )
+                    track_id = assignments.get(face_index)
+                    if track_id is None and len(tracked) == 1:
+                        track_id = next(iter(tracked))
+                    if embedding is not None and track_id is not None:
                         name, _score = self.database.match(embedding)
                         with self._lock:
                             if self._processing_enabled.is_set():
-                                self.current_names[closest_id] = name or "Unknown"
+                                self.current_names[track_id] = name or "Unknown"
 
                 last_recog = now
 
@@ -225,6 +234,19 @@ class VisionCore:
                 previous_count = self._reported_face_count
                 self._reported_face_count = face_count
                 self.current_faces = faces
+                self.current_tracks = []
+                for face_index, (x1, y1, x2, y2) in enumerate(faces):
+                    cx = (x1 + x2) // 2
+                    cy = (y1 + y2) // 2
+                    track_id = assignments.get(face_index)
+                    self.current_tracks.append({
+                        "bbox": (x1, y1, x2, y2),
+                        "center": (cx, cy),
+                        "track_id": track_id,
+                        "ambiguous": track_id is None or track_id in ambiguous_ids,
+                    })
+                self.latest_frame_at = frame_timestamp
+                self.frame_size = (frame_width, frame_height)
                 self.person_present = bool(faces)
 
             if face_count != previous_count:
