@@ -246,6 +246,46 @@ def stop_motion():
         return motors.stop()
 
 
+def confirm_motion_command(sequence, direction):
+    acknowledgement = motors.gpio.wait_for_ack(sequence, timeout=0.75)
+    if acknowledgement == "OK":
+        return True, None
+
+    if acknowledgement is None:
+        print(f"[COMMAND] No ESP32 acknowledgement for {direction}; sending STOP")
+        failure = "ACK_TIMEOUT"
+    else:
+        print(f"[COMMAND] ESP32 rejected {direction}: {acknowledgement}")
+        failure = {
+            "ERROR|OBSTACLE": "OBSTACLE",
+            "ERROR|SENSOR_NOT_READY": "SENSOR_NOT_READY",
+            "ERROR|SAFETY_STOP": "SAFETY_STOP",
+        }.get(acknowledgement, "REJECTED")
+
+    # The controller has either rejected the command or failed to confirm it.
+    # Cancel the Pi timer and issue a dedicated STOP as a fail-safe.
+    stop_motion()
+    return False, failure
+
+
+def motion_failure_response(direction, failure):
+    if failure == "OBSTACLE":
+        # The ESP32 also emits BLOCKED|OBSTACLE; process_safety_events speaks it.
+        return ""
+    if failure == "SENSOR_NOT_READY":
+        if direction == "BACKWARD":
+            return "My rear sensor isn't ready, so I can't move backward."
+        if direction in ("LEFT", "RIGHT"):
+            return "A safety sensor isn't ready, so I can't turn."
+        return "A front safety sensor isn't ready, so I can't move forward."
+    if failure == "SAFETY_STOP":
+        # Older firmware reports the obstacle detail as a BLOCKED event.
+        return ""
+    if failure == "ACK_TIMEOUT":
+        return "I couldn't confirm that move, so I stopped."
+    return "The motor controller rejected that command."
+
+
 def announce_safety_message(message):
     print(f"[SAFETY] {message}")
     wake.lock()
@@ -429,30 +469,42 @@ def main():
                         print("[COMMAND] FORWARD could not be sent; ESP32 link is unavailable")
                         response = "I couldn't reach the motor controller, so I can't move."
                     else:
-                        print(f"[COMMAND] FORWARD sent to ESP32 (sequence {move_sequence})")
-                        response = {
-                            "slow": "Forward slowly.",
-                            "medium": "Moving forward.",
-                            "fast": "Forward quickly.",
-                        }[speed_name]
+                        accepted, failure = confirm_motion_command(move_sequence, "FORWARD")
+                        if accepted:
+                            print(f"[COMMAND] FORWARD accepted by ESP32 (sequence {move_sequence})")
+                            response = {
+                                "slow": "Forward slowly.",
+                                "medium": "Moving forward.",
+                                "fast": "Forward quickly.",
+                            }[speed_name]
+                        else:
+                            response = motion_failure_response("FORWARD", failure)
                 elif (direction := get_direction_command(text)) is not None:
                     direction_name = direction.lower().replace("_", " ")
+                    duration = (
+                        TURN_COMMAND_DURATION_SECONDS
+                        if direction in ("LEFT", "RIGHT")
+                        else FORWARD_COMMAND_DURATION_SECONDS
+                    )
                     print(
                         f"[COMMAND] Explicit {direction_name.upper()} recognized "
-                        f"(PWM 200); auto-stop in "
-                        f"{TURN_COMMAND_DURATION_SECONDS if direction in ('LEFT', 'RIGHT') else FORWARD_COMMAND_DURATION_SECONDS:.0f}s"
+                        f"(PWM 200); auto-stop in {duration:.0f}s"
                     )
                     move_sequence = start_bounded_motion(direction, 200)
                     if move_sequence is None:
                         print(f"[COMMAND] {direction_name.upper()} could not be sent; ESP32 link is unavailable")
                         response = "I couldn't reach the motor controller."
                     else:
-                        print(f"[COMMAND] {direction_name.upper()} sent to ESP32 (sequence {move_sequence})")
-                        response = {
-                            "BACKWARD": "Moving backward.",
-                            "LEFT": "Turning left.",
-                            "RIGHT": "Turning right.",
-                        }[direction]
+                        accepted, failure = confirm_motion_command(move_sequence, direction)
+                        if accepted:
+                            print(f"[COMMAND] {direction_name.upper()} accepted by ESP32 (sequence {move_sequence})")
+                            response = {
+                                "BACKWARD": "Moving backward.",
+                                "LEFT": "Turning left.",
+                                "RIGHT": "Turning right.",
+                            }[direction]
+                        else:
+                            response = motion_failure_response(direction, failure)
                 else:
                     response = brain.process(text)
 
