@@ -102,6 +102,44 @@ def get_forward_speed(user_input: str):
     return level, _FORWARD_SPEEDS[level]
 
 
+
+_FOLLOW_START_PHRASES = {
+    "follow me",
+    "start following",
+    "start follow mode",
+    "follow that person",
+}
+_FOLLOW_STOP_PHRASES = {
+    "stop following",
+    "stop follow mode",
+    "cancel following",
+}
+_FOLLOW_SELECTION_PHRASES = {
+    "follow left": "LEFT",
+    "follow the person on the left": "LEFT",
+    "follow person on the left": "LEFT",
+    "select the person on the left": "LEFT",
+    "follow center": "CENTER",
+    "follow the person in the center": "CENTER",
+    "follow person in the center": "CENTER",
+    "select the person in the center": "CENTER",
+    "follow right": "RIGHT",
+    "follow the person on the right": "RIGHT",
+    "follow person on the right": "RIGHT",
+    "select the person on the right": "RIGHT",
+}
+
+
+def get_follow_command(user_input: str):
+    """Return an exact, deterministic follow-mode command or None."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", (user_input or "").lower()).strip()
+    if normalized in _FOLLOW_START_PHRASES:
+        return "START"
+    if normalized in _FOLLOW_STOP_PHRASES:
+        return "STOP"
+    return _FOLLOW_SELECTION_PHRASES.get(normalized)
+
+
 _DIRECTION_COMMANDS = {
     "backward": "BACKWARD",
     "go backward": "BACKWARD",
