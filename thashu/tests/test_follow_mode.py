@@ -49,6 +49,13 @@ class CentroidTrackerSafetyTests(unittest.TestCase):
 
 
 class FollowLogicTests(unittest.TestCase):
+    def test_off_mode_does_not_select_or_request_motion(self):
+        logic = FollowLogic()
+        result = logic.update(snapshot([face(9, 320)]), now=10.1)
+        self.assertEqual(result["state"], FollowLogic.OFF)
+        self.assertIsNone(result["target"])
+        self.assertFalse(result["stop_motion"])
+
     def setUp(self):
         self.logic = FollowLogic()
         self.logic.start()
