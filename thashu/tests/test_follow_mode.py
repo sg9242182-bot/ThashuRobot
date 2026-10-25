@@ -60,7 +60,7 @@ class FollowLogicTests(unittest.TestCase):
         self.assertFalse(result["stop_motion"])
 
     def test_multiple_faces_require_unique_region_selection(self):
-        faces = [face(1, 100), face(2, 400)]
+        faces = [face(1, 100), face(2, 500)]
         result = self.logic.update(snapshot(faces), now=10.1)
         self.assertEqual(result["state"], FollowLogic.SELECTING_TARGET)
         self.assertIsNone(result["target"])
@@ -70,7 +70,7 @@ class FollowLogicTests(unittest.TestCase):
         self.assertEqual(result["target"]["track_id"], 2)
 
     def test_duplicate_faces_in_requested_region_are_rejected(self):
-        faces = [face(1, 410), face(2, 500)]
+        faces = [face(1, 460), face(2, 550)]
         self.logic.update(snapshot(faces), now=10.1)
         self.logic.request_region("RIGHT")
         result = self.logic.update(snapshot(faces), now=10.2)
