@@ -335,11 +335,11 @@ def announce_follow_notice(notice):
         "no_target": "I don't see anyone to follow yet. Please move into view.",
         "selection_required": "I see several people. Say follow left, follow center, or follow right.",
         "selection_not_unique": "I can't identify one person in that direction. Please choose left, center, or right again.",
-        "target_lost": "I lost the selected person. I stopped tracking them.",
+        "target_lost": "I lost the selected person. I stopped tracking them. Say follow me again when they are visible to select again.",
         "target_ambiguous": "I can't tell which person you selected. Following is stopped; say follow me again to choose.",
         "reselect_target": "I couldn't safely reacquire the same person. Say follow me again to select a target.",
-        "stale_frame": "The camera feed is stale, so I stopped following.",
-        "link_lost": "I lost the motor and servo controller connection, so follow mode stopped.",
+        "stale_frame": "The camera feed is stale, so I stopped following. Say follow me again after the camera is working.",
+        "link_lost": "I lost the motor and servo controller connection, so follow mode stopped. Say follow me again after it reconnects.",
     }
     message = messages.get(notice)
     if not message:
