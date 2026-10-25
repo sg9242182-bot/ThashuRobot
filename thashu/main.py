@@ -279,8 +279,9 @@ def motion_failure_response(direction, failure):
             return "A safety sensor isn't ready, so I can't turn."
         return "A front safety sensor isn't ready, so I can't move forward."
     if failure == "SAFETY_STOP":
-        # Older firmware reports the obstacle detail as a BLOCKED event.
-        return ""
+        # Older firmware can reject with a generic safety code and omit the
+        # separate BLOCKED event. Give the user an audible, accurate reason.
+        return "The safety system stopped the move, so I didn't move. Check for an obstacle or sensor issue."
     if failure == "ACK_TIMEOUT":
         return "I couldn't confirm that move, so I stopped."
     return "The motor controller rejected that command."
