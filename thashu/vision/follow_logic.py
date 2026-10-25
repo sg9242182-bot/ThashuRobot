@@ -8,12 +8,9 @@ class FollowLogic:
     WAITING_FOR_TARGET = "WAITING_FOR_TARGET"
     SELECTING_TARGET = "SELECTING_TARGET"
     TRACKING = "TRACKING"
-    TARGET_LOST = "TARGET_LOST"
     NEEDS_RESELECTION = "NEEDS_RESELECTION"
 
     MAX_FRAME_AGE_SECONDS = 0.35
-    TARGET_LOSS_GRACE_SECONDS = 1.5
-    REACQUIRE_STABLE_FRAMES = 3
 
     def __init__(self, frame_w=640, frame_h=480):
         self.frame_w = frame_w
@@ -22,8 +19,6 @@ class FollowLogic:
         self.state = self.OFF
         self.target_id = None
         self.pending_region = None
-        self._lost_since = None
-        self._reacquire_frames = 0
         self._notice_latched = set()
         self._stop_latched = False
 
@@ -33,8 +28,6 @@ class FollowLogic:
         self.state = self.WAITING_FOR_TARGET
         self.target_id = None
         self.pending_region = None
-        self._lost_since = None
-        self._reacquire_frames = 0
         self._notice_latched.clear()
         self._stop_latched = False
 
@@ -45,8 +38,6 @@ class FollowLogic:
         self.state = self.OFF
         self.target_id = None
         self.pending_region = None
-        self._lost_since = None
-        self._reacquire_frames = 0
         self._notice_latched.clear()
         self._stop_latched = False
         return was_enabled
@@ -167,9 +158,7 @@ class FollowLogic:
                 return result
             self.target_id = selected["track_id"]
             self.state = self.TRACKING
-            self._lost_since = None
-            self._reacquire_frames = 0
-            self._notice_latched.clear()
+                    self._notice_latched.clear()
             self._stop_latched = False
             result.update(state=self.state, target=selected)
             return result
@@ -206,27 +195,6 @@ class FollowLogic:
             result.update(state=self.state, target=matching)
             return result
 
-        if self.state == self.TARGET_LOST:
-            if matching is not None:
-                self._reacquire_frames += 1
-                if self._reacquire_frames >= self.REACQUIRE_STABLE_FRAMES:
-                    self.state = self.TRACKING
-                    self._lost_since = None
-                    self._reacquire_frames = 0
-                    self._notice_latched.clear()
-                    self._stop_latched = False
-                    result.update(state=self.state, target=matching)
-                    return result
-            elif self._lost_since is not None and now - self._lost_since >= self.TARGET_LOSS_GRACE_SECONDS:
-                self.target_id = None
-                self.state = self.NEEDS_RESELECTION
-                result.update(
-                    state=self.state,
-                    notice=self._notice_once("reselect_target"),
-                )
-                return result
-            self._request_stop_once(result)
-            return result
 
         return result
 
