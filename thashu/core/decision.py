@@ -116,11 +116,16 @@ _DIRECTION_COMMANDS = {
     "rotate left": "LEFT",
     "spin left": "LEFT",
     "left turn": "LEFT",
+    # Common Whisper mis-transcriptions observed during turn-command tests.
+    "on left": "LEFT",
+    "done left": "LEFT",
     "turn right": "RIGHT",
     "turn to the right": "RIGHT",
     "rotate right": "RIGHT",
     "spin right": "RIGHT",
     "right turn": "RIGHT",
+    "on right": "RIGHT",
+    "done right": "RIGHT",
 }
 
 
