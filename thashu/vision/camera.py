@@ -11,6 +11,7 @@ class Camera:
 
         self.cap = None
         self.frame = None
+        self.frame_updated_at = None
         self.running = False
         self.lock = threading.Lock()
         self._lifecycle_lock = threading.Lock()
@@ -58,6 +59,9 @@ class Camera:
                 ret, frame = cap.read()
 
             if not ret:
+                with self.lock:
+                    self.frame = None
+                    self.frame_updated_at = None
                 if not self.running:
                     break
 
@@ -82,12 +86,20 @@ class Camera:
 
             with self.lock:
                 self.frame = frame
+                self.frame_updated_at = time.monotonic()
 
     def read(self):
         with self.lock:
             if self.frame is None:
                 return None
             return self.frame.copy()
+
+    def read_with_timestamp(self):
+        """Return the latest copied frame and its capture time from monotonic clock."""
+        with self.lock:
+            if self.frame is None or self.frame_updated_at is None:
+                return None, None
+            return self.frame.copy(), self.frame_updated_at
 
     def stop(self):
         """Release the device and join its capture thread before another start."""
@@ -100,6 +112,9 @@ class Camera:
                     cap.release()
             except Exception:
                 pass
+            with self.lock:
+                self.frame = None
+                self.frame_updated_at = None
 
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=2.0)
