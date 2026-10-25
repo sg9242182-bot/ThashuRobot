@@ -158,7 +158,7 @@ class FollowLogic:
                 return result
             self.target_id = selected["track_id"]
             self.state = self.TRACKING
-                    self._notice_latched.clear()
+            self._notice_latched.clear()
             self._stop_latched = False
             result.update(state=self.state, target=selected)
             return result
