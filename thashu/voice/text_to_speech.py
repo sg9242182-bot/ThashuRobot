@@ -27,6 +27,7 @@ COMMAND_VOICE_PROMPTS = {
     "stop": "Stopping.",
     "obstacle_stop": "I stopped because an obstacle was detected.",
     "obstacle_blocked_v2": "I can't move because an obstacle was detected.",
+    "safety_stop": "The safety system stopped the move, so I didn't move. Check for an obstacle or sensor issue.",
 }
 _PROMPT_TO_VOICE = {text: name for name, text in COMMAND_VOICE_PROMPTS.items()}
 
