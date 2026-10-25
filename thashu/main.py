@@ -16,9 +16,11 @@ from core.attention       import AttentionSystem
 from core.state           import RuntimeState, RuntimeStateMachine
 from core.event_bus       import EventBus
 from vision.vision_core   import VisionCore
+from vision.follow_logic   import FollowLogic
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
-from core.decision        import get_forward_speed, get_direction_command, is_stop_command
+from hardware.servo_tracking import ServoTracker
+from core.decision        import get_forward_speed, get_direction_command, get_follow_command, is_stop_command
 from core.model_paths import model_path, project_path
 
 # ── Sounds ────────────────────────────────────────────────────────────────────
@@ -55,6 +57,10 @@ vad    = VoiceActivityDetector()
 attn   = AttentionSystem()
 vision = VisionCore()
 eyes   = Eyes()
+follow_logic = FollowLogic()
+servo_tracker = ServoTracker()
+_follow_start_pending = False
+_follow_region_pending = None
 _motion_timer = None
 _motion_generation = 0
 _motion_lock = threading.Lock()
@@ -162,6 +168,13 @@ def safe_play(path: str):
     time.sleep(0.15)
 
 def transition_runtime(target_state):
+    global _follow_start_pending, _follow_region_pending
+
+    if runtime.current == RuntimeState.IDLE and target_state != RuntimeState.IDLE and follow_logic.enabled:
+        follow_logic.stop()
+        sequence = stop_motion()
+        print(f"[FOLLOW] Stopped before runtime interaction (STOP sequence {sequence})")
+
     previous, current = runtime.transition_to(target_state)
 
     event_bus.publish(
@@ -173,6 +186,14 @@ def transition_runtime(target_state):
     )
 
     print(f"[STATE] {previous.value} -> {current.value}")
+
+    if current == RuntimeState.IDLE and _follow_start_pending:
+        follow_logic.start()
+        if _follow_region_pending is not None:
+            follow_logic.request_region(_follow_region_pending)
+        _follow_start_pending = False
+        _follow_region_pending = None
+        print("[FOLLOW] Follow mode enabled; waiting for fresh face perception")
 
     return current
 
@@ -190,6 +211,12 @@ def _auto_stop_motion(generation):
         print("[COMMAND] Timed motor STOP could not be sent; ESP32 watchdog remains the fallback")
     else:
         print(f"[COMMAND] Movement timeout; STOP sent (sequence {sequence})")
+
+
+def queue_follow_start(region=None):
+    global _follow_start_pending, _follow_region_pending
+    _follow_start_pending = True
+    _follow_region_pending = region
 
 
 def start_bounded_motion(direction, speed):
@@ -303,6 +330,50 @@ def announce_safety_message(message):
         eyes.idle()
 
 
+def announce_follow_notice(notice):
+    messages = {
+        "no_target": "I don't see anyone to follow yet. Please move into view.",
+        "selection_required": "I see several people. Say follow left, follow center, or follow right.",
+        "selection_not_unique": "I can't identify one person in that direction. Please choose left, center, or right again.",
+        "target_lost": "I lost the selected person. I stopped tracking them.",
+        "target_ambiguous": "I can't tell which person you selected. Following is stopped; say follow me again to choose.",
+        "reselect_target": "I couldn't safely reacquire the same person. Say follow me again to select a target.",
+        "stale_frame": "The camera feed is stale, so I stopped following.",
+    }
+    message = messages.get(notice)
+    if not message:
+        return
+    print(f"[FOLLOW] {message}")
+    wake.lock()
+    audio.pause()
+    eyes.alert()
+    try:
+        speak(message)
+        time.sleep(0.4)
+    except Exception as exc:
+        print(f"[FOLLOW] Could not speak status: {exc}")
+    finally:
+        audio.resume()
+        wake.unlock()
+        eyes.idle()
+
+
+def update_follow_from_vision(snapshot):
+    if runtime.current != RuntimeState.IDLE or not follow_logic.enabled:
+        return
+    decision = follow_logic.update(snapshot, runtime_idle=True)
+    if decision["stop_motion"]:
+        sequence = stop_motion()
+        print(f"[FOLLOW] No safe target action; STOP sent (sequence {sequence})")
+    target = decision["target"]
+    if target is not None:
+        frame_w, frame_h = snapshot.get("frame_size", (640, 480))
+        x, y = target["center"]
+        servo_tracker.update(x, y, frame_w, frame_h)
+    if decision["notice"]:
+        announce_follow_notice(decision["notice"])
+
+
 def process_safety_events():
     for event in motors.gpio.drain_events():
         if event == "EVENT|0|STOP|OBSTACLE":
@@ -362,6 +433,7 @@ def main():
 
         # ── Pass vision state to attention system ─────────────────────────
         vis = vision.get_state()
+        update_follow_from_vision(vis)
 
         is_speech_now = vad.is_speech(chunk)
         attn.update(vis["faces"], is_speech_now)
@@ -452,7 +524,19 @@ def main():
 
                 brain_start = time.time()
 
-                if is_stop_command(text):
+                if (follow_command := get_follow_command(text)) == "STOP":
+                    follow_logic.stop()
+                    stop_sequence = stop_motion()
+                    print(f"[FOLLOW] Explicit follow cancel; STOP sequence {stop_sequence}")
+                    response = "I stopped following."
+                elif follow_command == "START":
+                    queue_follow_start()
+                    response = "Follow mode is on. I will track one selected person with the camera; the wheels stay stopped until follow distance and route safety are calibrated."
+                elif follow_command in ("LEFT", "CENTER", "RIGHT"):
+                    queue_follow_start(follow_command)
+                    response = f"I'll select the unique person on your {follow_command.lower()} after the camera resumes."
+                elif is_stop_command(text):
+                    follow_logic.stop()
                     print("[COMMAND] Explicit STOP recognized; sending directly to ESP32")
                     stop_sequence = stop_motion()
                     if stop_sequence is None:
