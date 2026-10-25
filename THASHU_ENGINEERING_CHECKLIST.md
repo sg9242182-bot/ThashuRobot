@@ -438,7 +438,77 @@ Implementation and validation note (2026-10-17): Updated `thashu/vision/vision_c
 
 \---
 
-Phase 5 — Person Recognition
+Phase 5 — Commanded Follow Mode & Face Tracking
+
+Status: PLANNED — requirements and edge cases are documented here; implementation must not begin until this phase scope is reviewed.
+
+Purpose:
+Provide a deliberate, safe follow mode using the existing face-perception and actuator architecture. Face detection alone must never start movement or servo tracking. Follow mode starts only after an explicit voice command such as “follow me.”
+
+Ownership and constraints:
+- `VisionCore` remains perception-only. It publishes face detections, stable short-lived track identifiers, positions, and freshness; it does not call motors or servos.
+- Follow-mode state and decisions belong in the existing runtime/supervisor and follow logic after an architecture audit. Reuse `vision/follow_logic.py`, `hardware/servo_tracking.py`, `hardware/motors.py`, and existing ESP32 safety. Add no module unless the audit shows the existing files cannot preserve these ownership boundaries.
+- Pi motor requests go only through `MotorController`; servo requests go through the existing servo interface and ESP32 protocol. ESP32 obstacle interlocks, watchdog, and STOP remain authoritative.
+- Mode is OFF at boot and after restart. It is enabled only by an explicit deterministic voice command; LLM output cannot enable or steer it. “Stop following” and explicit “stop” cancel the mode and stop motors immediately.
+- Face presence alone causes no actuation. Servo tracking and chassis following are active only while follow mode is explicitly enabled. Following pauses and motors stop whenever the runtime leaves IDLE; re-entry requires fresh target and safety validation.
+
+Target selection and multiple faces:
+- With no face visible, do not move; report that no target is available.
+- With exactly one face visible at “follow me,” select that face for this session.
+- With multiple faces, do not choose the largest/nearest face or move by default. Ask the user to select a unique visible target (left/center/right). If the selection maps to zero or multiple faces, ask again or cancel safely.
+- Lock the selected short-lived tracker identity. Never silently transfer following to another visible face when targets cross, overlap, disappear, or tracker identity becomes uncertain.
+- On target loss or ambiguous reacquisition, stop chassis motion immediately, hold the servo safely, and require the same target to be reacquired with high confidence or ask the user to select again. Do not chase/search with the chassis while target identity is uncertain.
+- Name-based selection is deferred until Person Recognition (now Phase 6) provides verified identities. Do not infer that the voice speaker is a face without a validated association method.
+
+Movement, servo, and safety behavior:
+- Servo tracking must have calibrated direction, center/dead zones, hard angle limits, rate limits, smoothing, and loss-of-target behavior; it must not oscillate or drive into mechanical stops.
+- Chassis movement requires a reliable target-distance estimate and calibrated follow-distance hysteresis. Face-box size alone is not accepted as a safe distance measurement without calibration. If distance cannot be established or validated, ship servo-only tracking and keep chassis follow disabled until that requirement passes.
+- Define bounded follow speed/acceleration and command refresh/lease behavior. Loss of target, stale camera frames, stale sensor data, ESP32 link loss, invalid safety readings, STOP, or controller errors must stop chassis motion; no stale command may persist.
+- Front ToF and rear ultrasonic checks remain in force. A safety stop must cancel follow movement, be logged once, and be announced without repeated spam.
+- Manual movement commands must have a defined precedence: stop follow before taking manual control; STOP always wins. Follow mode must never override voice STOP or a safety stop.
+- Do not store face images, embeddings, or identity associations for follow mode unless a separate user-approved memory requirement explicitly authorizes it.
+
+Existing files to inspect/reuse before editing:
+- `thashu/main.py` and `core/state.py` / supervisor integration
+- `thashu/vision/vision_core.py`, `vision/tracker.py`, `vision/follow_logic.py`
+- `thashu/hardware/servo_tracking.py`, `hardware/motors.py`, `hardware/gpio_control.py`
+- ESP32 servo, motor, communication, and safety managers
+- Existing voice parsing, event, and test patterns
+
+Required failure and interaction cases:
+- startup/restart while follow was active; follow must remain OFF after reboot
+- no face, one face, multiple faces, invalid/ambiguous location selection
+- target crossing another face, temporary occlusion, target leaving frame, stale camera frame, and target reappearing
+- STOP during servo tracking and during chassis movement
+- explicit manual command while following
+- wake/listen/think/speak transitions while following; motion stops and does not resume without fresh validation
+- obstacle stop, invalid/stale ToF or ultrasonic reading, and ESP32 serial loss/recovery
+- camera, vision worker, servo, motor controller, or audio-command failure
+- repeated detections/events must not cause command/audio spam or rapid direction oscillation
+
+Verification plan:
+- Unit tests for follow-mode state transitions, exact voice command parsing, target-selection ambiguity, stable target lock, and fail-safe transitions.
+- Mocked integration tests proving VisionCore emits perception only, no actuation occurs while mode is OFF, all actions use existing hardware controllers, STOP preempts following, and stale/lost target stops movement.
+- Pi camera tests with one and multiple people, including crossing/occlusion and explicit target selection.
+- Servo bench tests for direction, limits, center/dead zone, smoothing, and sustained tracking.
+- Wheels-raised chassis tests for bounded speed, follow-distance hysteresis, target loss, voice STOP, obstacles, stale sensors, and serial disconnect/recovery.
+- Controlled floor tests only after bench and safety tests pass; verify no target switching and no obstacle/sensor bypass.
+- Record actual Pi/ESP32 versions, tested sensor states, observed logs, and user-reported physical results before checking acceptance.
+
+Acceptance:
+\[ ] Follow mode is OFF on boot and face detection alone never actuates hardware.
+\[ ] Explicit “follow me” starts the mode; “stop following” and STOP stop it immediately.
+\[ ] One visible face can be selected and tracked; multiple faces never trigger arbitrary target choice or movement.
+\[ ] Target identity remains stable through tested movement; uncertain loss/crossing stops movement and requires safe reacquisition or reselection.
+\[ ] Servo tracking passes direction, limits, stability, and target-loss tests.
+\[ ] Chassis following stays within validated distance/speed bounds; if distance estimation is not validated, chassis following remains disabled.
+\[ ] Vision remains perception-only; hardware commands use existing controller interfaces and ESP32 safety.
+\[ ] Voice interaction, manual commands, STOP, obstacle stops, stale sensors, camera faults, and serial loss all preempt or safely stop following.
+\[ ] Automated tests, Pi integration tests, and controlled physical acceptance pass; no checklist box is checked from code inspection alone.
+
+\---
+
+Phase 6 — Person Recognition
 
 Status: NOT STARTED
 
@@ -482,7 +552,7 @@ Acceptance:
 
 \---
 
-Phase 6 — Person \& Conversation Memory
+Phase 7 — Person \& Conversation Memory
 
 Status: NOT STARTED
 
@@ -530,7 +600,7 @@ Acceptance:
 
 \---
 
-Phase 7 — Place / Environment Memory
+Phase 8 — Place / Environment Memory
 
 Status: NOT STARTED
 
@@ -572,7 +642,7 @@ Acceptance:
 
 \---
 
-Phase 8 — Unified Person + Place + Episodic Memory
+Phase 9 — Unified Person + Place + Episodic Memory
 
 Status: NOT STARTED
 
@@ -598,7 +668,7 @@ Acceptance:
 
 \---
 
-Phase 9 — Reliability \& Recovery
+Phase 10 — Reliability \& Recovery
 
 Status: NOT STARTED
 
@@ -634,7 +704,7 @@ Acceptance:
 
 \---
 
-Phase 10 — Performance Optimization
+Phase 11 — Performance Optimization
 
 Status: NOT STARTED
 
@@ -666,7 +736,7 @@ Acceptance:
 
 \---
 
-Phase 11 — Mobile Control
+Phase 12 — Mobile Control
 
 Status: NOT STARTED
 
@@ -696,7 +766,7 @@ Acceptance:
 
 \---
 
-Phase 12 — Full Robot / Expo Validation
+Phase 13 — Full Robot / Expo Validation
 
 Status: NOT STARTED
 
@@ -786,35 +856,36 @@ File	Status	Phase	Notes
 
 `hardware/gpio\_control.py`	REVIEW	1	Existing hardware interface
 
-`hardware/motors.py`	REVIEW	1/3	Motor control
+`hardware/motors.py`	REVIEW	1/3/5	Motor control
 
 `hardware/eyes.py`	REVIEW	1	Existing eye interface
 
-`hardware/servo\_tracking.py`	REVIEW	1/4	Servo/follow control
+`hardware/servo\_tracking.py`	REVIEW	1/4/5	Servo/follow control
 
-`vision/vision\_core.py`	REVIEW	4	Vision lifecycle
+`vision/vision\_core.py`	REVIEW	4/5	Perception lifecycle and follow-mode input
+`vision/follow\_logic.py`	REVIEW	5	Existing target selection/debounce logic
 
-`vision/face\_database.py`	REVIEW	5	Face storage
+`vision/face\_database.py`	REVIEW	6	Face storage
 
-`vision/face\_recognition.py`	REVIEW	5	Recognition
+`vision/face\_recognition.py`	REVIEW	6	Recognition
 
-`vision/auto\_capture.py`	REVIEW	5	Existing registration path
+`vision/auto\_capture.py`	REVIEW	6	Existing registration path
 
-`memory/people.py`	REVIEW	5/6	Person memory
+`memory/people.py`	REVIEW	6/7	Person memory
 
-`memory/short\_term.py`	REVIEW	6	Short-term memory
+`memory/short\_term.py`	REVIEW	7	Short-term memory
 
-`memory/long\_term.py`	REVIEW	6	Long-term memory
+`memory/long\_term.py`	REVIEW	7	Long-term memory
 
-`memory/storage.py`	REVIEW	6	Storage
+`memory/storage.py`	REVIEW	7	Storage
 
-`data/people.py`	REVIEW	5/6	Person data
+`data/people.py`	REVIEW	6/7	Person data
 
 `voice/audio\_manager.py`	REVIEW	2/4	Existing pause/resume pattern
 
 `voice/speech\_to\_text.py`	REVIEW	2/3	Whisper
 
-`voice/text\_to\_speech.py`	REVIEW	2/9	Piper
+`voice/text\_to\_speech.py`	REVIEW	2/10	Piper
 
 `voice/wake\_word.py`	REVIEW	2	Wake-word subsystem
 
@@ -851,6 +922,8 @@ Phase 10	—	—
 Phase 11	—	—
 
 Phase 12	—	—
+
+Phase 13	—	—
 
 
 Initial integrated-runtime note (2026-10-05): This entry described the first sketch draft, where protocol and safety logic were still in the sketch. It is superseded by the dedicated manager ownership correction recorded below; use that correction as the current architecture status.
