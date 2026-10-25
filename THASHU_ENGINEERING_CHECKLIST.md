@@ -526,7 +526,7 @@ Implementation snapshot (2026-10-26): Reused existing files; no new runtime modu
 - `thashu/main.py`: integrate explicit follow commands, servo tracking only while follow mode is enabled and runtime is IDLE, stop follow before any voice interaction, and stop/report on controller-link loss. Multiple faces prompt for a unique left/center/right choice.
 - `thashu/tests/test_follow_mode.py`: added exact-command, target-selection, ambiguity, target-loss, stale-frame, and tracker tests.
 - `thashu/tests/test_vision_lifecycle.py`: verifies published short-lived track IDs and capture freshness while preserving the no-actuator VisionCore contract.
-- Verification on a temporary mirror of the branch source: Python compile checks passed; 10 follow-mode tests passed; 5 vision lifecycle tests passed. Raspberry Pi camera/servo tests have not been run.
+- Verification on a temporary mirror of the branch source: Python compile checks passed; 11 follow-mode tests passed; 5 vision lifecycle tests passed. Raspberry Pi camera/servo tests have not been run.
 - Chassis motion is intentionally absent from this implementation tranche. No verified mapping connects the selected face to a fixed ToF beam or a safe follow-distance band. The existing ESP32 interlocks also require all front ToFs and rear sonar clear for turns. Implement and physically validate short motion leases, target-distance hysteresis, sensor-verified retreat/turn/recheck rerouting, and no-safe-route stop/report before enabling wheel follow. Do not mark chassis-follow or obstacle-reroute acceptance complete.
 
 \---
