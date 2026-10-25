@@ -307,7 +307,7 @@ def process_safety_events():
         if event == "EVENT|0|STOP|OBSTACLE":
             announce_safety_message("Obstacle detected. Stopping.")
         elif event == "EVENT|0|BLOCKED|OBSTACLE":
-            announce_safety_message("Obstacle ahead. I can't move.")
+            announce_safety_message("Obstacle detected. I can't move.")
         # EVENT and FAULT lines are logged immediately by GPIOControl's reader thread.
 
 
