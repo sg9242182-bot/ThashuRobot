@@ -903,7 +903,7 @@ Phase 1	2026-10-23	Complete — integrated controller and direct Pi USB-serial t
 
 Phase 2	2026-10-23	Complete — runtime supervisor/state machine verified; user confirms hardware safety remains active across states.
 
-Phase 3	—	Movement/STOP/safety checks user-reported passed; Pi–ESP32 link-loss and recovery validation remains pending.
+Phase 3	2026-10-25	Complete — movement, STOP, safety, and Pi–ESP32 link-loss/recovery checks verified by the user.
 
 Phase 4	2026-10-23	Vision lifecycle software and Raspberry Pi acceptance passed (user-reported; logged 2026-10-23).
 
