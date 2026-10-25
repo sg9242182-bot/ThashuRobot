@@ -128,11 +128,11 @@ class FollowLogic:
 
         faces, width = self._fresh_faces(snapshot or {}, now)
         if faces is None:
-            if self.state in (self.TRACKING, self.TARGET_LOST):
-                if self.state == self.TRACKING:
-                    self.state = self.TARGET_LOST
-                    self._lost_since = now
-                    self._reacquire_frames = 0
+            if self.state == self.TRACKING:
+                # Tracker IDs are not identity proof across a camera gap.
+                self.target_id = None
+                self.state = self.NEEDS_RESELECTION
+                self._notice_latched.add("reselect_target")
                 self._request_stop_once(result)
                 result.update(
                     state=self.state,
@@ -175,7 +175,6 @@ class FollowLogic:
             return result
 
         if self.state == self.NEEDS_RESELECTION:
-            result["notice"] = self._notice_once("reselect_target")
             return result
 
         matching = next(
@@ -195,13 +194,14 @@ class FollowLogic:
 
         if self.state == self.TRACKING:
             if matching is None:
-                self.state = self.TARGET_LOST
-                self._lost_since = now
-                self._reacquire_frames = 0
+                # No appearance identity is retained for follow mode, so do not
+                # trust centroid reacquisition after even a short occlusion.
+                self.target_id = None
+                self.state = self.NEEDS_RESELECTION
+                self._notice_latched.add("reselect_target")
                 result.update(state=self.state, notice=self._notice_once("target_lost"))
                 self._request_stop_once(result)
                 return result
-            self._notice_latched.discard("target_lost")
             self._stop_latched = False
             result.update(state=self.state, target=matching)
             return result
