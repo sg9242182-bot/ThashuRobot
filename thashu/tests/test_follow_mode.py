@@ -84,12 +84,17 @@ class FollowLogicTests(unittest.TestCase):
         self.assertEqual(result["state"], FollowLogic.NEEDS_RESELECTION)
         self.assertIsNone(result["target"])
 
-    def test_target_loss_never_transfers_to_another_face(self):
+    def test_target_loss_never_transfers_or_auto_reacquires(self):
         self.logic.update(snapshot([face(1, 320)]), now=10.1)
         result = self.logic.update(snapshot([face(2, 320)]), now=10.2)
         self.assertTrue(result["stop_motion"])
         self.assertIsNone(result["target"])
-        self.assertEqual(self.logic.target_id, 1)
+        self.assertIsNone(self.logic.target_id)
+        self.assertEqual(self.logic.state, FollowLogic.NEEDS_RESELECTION)
+
+        result = self.logic.update(snapshot([face(1, 320)]), now=10.3)
+        self.assertIsNone(result["target"])
+        self.assertFalse(result["stop_motion"])
 
     def test_stale_frames_stop_existing_tracking(self):
         self.logic.update(snapshot([face(1, 320)]), now=10.1)
