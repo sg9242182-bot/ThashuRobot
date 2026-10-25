@@ -48,6 +48,8 @@ class GPIOControl:
 
         self._incoming = queue.Queue()
         self._events = queue.Queue()
+        self._ack_condition = threading.Condition()
+        self._acknowledgements = {}
         self._last_heartbeat = 0.0
         self._last_connect_attempt = 0.0
         self._stop_event = threading.Event()
@@ -199,6 +201,17 @@ class GPIOControl:
             except queue.Empty:
                 return events
 
+    def wait_for_ack(self, sequence, timeout=0.75):
+        """Wait for one command ACK; return its payload (for example, OK or ERROR|OBSTACLE)."""
+        deadline = time.monotonic() + timeout
+        with self._ack_condition:
+            while sequence not in self._acknowledgements:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                self._ack_condition.wait(remaining)
+            return self._acknowledgements.pop(sequence)
+
     # ------------------------------------------------------------------
     # Background transport
     # ------------------------------------------------------------------
@@ -233,6 +246,23 @@ class GPIOControl:
                 line = raw.decode("ascii", errors="replace").strip()
                 if line:
                     self._incoming.put(line)
+                    if line.startswith("ACK|"):
+                        fields = line.split("|", 2)
+                        try:
+                            sequence = int(fields[1])
+                            result = fields[2] if len(fields) == 3 else ""
+                        except (ValueError, IndexError):
+                            sequence = None
+                            result = ""
+
+                        if sequence is not None and result != "ALIVE":
+                            with self._ack_condition:
+                                self._acknowledgements[sequence] = result
+                                while len(self._acknowledgements) > 128:
+                                    self._acknowledgements.pop(next(iter(self._acknowledgements)))
+                                self._ack_condition.notify_all()
+                        if result.startswith("ERROR"):
+                            print(f"[ESP32] {line}")
                     if line.startswith(("EVENT|", "FAULT|")):
                         print(f"[ESP32] {line}")
                         self._events.put(line)
