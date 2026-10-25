@@ -442,7 +442,7 @@ Phase 5 — Commanded Follow Mode & Face Tracking
 
 Status: IN PROGRESS — architecture audit and servo-only follow implementation are complete; Pi hardware validation, calibrated chassis following, obstacle rerouting, and physical acceptance remain open.
 
-Architecture audit (2026-10-25):
+Initial architecture audit (2026-10-25; before the implementation below):
 - `VisionCore` is perception-only and pauses inference outside IDLE, preserving Phase 4. It currently publishes face boxes/names/presence, but not track IDs or observation timestamps.
 - `CentroidTracker` uses nearest-centroid greedy matching with no distance gate or ambiguity signal. A crossing/overlap can silently change target identity. Existing `FollowLogic` chooses the largest face and is not safe for this phase; it is not currently wired into the Phase 4 `VisionCore` or main actuator path.
 - `ServoTracker` exists but is not instantiated by `main.py`. Its Pi angle limits (30–150°) differ from ESP32 `ServoManager` limits (45–135°); control must be clamped consistently before physical servo testing.
@@ -479,11 +479,11 @@ Movement, servo, and safety behavior:
 - Do not store face images, embeddings, or identity associations for follow mode unless a separate user-approved memory requirement explicitly authorizes it.
 
 Existing files inspected/reused:
-- \\[x] `thashu/main.py` and `core/state.py` / supervisor integration
-- \\[x] `thashu/vision/vision_core.py`, `vision/tracker.py`, `vision/follow_logic.py`
-- \\[x] `thashu/hardware/servo_tracking.py`, `hardware/motors.py`, `hardware/gpio_control.py`
-- \\[x] ESP32 servo, motor, communication, and safety managers
-- \\[x] Existing voice parsing, event, and test patterns
+- \[x] `thashu/main.py` and `core/state.py` / supervisor integration
+- \[x] `thashu/vision/vision_core.py`, `vision/tracker.py`, `vision/follow_logic.py`
+- \[x] `thashu/hardware/servo_tracking.py`, `hardware/motors.py`, `hardware/gpio_control.py`
+- \[x] ESP32 servo, motor, communication, and safety managers
+- \[x] Existing voice parsing, event, and test patterns
 
 Required failure and interaction cases:
 - startup/restart while follow was active; follow must remain OFF after reboot
