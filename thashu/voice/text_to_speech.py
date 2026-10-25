@@ -25,8 +25,8 @@ COMMAND_VOICE_PROMPTS = {
     "turn_left": "Turning left.",
     "turn_right": "Turning right.",
     "stop": "Stopping.",
-    "obstacle_stop": "Obstacle detected. Stopping.",
-    "obstacle_blocked_v2": "Obstacle detected. I can't move.",
+    "obstacle_stop": "I stopped because an obstacle was detected.",
+    "obstacle_blocked_v2": "I can't move because an obstacle was detected.",
 }
 _PROMPT_TO_VOICE = {text: name for name, text in COMMAND_VOICE_PROMPTS.items()}
 
