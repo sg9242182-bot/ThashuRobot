@@ -1034,3 +1034,6 @@ Rear ultrasonic FAR margin follow-up (phase-5, 2026-10-26): User reports the rea
 
 
 Left-turn duration adjustment (phase-5, 2026-10-26): Increased the Pi-side bounded LEFT jog from 1.0 to 2.0 seconds after the user reported the robot turned only slightly. RIGHT remains at 1.0 second. The left-turn command log and Pi auto-stop timer use the same 2.0-second setting; ESP32 obstacle interlocks and stop behavior are unchanged. Physical turn angle and safety behavior need a controlled hardware check; no test was run here.
+
+
+Right-turn duration matched to left (phase-5, 2026-10-26): Per user follow-up, increased RIGHT jog from 1.0 to 2.0 seconds as well. Both left and right now run for two seconds, with their existing bounded Pi STOP timers and ESP32 safety interlocks.
