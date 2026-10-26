@@ -10,12 +10,17 @@ class UpperBodyDetector:
         )
         self.detector = cv2.CascadeClassifier(cascade_path)
         if self.detector.empty():
-            raise RuntimeError(
-                f"[VISION] Upper-body Haar cascade failed to load: {cascade_path}"
+            self.detector = None
+            print(
+                "[PERSON DETECT] Upper-body cascade unavailable; "
+                "person follow will remain unavailable"
             )
-        print("[PERSON DETECT] Upper-body Haar cascade loaded")
+        else:
+            print("[PERSON DETECT] Upper-body Haar cascade loaded")
 
     def detect(self, frame):
+        if self.detector is None:
+            return []
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         detections = self.detector.detectMultiScale(
             gray,
