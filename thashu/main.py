@@ -35,7 +35,8 @@ GRACE_PERIOD       = 4.0
 SAMPLE_RATE        = 48000
 BLOCK_SIZE         = 5460
 FORWARD_COMMAND_DURATION_SECONDS = 30.0
-TURN_COMMAND_DURATION_SECONDS = 1.0
+LEFT_TURN_COMMAND_DURATION_SECONDS = 2.0
+RIGHT_TURN_COMMAND_DURATION_SECONDS = 1.0
 
 # ── Shutdown Button ───────────────────────────────────────────────────────────
 BUTTON_PIN = 17
@@ -244,11 +245,12 @@ def start_bounded_motion(direction, speed):
         if sequence is None:
             return None
 
-        duration = (
-            TURN_COMMAND_DURATION_SECONDS
-            if direction in ("LEFT", "RIGHT")
-            else FORWARD_COMMAND_DURATION_SECONDS
-        )
+        if direction == "LEFT":
+            duration = LEFT_TURN_COMMAND_DURATION_SECONDS
+        elif direction == "RIGHT":
+            duration = RIGHT_TURN_COMMAND_DURATION_SECONDS
+        else:
+            duration = FORWARD_COMMAND_DURATION_SECONDS
         _motion_timer = threading.Timer(
             duration,
             _auto_stop_motion,
@@ -606,11 +608,12 @@ def main():
                             response = motion_failure_response("FORWARD", failure)
                 elif (direction := get_direction_command(text)) is not None:
                     direction_name = direction.lower().replace("_", " ")
-                    duration = (
-                        TURN_COMMAND_DURATION_SECONDS
-                        if direction in ("LEFT", "RIGHT")
-                        else FORWARD_COMMAND_DURATION_SECONDS
-                    )
+                    if direction == "LEFT":
+                        duration = LEFT_TURN_COMMAND_DURATION_SECONDS
+                    elif direction == "RIGHT":
+                        duration = RIGHT_TURN_COMMAND_DURATION_SECONDS
+                    else:
+                        duration = FORWARD_COMMAND_DURATION_SECONDS
                     print(
                         f"[COMMAND] Explicit {direction_name.upper()} recognized "
                         f"(PWM 200); auto-stop in {duration:.0f}s"
