@@ -24,9 +24,9 @@ class UpperBodyDetector:
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         detections = self.detector.detectMultiScale(
             gray,
-            scaleFactor=1.08,
-            minNeighbors=5,
-            minSize=(64, 96),
+            scaleFactor=1.05,
+            minNeighbors=3,
+            minSize=(48, 64),
         )
         return [
             (int(x), int(y), int(x + w), int(y + h))
