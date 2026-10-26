@@ -4,7 +4,7 @@ from hardware.gpio_control import GPIOControl
  
  
 class ServoTracker:
-    FOLLOW_FIXED_TILT_DEG = 75.0
+    FOLLOW_FIXED_TILT_DEG = 70.0
 
     def __init__(self):
         self.gpio = GPIOControl()
