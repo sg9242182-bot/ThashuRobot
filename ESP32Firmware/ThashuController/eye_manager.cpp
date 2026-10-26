@@ -23,6 +23,7 @@ bool EyeManager::begin() {
 
   _ready = _display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR);
   if (!_ready) return false;
+  _nextAutoBlinkMs = millis() + 3500;
   _display.clearDisplay();
   _display.display();
 
@@ -36,6 +37,10 @@ bool EyeManager::isReady() const { return _ready; }
 void EyeManager::update() {
   static unsigned long lastFrameMs = 0;
   const unsigned long now = millis();
+  if ((long)(now - _nextAutoBlinkMs) >= 0) {
+    triggerBlink();
+    _nextAutoBlinkMs = now + 4000;
+  }
   if (now - _lastHealthCheckMs >= 500) {
     _lastHealthCheckMs = now;
     Wire.beginTransmission(OLED_ADDR);
