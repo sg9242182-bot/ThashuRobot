@@ -2,7 +2,7 @@ import numpy as np
 
 
 class CentroidTracker:
-    """Short-lived face tracks with explicit ambiguity reporting for safe target lock."""
+    """Short-lived object tracks with explicit ambiguity reporting for safe target lock."""
 
     def __init__(
         self,
