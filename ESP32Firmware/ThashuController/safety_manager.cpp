@@ -41,7 +41,8 @@ bool SafetyManager::frontClear() const {
 }
 
 bool SafetyManager::rearClear() const {
-    return rear && rear->isFresh() && rear->isValid() &&
+    return rear && rear->isFresh() &&
+           (rear->isValid() || rear->isOutOfRange()) &&
            !rear->isObstacleDetected();
 }
 
