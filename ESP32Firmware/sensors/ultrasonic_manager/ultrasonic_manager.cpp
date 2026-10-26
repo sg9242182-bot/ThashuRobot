@@ -43,17 +43,13 @@ void UltrasonicManager::update() {
         interrupts();
 
         float measured = processEchoDuration(duration);
-
-        if (measured > 0.0f) {
-            distanceCm = measured;
-            valid = true;
-            lastReadingTime = millis();
-            obstacleDetected =
-                (distanceCm <= OBSTACLE_DISTANCE_CM);
-        } else {
-            valid = false;
-            obstacleDetected = false;
-        }
+        lastReadingTime = millis();
+        hasReading = true;
+        valid = measured >= 2.0f && measured <= 400.0f;
+        outOfRange = measured > 400.0f;
+        obstacleDetected =
+            valid && (measured <= OBSTACLE_DISTANCE_CM);
+        if (valid) distanceCm = measured;
 
         waitingForEcho = false;
     }
@@ -95,13 +91,19 @@ void UltrasonicManager::update() {
 
         noInterrupts();
 
+        const bool echoWasStarted = echoStarted;
         waitingForEcho = false;
         echoStarted = false;
         echoComplete = false;
 
         interrupts();
 
+        // A timeout with no rising edge is a valid no-echo / beyond-range
+        // result. A pulse that started but never ended is malformed.
+        lastReadingTime = millis();
+        hasReading = true;
         valid = false;
+        outOfRange = !echoWasStarted;
         obstacleDetected = false;
     }
 }
@@ -123,10 +125,6 @@ float UltrasonicManager::processEchoDuration(
     }
 
     float distance = duration / 58.0f;
-
-    if (distance < 2.0f || distance > 400.0f) {
-        return 0.0f;
-    }
 
     return distance;
 }
@@ -164,7 +162,11 @@ void IRAM_ATTR UltrasonicManager::echoISR() {
 }
 
 bool UltrasonicManager::isFresh() const {
-    return lastReadingTime != 0 && millis() - lastReadingTime <= 200;
+    return hasReading && millis() - lastReadingTime <= 200;
+}
+
+bool UltrasonicManager::isOutOfRange() const {
+    return outOfRange;
 }
 
 float UltrasonicManager::getDistanceCm() const {
