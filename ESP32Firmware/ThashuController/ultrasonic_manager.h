@@ -20,8 +20,8 @@ private:
     static constexpr uint8_t ECHO_PIN = 36;
 
     static constexpr unsigned long MEASUREMENT_INTERVAL_MS = 60;
-    // HC-SR04 modules may hold ECHO high for 38 ms when no target is in range.
-    static constexpr unsigned long ECHO_TIMEOUT_US = 40000;
+    // Allow margin for HC-SR04-compatible no-target ECHO pulses (nominally 38 ms).
+    static constexpr unsigned long ECHO_TIMEOUT_US = 50000;
 
     static constexpr float OBSTACLE_DISTANCE_CM = 30.0f;
 
