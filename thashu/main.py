@@ -20,7 +20,7 @@ from vision.follow_logic   import FollowLogic
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
 from hardware.servo_tracking import ServoTracker
-from core.decision        import get_forward_speed, get_direction_command, get_follow_command, is_stop_command
+from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command
 from core.model_paths import model_path, project_path
 
 # ── Sounds ────────────────────────────────────────────────────────────────────
@@ -554,6 +554,24 @@ def main():
                 elif follow_command in ("LEFT", "CENTER", "RIGHT"):
                     queue_follow_start(follow_command)
                     response = f"I'll select the unique person on your {follow_command.lower()} after the camera resumes."
+                elif (look_direction := get_look_command(text)) is not None:
+                    look_sequence = servo_tracker.look(look_direction)
+                    if look_sequence is None:
+                        response = "I couldn't reach the servo controller."
+                    else:
+                        look_ack = servo_tracker.gpio.wait_for_ack(look_sequence, timeout=0.75)
+                        if look_ack == "OK":
+                            print(f"[COMMAND] SERVO LOOK {look_direction} accepted (sequence {look_sequence})")
+                            response = {
+                                "UP": "Looking up.",
+                                "DOWN": "Looking down.",
+                                "LEFT": "Looking left.",
+                                "RIGHT": "Looking right.",
+                                "CENTER": "Looking straight ahead.",
+                            }[look_direction]
+                        else:
+                            print(f"[COMMAND] SERVO LOOK {look_direction} failed: {look_ack or 'ACK_TIMEOUT'}")
+                            response = "I couldn't reach the servo controller."
                 elif is_stop_command(text):
                     follow_logic.stop()
                     servo_tracker.stop_search()
