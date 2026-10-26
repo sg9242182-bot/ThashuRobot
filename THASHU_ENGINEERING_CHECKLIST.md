@@ -507,10 +507,10 @@ Verification plan:
 
 Acceptance:
 \[ ] Follow mode is OFF on boot and face detection alone never actuates hardware.
-\[ ] Explicit “follow me” starts the mode; “stop following” and STOP stop it immediately.
-\[ ] One visible face can be selected and tracked; multiple faces never trigger arbitrary target choice or movement.
+\[x] Explicit “follow me” starts the mode; “stop following” and STOP stop it immediately.
+\[x] One visible face can be selected and tracked; multiple faces never trigger arbitrary target choice or movement.
 \[ ] Target identity remains stable through tested movement; uncertain loss/crossing stops movement and requires safe reacquisition or reselection.
-\[ ] Servo tracking passes direction, limits, stability, and target-loss tests.
+\[x] Servo tracking passes direction, limits, stability, and target-loss tests.
 \[ ] Chassis following stays within validated distance/speed bounds; if distance estimation is not validated, chassis following remains disabled.
 \[ ] Vision remains perception-only; hardware commands use existing controller interfaces and ESP32 safety.
 \[ ] Voice interaction, manual commands, STOP, stale sensors, camera faults, and serial loss all preempt or safely stop following. An obstacle triggers an immediate stop, then only a fresh-sensor-verified bounded reroute; when no safe route can be verified, the robot remains stopped and reports why.
@@ -1037,3 +1037,6 @@ Left-turn duration adjustment (phase-5, 2026-10-26): Increased the Pi-side bound
 
 
 Right-turn duration matched to left (phase-5, 2026-10-26): Per user follow-up, increased RIGHT jog from 1.0 to 2.0 seconds as well. Both left and right now run for two seconds, with their existing bounded Pi STOP timers and ESP32 safety interlocks.
+
+
+Phase 5 user-reported validation update (2026-10-26): The user confirms both previously listed test groups passed: (1) voice servo directions, two-second left/right turns, visible auto-blinks, and rear ultrasonic FAR reporting; (2) Pi follow-mode tests for face selection/tracking, target loss/reacquisition, servo behavior, and STOP/voice-interaction preemption. Checked the explicit follow start/stop, single/multiple-face selection, and servo tracking acceptance items above. Chassis following and obstacle rerouting remain open; the broader crossing/occlusion, failure-injection, and full automated/physical acceptance criteria have not been claimed complete by this confirmation.
