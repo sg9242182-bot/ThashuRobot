@@ -54,6 +54,10 @@ class VisionCore:
         self.frame_size = (640, 480)
         self.person_present = False
         self._reported_face_count = 0
+        # Haar detections can flicker between frames. Only publish a face after
+        # it is spatially consistent across three consecutive camera frames.
+        self._detection_candidates = []
+        self._next_detection_candidate_id = 0
 
         print("[VISION] Initialized")
 
@@ -158,6 +162,73 @@ class VisionCore:
                 "frame_size": self.frame_size,
             }
 
+    def _stabilize_detections(self, detections):
+        """Filter single-frame Haar false positives before tracking or reporting."""
+        detections = [tuple(map(int, box)) for box in (detections or [])]
+        candidates = self._detection_candidates
+
+        pairs = []
+        for candidate_index, candidate in enumerate(candidates):
+            x1, y1, x2, y2 = candidate["bbox"]
+            old_center = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+            old_size = max(x2 - x1, y2 - y1)
+            for detection_index, box in enumerate(detections):
+                nx1, ny1, nx2, ny2 = box
+                new_center = ((nx1 + nx2) / 2.0, (ny1 + ny2) / 2.0)
+                new_size = max(nx2 - nx1, ny2 - ny1)
+                dx = old_center[0] - new_center[0]
+                dy = old_center[1] - new_center[1]
+                distance = (dx * dx + dy * dy) ** 0.5
+                gate = max(60.0, 0.65 * max(old_size, new_size))
+                if distance <= gate:
+                    pairs.append((distance, candidate_index, detection_index))
+
+        used_candidates = set()
+        used_detections = set()
+        matches = []
+        for _distance, candidate_index, detection_index in sorted(pairs):
+            if candidate_index in used_candidates or detection_index in used_detections:
+                continue
+            used_candidates.add(candidate_index)
+            used_detections.add(detection_index)
+            matches.append((candidate_index, detection_index))
+
+        for candidate_index, candidate in enumerate(candidates):
+            if candidate_index not in used_candidates:
+                candidate["misses"] += 1
+                candidate["hits"] = 0
+
+        for candidate_index, detection_index in matches:
+            candidate = candidates[candidate_index]
+            was_missing = candidate["misses"] > 0
+            candidate["bbox"] = detections[detection_index]
+            candidate["misses"] = 0
+            candidate["hits"] = 1 if was_missing else candidate["hits"] + 1
+            if candidate["hits"] >= 3:
+                candidate["confirmed"] = True
+
+        for detection_index, box in enumerate(detections):
+            if detection_index not in used_detections:
+                candidates.append({
+                    "id": self._next_detection_candidate_id,
+                    "bbox": box,
+                    "hits": 1,
+                    "misses": 0,
+                    "confirmed": False,
+                })
+                self._next_detection_candidate_id += 1
+
+        # Hold a confirmed face through brief detector flicker; clear it only
+        # after three consecutive misses. This also stabilizes count-change logs.
+        self._detection_candidates = [
+            candidate for candidate in candidates if candidate["misses"] < 3
+        ]
+        return [
+            candidate["bbox"]
+            for candidate in self._detection_candidates
+            if candidate["confirmed"]
+        ]
+
     def _loop(self):
         recog_interval = 2.0
         last_recog = 0.0
@@ -174,6 +245,8 @@ class VisionCore:
                     self.current_names.clear()
                     self.current_faces = []
                     self.person_present = False
+                    self._detection_candidates = []
+                    self._next_detection_candidate_id = 0
                     self._tracker_reset_pending = False
                     last_recog = 0.0
 
@@ -196,9 +269,10 @@ class VisionCore:
             except (AttributeError, TypeError, ValueError):
                 frame_width, frame_height = self.frame_size
 
-            faces = self.detector.detect(frame)
+            detections = self.detector.detect(frame)
             if not self._processing_enabled.is_set():
                 continue
+            faces = self._stabilize_detections(detections)
 
             with self._lock:
                 if not self._processing_enabled.is_set():
