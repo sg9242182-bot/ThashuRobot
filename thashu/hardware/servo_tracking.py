@@ -4,6 +4,8 @@ from hardware.gpio_control import GPIOControl
  
  
 class ServoTracker:
+    FOLLOW_FIXED_TILT_DEG = 75.0
+
     def __init__(self):
         self.gpio = GPIOControl()
  
@@ -72,6 +74,45 @@ class ServoTracker:
             print(f"[SERVO] Pan:{int(self.pan)} Tilt:{int(self.tilt)}")
             self._last_log = now
  
+    def set_follow_tilt(self, angle=None):
+        """Set the calibrated fixed tilt used while tracking an upper body."""
+        self._search_active = False
+        angle = self.FOLLOW_FIXED_TILT_DEG if angle is None else float(angle)
+        self.tilt = max(self.tilt_min, min(self.tilt_max, angle))
+        self._last_send = time.time()
+        return self.gpio.send(
+            f"SERVO|PAN_TILT|{int(self.pan)}|{int(self.tilt)}"
+        )
+
+    def update_pan_only(self, target_x, frame_w):
+        """Pan toward a follow target while holding the calibrated tilt fixed."""
+        if frame_w <= 0:
+            return
+        self._search_active = False
+        center_x = frame_w / 2.0
+        error_x = (target_x - center_x) / center_x
+        if abs(error_x) < self.deadzone:
+            return
+
+        edge_factor = 0.4 if (
+            self.pan <= self.pan_min + 5 or self.pan >= self.pan_max - 5
+        ) else 1.0
+        target_pan = self.pan - error_x * self.gain * edge_factor
+        target_pan = max(self.pan_min, min(self.pan_max, target_pan))
+        pan_diff = max(
+            -self.max_step,
+            min(self.max_step, target_pan - self.pan),
+        )
+        self.pan += pan_diff * self.smooth
+
+        now = time.time()
+        if now - self._last_send < 0.1:
+            return
+        self._last_send = now
+        self.gpio.send(
+            f"SERVO|PAN_TILT|{int(self.pan)}|{int(self.tilt)}"
+        )
+
     def search_step(self):
         """Sweep the head slowly while follow mode searches for a person."""
         now = time.monotonic()
@@ -80,7 +121,6 @@ class ServoTracker:
             self._search_direction = -1 if self.pan >= 125 else 1
             self._search_tilt_direction = -1 if self.tilt >= 105 else 1
             self.pan = max(50.0, min(130.0, self.pan))
-            self.tilt = max(75.0, min(105.0, self.tilt))
             self._search_last_step = 0.0
         if now - self._search_last_step < 0.35:
             return
@@ -90,18 +130,10 @@ class ServoTracker:
         if next_pan >= 125.0:
             next_pan = 125.0
             self._search_direction = -1
-            self.tilt += self._search_tilt_direction * 10.0
         elif next_pan <= 55.0:
             next_pan = 55.0
             self._search_direction = 1
-            self.tilt += self._search_tilt_direction * 10.0
 
-        if self.tilt >= 105.0:
-            self.tilt = 105.0
-            self._search_tilt_direction = -1
-        elif self.tilt <= 75.0:
-            self.tilt = 75.0
-            self._search_tilt_direction = 1
 
         self.pan = next_pan
         self.gpio.send(f"SERVO|PAN_TILT|{int(self.pan)}|{int(self.tilt)}")
