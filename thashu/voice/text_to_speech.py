@@ -42,6 +42,11 @@ COMMAND_VOICE_PROMPTS = {
     "follow_target_ambiguous": "I can't tell which person you selected. Following is stopped; say follow me again to choose a target.",
     "follow_stale_camera": "The camera feed is stale, so I stopped following. Say follow me again after the camera is working.",
     "follow_link_lost": "I lost the motor and servo controller connection, so follow mode stopped. Say follow me again after it reconnects.",
+    "look_up": "Looking up.",
+    "look_down": "Looking down.",
+    "look_left": "Looking left.",
+    "look_right": "Looking right.",
+    "look_center": "Looking straight ahead.",
 }
 _PROMPT_TO_VOICE = {text: name for name, text in COMMAND_VOICE_PROMPTS.items()}
 
