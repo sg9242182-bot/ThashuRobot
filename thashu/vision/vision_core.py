@@ -14,6 +14,8 @@ class VisionCore:
         recognizer=None,
         database=None,
         tracker=None,
+        person_detector=None,
+        person_tracker=None,
     ):
         # Lazy imports let lifecycle behavior be tested without opening hardware
         # or loading vision models. Production still uses the existing modules.
@@ -25,6 +27,9 @@ class VisionCore:
             # FaceDetector uses OpenCV's packaged Haar cascade; it has no local
             # MobileNet model files to load.
             detector = FaceDetector()
+            if person_detector is None:
+                from vision.person_detection import UpperBodyDetector
+                person_detector = UpperBodyDetector()
         if recognizer is None:
             from vision.face_recognition import FaceRecognizer
             recognizer = FaceRecognizer(model_path("face", "w600k_r50.onnx"))
@@ -34,8 +39,13 @@ class VisionCore:
         if tracker is None:
             from vision.tracker import CentroidTracker
             tracker = CentroidTracker(max_disappeared=20)
+        if person_detector is not None and person_tracker is None:
+            from vision.tracker import CentroidTracker
+            person_tracker = CentroidTracker(max_disappeared=8)
         self.camera = camera
         self.detector = detector
+        self.person_detector = person_detector
+        self.person_tracker = person_tracker
         self.recognizer = recognizer
         self.database = database
         self.tracker = tracker
@@ -50,6 +60,7 @@ class VisionCore:
         self.current_faces = []
         self.current_names = {}
         self.current_tracks = []
+        self.current_people = []
         self.latest_frame_at = None
         self.frame_size = (640, 480)
         self.person_present = False
@@ -58,6 +69,8 @@ class VisionCore:
         # it is spatially consistent across three consecutive camera frames.
         self._detection_candidates = []
         self._next_detection_candidate_id = 0
+        self._person_detection_candidates = []
+        self._next_person_candidate_id = 0
 
         print("[VISION] Initialized")
 
@@ -86,6 +99,7 @@ class VisionCore:
             self.current_faces = []
             self.current_names.clear()
             self.current_tracks = []
+            self.current_people = []
             self.latest_frame_at = None
             self.person_present = False
             self._reported_face_count = 0
@@ -123,6 +137,7 @@ class VisionCore:
                 self.current_faces = []
                 self.current_names.clear()
                 self.current_tracks = []
+                self.current_people = []
                 self.latest_frame_at = None
                 self.person_present = False
             thread = self._thread
@@ -141,11 +156,11 @@ class VisionCore:
     def get_state(self) -> dict:
         """Return perception and short-lived tracking metadata, never actuators."""
         with self._lock:
-            persons = []
+            faces = []
             for tracked in self.current_tracks:
                 track_id = tracked.get("track_id")
                 name = self.current_names.get(track_id, "Unknown")
-                persons.append({
+                faces.append({
                     "bbox": tracked["bbox"],
                     "center": tracked["center"],
                     "track_id": track_id,
@@ -155,7 +170,8 @@ class VisionCore:
                 })
 
             return {
-                "faces": persons,
+                "faces": faces,
+                "persons": [dict(person) for person in self.current_people],
                 "names": dict(self.current_names),
                 "present": self.person_present,
                 "observed_at": self.latest_frame_at,
@@ -229,6 +245,67 @@ class VisionCore:
             if candidate["confirmed"]
         ]
 
+    def _stabilize_person_detections(self, detections):
+        """Require three spatially consistent frames before publishing a person box."""
+        detections = [tuple(map(int, box)) for box in (detections or [])]
+        candidates = self._person_detection_candidates
+        pairs = []
+
+        for candidate_index, candidate in enumerate(candidates):
+            x1, y1, x2, y2 = candidate["bbox"]
+            old_center = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+            old_size = max(x2 - x1, y2 - y1)
+            for detection_index, box in enumerate(detections):
+                nx1, ny1, nx2, ny2 = box
+                new_center = ((nx1 + nx2) / 2.0, (ny1 + ny2) / 2.0)
+                new_size = max(nx2 - nx1, ny2 - ny1)
+                dx = old_center[0] - new_center[0]
+                dy = old_center[1] - new_center[1]
+                distance = (dx * dx + dy * dy) ** 0.5
+                gate = max(80.0, 0.65 * max(old_size, new_size))
+                if distance <= gate:
+                    pairs.append((distance, candidate_index, detection_index))
+
+        used_candidates = set()
+        used_detections = set()
+        for _distance, candidate_index, detection_index in sorted(pairs):
+            if candidate_index in used_candidates or detection_index in used_detections:
+                continue
+            used_candidates.add(candidate_index)
+            used_detections.add(detection_index)
+            candidate = candidates[candidate_index]
+            was_missing = candidate["misses"] > 0
+            candidate["bbox"] = detections[detection_index]
+            candidate["misses"] = 0
+            candidate["hits"] = 1 if was_missing else candidate["hits"] + 1
+            if candidate["hits"] >= 3:
+                candidate["confirmed"] = True
+
+        for candidate_index, candidate in enumerate(candidates):
+            if candidate_index not in used_candidates:
+                candidate["misses"] += 1
+                candidate["hits"] = 0
+
+        for detection_index, box in enumerate(detections):
+            if detection_index not in used_detections:
+                candidates.append({
+                    "id": self._next_person_candidate_id,
+                    "bbox": box,
+                    "hits": 1,
+                    "misses": 0,
+                    "confirmed": False,
+                })
+                self._next_person_candidate_id += 1
+
+        self._person_detection_candidates = [
+            candidate for candidate in candidates if candidate["misses"] < 3
+        ]
+        return [
+            candidate["bbox"]
+            for candidate in self._person_detection_candidates
+            if candidate["confirmed"]
+        ]
+
     def _loop(self):
         recog_interval = 2.0
         last_recog = 0.0
@@ -242,11 +319,16 @@ class VisionCore:
             with self._lock:
                 if self._tracker_reset_pending:
                     self.tracker.reset()
+                    if self.person_tracker is not None:
+                        self.person_tracker.reset()
                     self.current_names.clear()
                     self.current_faces = []
+                    self.current_people = []
                     self.person_present = False
                     self._detection_candidates = []
                     self._next_detection_candidate_id = 0
+                    self._person_detection_candidates = []
+                    self._next_person_candidate_id = 0
                     self._tracker_reset_pending = False
                     last_recog = 0.0
 
@@ -273,6 +355,36 @@ class VisionCore:
             if not self._processing_enabled.is_set():
                 continue
             faces = self._stabilize_detections(detections)
+            person_boxes = []
+            if self.person_detector is not None:
+                person_detections = self.person_detector.detect(frame)
+                if not self._processing_enabled.is_set():
+                    continue
+                person_boxes = self._stabilize_person_detections(person_detections)
+
+            if self.person_tracker is not None:
+                tracked_persons = self.person_tracker.update(person_boxes)
+                person_assignments = dict(
+                    getattr(self.person_tracker, "last_assignments", {}) or {}
+                )
+                ambiguous_person_ids = set(
+                    getattr(self.person_tracker, "last_ambiguous_ids", set()) or ()
+                )
+                if not person_assignments and len(person_boxes) == 1 and len(tracked_persons) == 1:
+                    person_assignments[0] = next(iter(tracked_persons))
+                current_people = []
+                for person_index, (x1, y1, x2, y2) in enumerate(person_boxes):
+                    track_id = person_assignments.get(person_index)
+                    if track_id is None:
+                        continue
+                    current_people.append({
+                        "bbox": (x1, y1, x2, y2),
+                        "center": ((x1 + x2) // 2, (y1 + y2) // 2),
+                        "track_id": track_id,
+                        "ambiguous": track_id in ambiguous_person_ids,
+                    })
+            else:
+                current_people = []
 
             with self._lock:
                 if not self._processing_enabled.is_set():
@@ -315,6 +427,7 @@ class VisionCore:
                 self._reported_face_count = face_count
                 self.current_faces = faces
                 self.current_tracks = []
+                self.current_people = current_people
                 for face_index, (x1, y1, x2, y2) in enumerate(faces):
                     cx = (x1 + x2) // 2
                     cy = (y1 + y2) // 2
@@ -327,7 +440,7 @@ class VisionCore:
                     })
                 self.latest_frame_at = frame_timestamp
                 self.frame_size = (frame_width, frame_height)
-                self.person_present = bool(faces)
+                self.person_present = bool(faces or current_people)
 
             if face_count != previous_count:
                 if previous_count == 0 and face_count > 0:
