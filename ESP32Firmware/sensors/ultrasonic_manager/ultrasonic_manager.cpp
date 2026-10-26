@@ -43,15 +43,21 @@ void UltrasonicManager::update() {
         interrupts();
 
         float measured = processEchoDuration(duration);
+        lastReadingTime = millis();
+        hasReading = true;
 
-        if (measured > 0.0f) {
+        if (measured >= 2.0f && measured <= 400.0f) {
             distanceCm = measured;
             valid = true;
-            lastReadingTime = millis();
-            obstacleDetected =
-                (distanceCm <= OBSTACLE_DISTANCE_CM);
+            outOfRange = false;
+            obstacleDetected = (distanceCm <= OBSTACLE_DISTANCE_CM);
+        } else if (measured > 400.0f) {
+            valid = false;
+            outOfRange = true;
+            obstacleDetected = false;
         } else {
             valid = false;
+            outOfRange = false;
             obstacleDetected = false;
         }
 
@@ -95,13 +101,19 @@ void UltrasonicManager::update() {
 
         noInterrupts();
 
+        const bool sawRisingEdge = echoStarted;
         waitingForEcho = false;
         echoStarted = false;
         echoComplete = false;
 
         interrupts();
 
+        lastReadingTime = millis();
+        hasReading = true;
         valid = false;
+        // No pulse at all is a fresh no-echo / out-of-range result. A pulse
+        // that started but never ended is malformed and remains SENSOR_NOT_READY.
+        outOfRange = !sawRisingEdge;
         obstacleDetected = false;
     }
 }
@@ -123,10 +135,6 @@ float UltrasonicManager::processEchoDuration(
     }
 
     float distance = duration / 58.0f;
-
-    if (distance < 2.0f || distance > 400.0f) {
-        return 0.0f;
-    }
 
     return distance;
 }
@@ -164,7 +172,7 @@ void IRAM_ATTR UltrasonicManager::echoISR() {
 }
 
 bool UltrasonicManager::isFresh() const {
-    return lastReadingTime != 0 && millis() - lastReadingTime <= 200;
+    return hasReading && millis() - lastReadingTime <= 200;
 }
 
 float UltrasonicManager::getDistanceCm() const {
@@ -173,6 +181,10 @@ float UltrasonicManager::getDistanceCm() const {
 
 bool UltrasonicManager::isValid() const {
     return valid;
+}
+
+bool UltrasonicManager::isOutOfRange() const {
+    return outOfRange;
 }
 
 bool UltrasonicManager::isObstacleDetected() const {
