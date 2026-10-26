@@ -69,12 +69,12 @@ void ToFManager::update() {
         const uint8_t status = sensors[i].readRangeStatus();
 
         rangeStatus[i] = status;
-        lastReadingTime[i] = millis();
 
-        // A completed status-4 result is distinguishable from a sensor/API
-        // failure: retain freshness and expose it as FAR, without inventing a
-        // numeric distance. Safety may treat fresh FAR as no detected obstacle.
+        // Status 4 is the library's explicit no-target/out-of-range result.
+        // readRangeResult() returns 0xFFFF for status 4 by design, so classify
+        // it before treating the sentinel as an API read failure.
         if (status == OUT_OF_RANGE_STATUS) {
+            lastReadingTime[i] = millis();
             hasData[i] = true;
             outOfRange[i] = true;
             valid[i] = false;
@@ -83,16 +83,15 @@ void ToFManager::update() {
             continue;
         }
 
-        // A sentinel without status 4 is an unavailable/failed reading.
+        // A sentinel without status 4 means the I2C/API read failed. Keep
+        // the last successful sample and its original timestamp: a transient
+        // bus error won't create a false NA, but the sample still expires at
+        // READING_MAX_AGE_MS and then correctly blocks movement.
         if (measuredDistance == 0xFFFFU) {
-            hasData[i] = false;
-            outOfRange[i] = false;
-            valid[i] = false;
-            obstacleDetected[i] = false;
-            distanceMm[i] = 0;
             continue;
         }
 
+        lastReadingTime[i] = millis();
         hasData[i] = true;
         outOfRange[i] = false;
         distanceMm[i] = measuredDistance;
