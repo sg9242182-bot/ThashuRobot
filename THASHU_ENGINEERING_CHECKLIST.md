@@ -902,3 +902,6 @@ Rear ultrasonic out-of-range reporting correction (2026-10-26): Applied the Phas
 
 
 Automatic eye blink on Phase 1 (2026-10-26): Updated the active integrated controller's existing EyeManager so the OLED eyes trigger their existing 200 ms blink animation automatically, first after 3.5 seconds and then every 4 seconds. This ports the already implemented Phase 5 timer into the Phase 1 controller without changing eye expressions or sensor interlocks. ESP32 build/upload and visual verification remain pending; reflash the integrated ThashuController sketch before expecting the change on the robot.
+
+
+ToF transient-read reliability correction (phase1, 2026-10-26): The Adafruit VL53L0X API reports `isRangeComplete()` as true on an underlying I2C/API error, and `readRangeResult()` can return `0xFFFF` for that failed read. Updated both existing ToFManager copies so a failed sentinel read does not erase the last successful sensor sample or refresh its timestamp. One transient bus/read failure therefore does not immediately produce `NA`; the last good reading still expires at the existing 150 ms safety freshness limit, after which movement remains blocked. Status 4 remains a fresh FAR result. No safety threshold or obstacle rule was relaxed. Build and repeated physical validation are still required.
