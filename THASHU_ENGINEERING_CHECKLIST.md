@@ -453,14 +453,15 @@ Initial architecture audit (2026-10-25; before the implementation below):
 
 
 Purpose:
-Provide a deliberate, safe follow mode using the existing person/upper-body perception and actuator architecture. Person or face detection alone must never start movement or servo tracking. Follow mode starts only after an explicit voice command such as “follow me.”
+Provide two distinct behaviors using the existing vision and actuator architecture. While IDLE, passive face tracking may pan/tilt the camera toward one stable, unambiguous detected face whether recognized or unknown; it never starts chassis motion or enables follow mode, and it stops when the wake word moves the runtime out of IDLE. Person/upper-body follow mode starts only after an explicit voice command such as “follow me.”
 
 Ownership and constraints:
 - `VisionCore` remains perception-only. It publishes upper-body/person detections with stable short-lived track identifiers, bounding boxes, positions, and freshness; face detections may supplement identity cues, but the selected target must remain trackable by the upper body when the face turns or is partly occluded. VisionCore does not call motors or servos.
 - Follow-mode state and decisions belong in the existing runtime/supervisor and follow logic after an architecture audit. Reuse `vision/follow_logic.py`, `hardware/servo_tracking.py`, `hardware/motors.py`, and existing ESP32 safety. Add no module unless the audit shows the existing files cannot preserve these ownership boundaries.
 - Pi motor requests go only through `MotorController`; servo requests go through the existing servo interface and ESP32 protocol. ESP32 obstacle interlocks, watchdog, and STOP remain authoritative.
-- Mode is OFF at boot and after restart. It is enabled only by an explicit deterministic voice command; LLM output cannot enable or steer it. “Stop following” and explicit “stop” cancel the mode and stop motors immediately.
-- Person/face presence alone causes no actuation. Servo tracking and chassis following are active only while follow mode is explicitly enabled. Following pauses and motors stop whenever the runtime leaves IDLE; re-entry requires fresh target and safety validation.
+- Follow mode is OFF at boot and after restart. It is enabled only by an explicit deterministic voice command; LLM output cannot enable or steer it. “Stop following” and explicit “stop” cancel the mode and stop motors immediately.
+- Passive face tracking is separate from follow mode: while IDLE, a single stable, unambiguous face can drive camera servos whether its identity is known or unknown. Multiple/ambiguous faces do not cause arbitrary selection. This passive servo behavior never starts chassis movement and stops as soon as the wake word is detected and the runtime leaves IDLE.
+- Upper-body/person servo and chassis following are active only while follow mode is explicitly enabled. Following pauses and motors stop whenever the runtime leaves IDLE; re-entry requires fresh target and safety validation.
 
 Target selection and multiple people:
 - With no upper body/person visible, do not move; report that no target is available.
@@ -506,7 +507,8 @@ Verification plan:
 - Record actual Pi/ESP32 versions, tested sensor states, observed logs, and user-reported physical results before checking acceptance.
 
 Acceptance:
-\[ ] Follow mode is OFF on boot and face detection alone never actuates hardware.
+\[ ] Follow mode is OFF on boot; passive face-only servo tracking never moves the chassis or enables follow mode.
+\[ ] While IDLE, a unique stable face is passively servo-tracked whether known or unknown; tracking stops on wake-word detection and does not resume until IDLE vision has fresh detections.
 \[x] Explicit “follow me” starts the mode; “stop following” and STOP stop it immediately.
 \[ ] One visible upper-body/person track can be selected and tracked while moving; multiple people never trigger arbitrary target choice or movement.
 \[ ] Target identity remains stable through tested movement; uncertain loss/crossing stops movement and requires safe reacquisition or reselection.
@@ -1045,4 +1047,6 @@ Phase 5 user-reported validation update (2026-10-26): The user confirms both pre
 Phase 5 sensor-telemetry prerequisite (2026-10-26): Extended the existing `thashu/hardware/gpio_control.py` to parse ESP32 `TEL|0|SENSORS` frames and expose `get_sensor_snapshot(max_age=0.2)`. The returned copy includes monotonic receive time and left/center/right ToF plus rear ultrasonic values in millimetres; `FAR` and `NA` remain distinct, and missing/stale telemetry returns `None`. This is read-only infrastructure for future route evaluation and does not issue motor commands or enable chassis follow. Verify parsed fresh/stale telemetry on the Pi before relying on it; target-to-ToF mapping and safe-follow-distance calibration remain hardware prerequisites.
 
 
-Follow-target clarification from user (2026-10-26): The robot should follow a moving person by tracking the visible upper body, not merely keeping the face centered. Updated Phase 5 target-selection and acceptance language accordingly. Existing follow implementation is face-box based; face-only Pi tests do not validate upper-body tracking. The verified face/servo behavior remains recorded, but the upper-body/person-track acceptance is open. Add upper-body tracking through existing VisionCore/tracker ownership (no actuator calls from VisionCore); face recognition may supplement identity only. Do not enable chassis following until upper-body tracking, distance mapping to the ToFs, bounded motion, and sensor-verified rerouting pass their required tests.
+Follow-target clarification from user (2026-10-26): Follow mode should track a moving person by their visible upper body, not merely keep the face centered. Existing follow implementation is face-box based; face-only Pi tests do not validate upper-body tracking. Add upper-body tracking through existing VisionCore/tracker ownership (no actuator calls from VisionCore); face recognition may supplement identity only. Do not enable chassis following until upper-body tracking, distance mapping to the ToFs, bounded motion, and sensor-verified rerouting pass their required tests.
+
+Passive face-tracking clarification from user (2026-10-26): Independently of follow mode, while the runtime is IDLE the Pi servo controller may center one stable, unambiguous face whether recognized or unknown. It must stop issuing tracking updates immediately when the wake word is detected and must not restart until the runtime returns to IDLE with fresh camera frames. Face presence never enables chassis movement. Implementation is in `thashu/main.py`; multiple/ambiguous faces are not arbitrarily selected. Hardware validation remains pending.
