@@ -60,6 +60,7 @@ vision = VisionCore()
 eyes   = Eyes()
 follow_logic = FollowLogic()
 servo_tracker = ServoTracker()
+_auto_face_track_id = None
 _follow_start_pending = False
 _follow_region_pending = None
 _motion_timer = None
@@ -169,7 +170,14 @@ def safe_play(path: str):
     time.sleep(0.15)
 
 def transition_runtime(target_state):
-    global _follow_start_pending, _follow_region_pending
+    global _auto_face_track_id, _follow_start_pending, _follow_region_pending
+
+    if runtime.current == RuntimeState.IDLE and target_state != RuntimeState.IDLE:
+        if not follow_logic.enabled:
+            if _auto_face_track_id is not None:
+                print(f"[SERVO] Automatic face tracking paused at {target_state}")
+            _auto_face_track_id = None
+            servo_tracker.stop_search()
 
     if runtime.current == RuntimeState.IDLE and target_state != RuntimeState.IDLE and follow_logic.enabled:
         follow_logic.stop()
@@ -190,6 +198,7 @@ def transition_runtime(target_state):
     print(f"[STATE] {previous.value} -> {current.value}")
 
     if current == RuntimeState.IDLE and _follow_start_pending:
+        _auto_face_track_id = None
         follow_logic.start()
         if _follow_region_pending is not None:
             follow_logic.request_region(_follow_region_pending)
@@ -394,6 +403,54 @@ def update_follow_from_vision(snapshot):
         announce_follow_notice(decision["notice"])
 
 
+def update_idle_face_tracking(snapshot):
+    """Track one visible face with the camera servos while idle, independent of identity."""
+    global _auto_face_track_id
+
+    if runtime.current != RuntimeState.IDLE or follow_logic.enabled:
+        return
+
+    observed_at = (snapshot or {}).get("observed_at")
+    if not isinstance(observed_at, (int, float)):
+        _auto_face_track_id = None
+        servo_tracker.stop_search()
+        return
+    age = time.monotonic() - observed_at
+    if age < 0 or age > 0.35:
+        _auto_face_track_id = None
+        servo_tracker.stop_search()
+        return
+
+    faces = (snapshot or {}).get("faces") or []
+    candidates = [
+        face for face in faces
+        if isinstance(face, dict)
+        and face.get("track_id") is not None
+        and not face.get("ambiguous", True)
+    ]
+    target = next(
+        (face for face in candidates if face.get("track_id") == _auto_face_track_id),
+        None,
+    )
+    if target is None and len(candidates) == 1:
+        target = candidates[0]
+        _auto_face_track_id = target["track_id"]
+        print(
+            f"[SERVO] Automatic face tracking started "
+            f"(track={_auto_face_track_id}, name={target.get('name', 'Unknown')})"
+        )
+    elif target is None:
+        if _auto_face_track_id is not None:
+            print("[SERVO] Automatic face tracking stopped; no unique face target")
+        _auto_face_track_id = None
+        servo_tracker.stop_search()
+        return
+
+    frame_w, frame_h = (snapshot or {}).get("frame_size", (640, 480))
+    x, y = target["center"]
+    servo_tracker.update(x, y, frame_w, frame_h)
+
+
 def process_safety_events():
     for event in motors.gpio.drain_events():
         if event == "EVENT|0|STOP|OBSTACLE":
@@ -454,6 +511,7 @@ def main():
         # ── Pass vision state to attention system ─────────────────────────
         vis = vision.get_state()
         update_follow_from_vision(vis)
+        update_idle_face_tracking(vis)
 
         is_speech_now = vad.is_speech(chunk)
         attn.update(vis["faces"], is_speech_now)
