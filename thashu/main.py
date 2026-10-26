@@ -204,7 +204,7 @@ def transition_runtime(target_state):
             follow_logic.request_region(_follow_region_pending)
         _follow_start_pending = False
         _follow_region_pending = None
-        print("[FOLLOW] Follow mode enabled; waiting for fresh face perception")
+        print("[FOLLOW] Follow mode enabled; waiting for fresh upper-body perception")
 
     return current
 
@@ -344,7 +344,7 @@ def announce_safety_message(message):
 
 def announce_follow_notice(notice):
     messages = {
-        "no_target": "I haven't found a face yet. I'm scanning with my camera and will keep searching.",
+        "no_target": "I haven't found an upper body yet. I'm scanning with my camera and will keep searching.",
         "selection_required": "I see several people. Say follow left, follow center, or follow right.",
         "selection_not_unique": "I can't identify one person in that direction. Please choose left, center, or right again.",
         "target_lost": "I lost the selected person. I stopped tracking them. Say follow me again when they are visible to select again.",
