@@ -22,9 +22,14 @@ class ServoTracker:
  
         self._last_send = 0
         self._last_log  = 0
+        self._search_active = False
+        self._search_direction = 1
+        self._search_tilt_direction = 1
+        self._search_last_step = 0.0
         print("[SERVO] Initialized")
  
     def update(self, target_x, target_y, frame_w, frame_h):
+        self._search_active = False
         cx = frame_w // 2
         cy = frame_h // 2
  
@@ -67,7 +72,45 @@ class ServoTracker:
             print(f"[SERVO] Pan:{int(self.pan)} Tilt:{int(self.tilt)}")
             self._last_log = now
  
+    def search_step(self):
+        """Sweep the head slowly while follow mode searches for a face."""
+        now = time.monotonic()
+        if not self._search_active:
+            self._search_active = True
+            self._search_direction = -1 if self.pan >= 125 else 1
+            self._search_tilt_direction = -1 if self.tilt >= 105 else 1
+            self.pan = max(50.0, min(130.0, self.pan))
+            self.tilt = max(75.0, min(105.0, self.tilt))
+            self._search_last_step = 0.0
+        if now - self._search_last_step < 0.35:
+            return
+        self._search_last_step = now
+
+        next_pan = self.pan + self._search_direction * 8.0
+        if next_pan >= 125.0:
+            next_pan = 125.0
+            self._search_direction = -1
+            self.tilt += self._search_tilt_direction * 10.0
+        elif next_pan <= 55.0:
+            next_pan = 55.0
+            self._search_direction = 1
+            self.tilt += self._search_tilt_direction * 10.0
+
+        if self.tilt >= 105.0:
+            self.tilt = 105.0
+            self._search_tilt_direction = -1
+        elif self.tilt <= 75.0:
+            self.tilt = 75.0
+            self._search_tilt_direction = 1
+
+        self.pan = next_pan
+        self.gpio.send(f"SERVO|PAN_TILT|{int(self.pan)}|{int(self.tilt)}")
+
+    def stop_search(self):
+        self._search_active = False
+
     def center(self):
+        self._search_active = False
         self.pan  = 90.0
         self.tilt = 90.0
         self.gpio.send("SERVO|PAN_TILT|90|90")
