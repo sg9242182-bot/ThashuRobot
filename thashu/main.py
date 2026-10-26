@@ -172,6 +172,7 @@ def transition_runtime(target_state):
 
     if runtime.current == RuntimeState.IDLE and target_state != RuntimeState.IDLE and follow_logic.enabled:
         follow_logic.stop()
+        servo_tracker.stop_search()
         sequence = stop_motion()
         print(f"[FOLLOW] Stopped before runtime interaction (STOP sequence {sequence})")
 
@@ -332,7 +333,7 @@ def announce_safety_message(message):
 
 def announce_follow_notice(notice):
     messages = {
-        "no_target": "I don't see anyone to follow yet. Please move into view.",
+        "no_target": "I haven't found a face yet. I'm scanning with my camera and will keep searching.",
         "selection_required": "I see several people. Say follow left, follow center, or follow right.",
         "selection_not_unique": "I can't identify one person in that direction. Please choose left, center, or right again.",
         "target_lost": "I lost the selected person. I stopped tracking them. Say follow me again when they are visible to select again.",
@@ -368,6 +369,7 @@ def update_follow_from_vision(snapshot):
         print(f"[FOLLOW] No safe target action; STOP sent (sequence {sequence})")
     target = decision["target"]
     if target is not None:
+        servo_tracker.stop_search()
         if not motors.gpio.is_connected():
             follow_logic.stop()
             sequence = stop_motion()
@@ -377,6 +379,15 @@ def update_follow_from_vision(snapshot):
         frame_w, frame_h = snapshot.get("frame_size", (640, 480))
         x, y = target["center"]
         servo_tracker.update(x, y, frame_w, frame_h)
+    elif decision["state"] in (FollowLogic.WAITING_FOR_TARGET, FollowLogic.SEARCHING_FOR_TARGET):
+        observed_at = snapshot.get("observed_at")
+        frame_age = time.monotonic() - observed_at if isinstance(observed_at, (int, float)) else None
+        if frame_age is not None and 0.0 <= frame_age <= FollowLogic.MAX_FRAME_AGE_SECONDS:
+            servo_tracker.search_step()
+        else:
+            servo_tracker.stop_search()
+    else:
+        servo_tracker.stop_search()
     if decision["notice"]:
         announce_follow_notice(decision["notice"])
 
@@ -533,17 +544,19 @@ def main():
 
                 if (follow_command := get_follow_command(text)) == "STOP":
                     follow_logic.stop()
+                    servo_tracker.stop_search()
                     stop_sequence = stop_motion()
                     print(f"[FOLLOW] Explicit follow cancel; STOP sequence {stop_sequence}")
                     response = "I stopped following."
                 elif follow_command == "START":
                     queue_follow_start()
-                    response = "Follow mode is on. I will track one selected person with the camera; the wheels stay stopped until follow distance and route safety are calibrated."
+                    response = "Follow mode is on. I will scan with my camera and track one selected face; the wheels stay stopped until follow distance and route safety are calibrated."
                 elif follow_command in ("LEFT", "CENTER", "RIGHT"):
                     queue_follow_start(follow_command)
                     response = f"I'll select the unique person on your {follow_command.lower()} after the camera resumes."
                 elif is_stop_command(text):
                     follow_logic.stop()
+                    servo_tracker.stop_search()
                     print("[COMMAND] Explicit STOP recognized; sending directly to ESP32")
                     stop_sequence = stop_motion()
                     if stop_sequence is None:
