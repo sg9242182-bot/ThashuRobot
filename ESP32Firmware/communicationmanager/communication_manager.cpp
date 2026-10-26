@@ -135,7 +135,9 @@ void CommunicationManager::sendTelemetry() {
         else Serial.print("NA");
     }
     Serial.print("|US_REAR|");
-    if (rear->isFresh() && rear->isValid()) Serial.print((long)(rear->getDistanceCm() * 10.0f));
+    if (!rear->isFresh()) Serial.print("NA");
+    else if (rear->isValid()) Serial.print((long)(rear->getDistanceCm() * 10.0f));
+    else if (rear->isOutOfRange()) Serial.print("FAR");
     else Serial.print("NA");
     Serial.println();
 }
