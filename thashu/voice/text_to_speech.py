@@ -53,8 +53,11 @@ COMMAND_VOICE_PROMPTS = {
 def _quick_response_voice_prompts():
     """Build stable cache names for every possible fixed quick-response reply."""
     prompts = {}
+    command_replies = set(COMMAND_VOICE_PROMPTS.values())
     for replies in QuickResponses().data.values():
         for reply in replies:
+            if reply in command_replies:
+                continue
             digest = hashlib.sha256(reply.encode("utf-8")).hexdigest()[:16]
             prompts[f"quick_{digest}"] = reply
     return prompts
