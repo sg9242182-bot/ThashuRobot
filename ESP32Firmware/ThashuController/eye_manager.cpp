@@ -8,7 +8,7 @@ EyeManager::EyeManager()
   _currentTarget(EXPR_IDLE),
   _blinkActive(false),
   _blinkStartMs(0),
-  _blinkDurationMs(200),
+  _blinkDurationMs(360),
   _renderDirty(true),
   _ready(false) {
 
@@ -23,7 +23,7 @@ bool EyeManager::begin() {
 
   _ready = _display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR);
   if (!_ready) return false;
-  _nextAutoBlinkMs = millis() + 3500;
+  _nextAutoBlinkMs = millis() + 2500;
   _display.clearDisplay();
   _display.display();
 
@@ -39,7 +39,8 @@ void EyeManager::update() {
   const unsigned long now = millis();
   if ((long)(now - _nextAutoBlinkMs) >= 0) {
     triggerBlink();
-    _nextAutoBlinkMs = now + 4000;
+    Serial.println(F("DBG|EYES|AUTO_BLINK"));
+    _nextAutoBlinkMs = now + 3500;
   }
   if (now - _lastHealthCheckMs >= 500) {
     _lastHealthCheckMs = now;
@@ -233,8 +234,15 @@ float EyeManager::getBlinkAmount(unsigned long now) {
     _blinkActive = false;
     return 0.0f;
   }
-  float t = (float)elapsed / (float)_blinkDurationMs;
-  return (t < 0.5f) ? easeInOutCubic(t / 0.5f) : 1.0f - easeInOutCubic((t - 0.5f) / 0.5f);
+  // Close over 80 ms, hold fully closed for 150 ms, then reopen over 130 ms.
+  // The closed hold makes the blink visible even when OLED refresh is busy.
+  if (elapsed < 80) {
+    return easeInOutCubic((float)elapsed / 80.0f);
+  }
+  if (elapsed < 230) {
+    return 1.0f;
+  }
+  return 1.0f - easeInOutCubic((float)(elapsed - 230) / 130.0f);
 }
 
 // ---------------------------------------------------------
