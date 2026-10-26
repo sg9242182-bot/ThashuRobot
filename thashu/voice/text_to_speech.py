@@ -28,6 +28,20 @@ COMMAND_VOICE_PROMPTS = {
     "obstacle_stop": "I stopped because an obstacle was detected.",
     "obstacle_blocked_v2": "I can't move because an obstacle was detected.",
     "safety_stop": "The safety system stopped the move, so I didn't move. Check for an obstacle or sensor issue.",
+    "sensor_not_ready_forward": "A front safety sensor isn't ready, so I can't move forward.",
+    "sensor_not_ready_reverse": "My rear sensor isn't ready, so I can't move backward.",
+    "sensor_not_ready_turn": "A safety sensor isn't ready, so I can't turn.",
+    "ack_timeout": "I couldn't confirm that move, so I stopped.",
+    "controller_unavailable": "I couldn't reach the motor controller, so I can't move.",
+    "not_understood": "I don't understand, please say that again.",
+    "follow_stopped": "I stopped following.",
+    "follow_started": "Follow mode is on. I will scan with my camera and track one selected face; the wheels stay stopped until follow distance and route safety are calibrated.",
+    "follow_selection_required": "I see several people. Say follow left, follow center, or follow right.",
+    "follow_no_face": "I haven't found a face yet. I'm scanning with my camera and will keep searching.",
+    "follow_target_lost": "I lost the selected person. I stopped tracking them. Say follow me again when they are visible to select again.",
+    "follow_target_ambiguous": "I can't tell which person you selected. Following is stopped; say follow me again to choose a target.",
+    "follow_stale_camera": "The camera feed is stale, so I stopped following. Say follow me again after the camera is working.",
+    "follow_link_lost": "I lost the motor and servo controller connection, so follow mode stopped. Say follow me again after it reconnects.",
 }
 _PROMPT_TO_VOICE = {text: name for name, text in COMMAND_VOICE_PROMPTS.items()}
 
