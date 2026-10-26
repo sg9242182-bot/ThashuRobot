@@ -56,6 +56,7 @@ class GPIOControl:
         self._acknowledgements = {}
         self._last_heartbeat = 0.0
         self._last_rx_monotonic = 0.0
+        self._sensor_snapshot = None
         self._last_connect_attempt = 0.0
         self._stop_event = threading.Event()
 
@@ -288,6 +289,8 @@ class GPIOControl:
                 line = raw.decode("ascii", errors="replace").strip()
                 if line:
                     self._incoming.put(line)
+                    if line.startswith("TEL|"):
+                        self._update_sensor_snapshot(line)
                     if line.startswith("ACK|"):
                         fields = line.split("|", 2)
                         try:
@@ -313,6 +316,55 @@ class GPIOControl:
             except Exception as exc:
                 # A malformed inbound frame must not kill the reader thread.
                 print(f"[GPIO] ESP32 receive error: {exc}")
+
+    def _update_sensor_snapshot(self, line):
+        """Parse one ESP32 sensor frame and publish a timestamped snapshot."""
+        fields = line.split("|")
+        if len(fields) != 11 or fields[:3] != ["TEL", "0", "SENSORS"]:
+            return
+
+        raw = dict(zip(fields[3::2], fields[4::2]))
+        labels = ("TOF_L", "TOF_C", "TOF_R", "US_REAR")
+        if any(label not in raw for label in labels):
+            return
+
+        def parse_value(value):
+            if value == "FAR":
+                return "FAR"
+            if value == "NA":
+                return None
+            try:
+                distance = int(value)
+            except (TypeError, ValueError):
+                return False
+            return distance if distance >= 0 else False
+
+        parsed = [parse_value(raw[label]) for label in labels]
+        if any(value is False for value in parsed):
+            return
+
+        snapshot = {
+            "tof_left_mm": parsed[0],
+            "tof_center_mm": parsed[1],
+            "tof_right_mm": parsed[2],
+            "rear_mm": parsed[3],
+            "received_at": time.monotonic(),
+        }
+        with self._state_lock:
+            self._sensor_snapshot = snapshot
+
+    def get_sensor_snapshot(self, max_age=0.2):
+        """Return a copy of fresh sensor telemetry, or None if missing/stale.
+
+        Numeric values are millimetres; out-of-range channels are "FAR";
+        unavailable channels are None. The timestamp uses time.monotonic().
+        """
+        now = time.monotonic()
+        with self._state_lock:
+            snapshot = self._sensor_snapshot
+            if snapshot is None or now - snapshot["received_at"] > max_age:
+                return None
+            return dict(snapshot)
 
     # ------------------------------------------------------------------
     # Lifecycle / status
