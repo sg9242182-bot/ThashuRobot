@@ -173,6 +173,34 @@ def get_direction_command(user_input: str):
     return _DIRECTION_COMMANDS.get(normalized)
 
 
+_LOOK_COMMANDS = {
+    "look up": "UP",
+    "look upward": "UP",
+    "look to the left": "LEFT",
+    "look left": "LEFT",
+    "look left side": "LEFT",
+    "look to the left side": "LEFT",
+    "look on the left": "LEFT",
+    "look right": "RIGHT",
+    "look to the right": "RIGHT",
+    "look right side": "RIGHT",
+    "look to the right side": "RIGHT",
+    "look on the right": "RIGHT",
+    "look down": "DOWN",
+    "look downward": "DOWN",
+    "look straight": "CENTER",
+    "look straight ahead": "CENTER",
+    "look center": "CENTER",
+    "look at the center": "CENTER",
+}
+
+
+def get_look_command(user_input: str):
+    """Return a strictly matched head-servo look direction or None."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", (user_input or "").lower()).strip()
+    return _LOOK_COMMANDS.get(normalized)
+
+
 def is_forward_command(user_input: str) -> bool:
     """Accept only explicit forward phrases with an optional recognized speed."""
     return get_forward_speed(user_input) is not None
