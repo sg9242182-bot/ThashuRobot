@@ -519,7 +519,7 @@ Acceptance:
 \[ ] Automated tests, Pi integration tests, and controlled physical acceptance pass; no checklist box is checked from code inspection alone.
 
 
-Implementation snapshot (2026-10-26): Reused existing files; no new runtime module was introduced. The current follow perception remains face-box based and does not yet meet the upper-body tracking requirement.
+Implementation snapshot (2026-10-26): Added thashu/vision/person_detection.py because Phase 5 required a separate upper-body detector; reused VisionCore, CentroidTracker, FollowLogic, and ServoTracker. VisionCore now publishes stable face and upper-body tracks separately. The upper-body path has not been tested on the Pi; chassis-follow movement remains disabled pending sensor/target calibration.
 - `thashu/core/decision.py`: added exact “follow me”, “stop following”, and unique left/center/right selection phrases. These dispatch deterministically before Brain/LLM.
 - `thashu/vision/follow_logic.py`: added OFF-by-default follow session state, fresh-frame checks, unique target selection, no silent target transfer, and one-shot stop/notice decisions. Any target loss, ambiguity, or stale frame requires an explicit reselection; no face images or embeddings are stored.
 - `thashu/vision/tracker.py`: added bounded centroid association plus overlap/crossing ambiguity flags.
@@ -1046,6 +1046,12 @@ Phase 5 user-reported validation update (2026-10-26): The user confirms both pre
 
 Phase 5 sensor-telemetry prerequisite (2026-10-26): Extended the existing `thashu/hardware/gpio_control.py` to parse ESP32 `TEL|0|SENSORS` frames and expose `get_sensor_snapshot(max_age=0.2)`. The returned copy includes monotonic receive time and left/center/right ToF plus rear ultrasonic values in millimetres; `FAR` and `NA` remain distinct, and missing/stale telemetry returns `None`. This is read-only infrastructure for future route evaluation and does not issue motor commands or enable chassis follow. Verify parsed fresh/stale telemetry on the Pi before relying on it; target-to-ToF mapping and safe-follow-distance calibration remain hardware prerequisites.
 
+
+
+
+Upper-body tracking implementation (2026-10-26): Added thashu/vision/person_detection.py, which uses OpenCV's packaged haarcascade_upperbody.xml; the detector degrades to no person tracks if that cascade is unavailable, preserving face and voice startup. VisionCore stabilizes upper-body detections across three frames and publishes persons with independent short-lived tracker IDs, while retaining separate face detections and recognition. Existing FollowLogic now selects persons from fresh snapshots (with a compatibility fallback for old face-only snapshots), and explicit follow aims the servo at the selected upper-body box. This Haar cascade is an initial frontal upper-body detector; profile views, occlusion, and motion robustness still require Pi camera validation. No tests were run.
+
+Chassis-follow gate (2026-10-26): Follow mode still does not issue forward/turn motor commands. The existing implementation only steers the camera servo and sends STOP on target loss. Do not enable chassis movement until the camera-to-ToF mapping identifies which fresh sensor reading belongs to the selected target, the desired following distance and robot clearance are physically calibrated, and a bounded motor lease plus fail-safe obstacle behavior is implemented and tested. Available front/rear sensors enforce ESP32 safety stops, but do not by themselves establish target distance or prove a side route/swept turning path is clear. Upper-body and chassis-follow acceptance remain unchecked.
 
 Follow-target clarification from user (2026-10-26): Follow mode should track a moving person by their visible upper body, not merely keep the face centered. Existing follow implementation is face-box based; face-only Pi tests do not validate upper-body tracking. Add upper-body tracking through existing VisionCore/tracker ownership (no actuator calls from VisionCore); face recognition may supplement identity only. Do not enable chassis following until upper-body tracking, distance mapping to the ToFs, bounded motion, and sensor-verified rerouting pass their required tests.
 
