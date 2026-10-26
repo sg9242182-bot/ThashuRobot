@@ -90,11 +90,10 @@ void UltrasonicManager::update() {
     /*
      * Timeout handling.
      *
-     * This timeout is measured from the moment
-     * we actually triggered the HC-SR04.
-     *
-     * Therefore it also works correctly when
-     * NO rising edge is ever received.
+     * This 40 ms timeout is measured from the trigger.
+     * It allows the HC-SR04's 38 ms no-target pulse to
+     * finish and be classified as FAR before timeout.
+     * A pulse that remains high beyond this is malformed.
      */
     if (waitingForEcho &&
         (micros() - measurementStartTime >= ECHO_TIMEOUT_US)) {
