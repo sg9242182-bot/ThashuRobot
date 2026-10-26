@@ -6,11 +6,14 @@ class FollowLogic:
 
     OFF = "OFF"
     WAITING_FOR_TARGET = "WAITING_FOR_TARGET"
+    SEARCHING_FOR_TARGET = "SEARCHING_FOR_TARGET"
     SELECTING_TARGET = "SELECTING_TARGET"
     TRACKING = "TRACKING"
     NEEDS_RESELECTION = "NEEDS_RESELECTION"
 
     MAX_FRAME_AGE_SECONDS = 0.35
+    SEARCH_GRACE_SECONDS = 12.0
+    NO_TARGET_NOTICE_DELAY_SECONDS = 15.0
 
     def __init__(self, frame_w=640, frame_h=480):
         self.frame_w = frame_w
@@ -21,6 +24,8 @@ class FollowLogic:
         self.pending_region = None
         self._notice_latched = set()
         self._stop_latched = False
+        self._waiting_since = None
+        self._target_lost_since = None
 
     def start(self):
         """Enable follow mode, but defer target choice until fresh perception arrives."""
@@ -30,6 +35,8 @@ class FollowLogic:
         self.pending_region = None
         self._notice_latched.clear()
         self._stop_latched = False
+        self._waiting_since = None
+        self._target_lost_since = None
 
     def stop(self):
         """Disable follow mode and discard the session target."""
@@ -40,6 +47,8 @@ class FollowLogic:
         self.pending_region = None
         self._notice_latched.clear()
         self._stop_latched = False
+        self._waiting_since = None
+        self._target_lost_since = None
         return was_enabled
 
     def request_region(self, region):
@@ -120,21 +129,28 @@ class FollowLogic:
         faces, width = self._fresh_faces(snapshot or {}, now)
         if faces is None:
             if self.state == self.TRACKING:
-                # Tracker IDs are not identity proof across a camera gap.
-                self.target_id = None
-                self.state = self.NEEDS_RESELECTION
-                self._notice_latched.add("reselect_target")
+                self.state = self.SEARCHING_FOR_TARGET
+                self._target_lost_since = now
                 self._request_stop_once(result)
-                result.update(
-                    state=self.state,
-                    notice=self._notice_once("stale_frame"),
-                )
+                result.update(state=self.state)
+            if self.state == self.SEARCHING_FOR_TARGET:
+                if now - self._target_lost_since >= self.SEARCH_GRACE_SECONDS:
+                    self.target_id = None
+                    self._target_lost_since = None
+                    self.state = self.NEEDS_RESELECTION
+                    result.update(state=self.state, notice=self._notice_once("target_lost"))
+                else:
+                    result.update(state=self.state)
             return result
 
         if self.state == self.WAITING_FOR_TARGET:
             if not faces:
-                result["notice"] = self._notice_once("no_target")
+                if self._waiting_since is None:
+                    self._waiting_since = now
+                if now - self._waiting_since >= self.NO_TARGET_NOTICE_DELAY_SECONDS:
+                    result["notice"] = self._notice_once("no_target")
                 return result
+            self._waiting_since = None
             selected = self._choose(faces, width)
             if selected is not None:
                 self.target_id = selected["track_id"]
@@ -163,6 +179,33 @@ class FollowLogic:
             result.update(state=self.state, target=selected)
             return result
 
+        if self.state == self.SEARCHING_FOR_TARGET:
+            matching = next(
+                (face for face in faces if face.get("track_id") == self.target_id),
+                None,
+            )
+            if matching is not None and matching.get("ambiguous", False):
+                self.target_id = None
+                self._target_lost_since = None
+                self.state = self.NEEDS_RESELECTION
+                result.update(state=self.state, notice=self._notice_once("target_ambiguous"))
+                return result
+            if matching is not None:
+                self.state = self.TRACKING
+                self._target_lost_since = None
+                self._stop_latched = False
+                self._notice_latched.clear()
+                result.update(state=self.state, target=matching)
+                return result
+            if now - self._target_lost_since >= self.SEARCH_GRACE_SECONDS:
+                self.target_id = None
+                self._target_lost_since = None
+                self.state = self.NEEDS_RESELECTION
+                result.update(state=self.state, notice=self._notice_once("target_lost"))
+            else:
+                result.update(state=self.state)
+            return result
+
         if self.state == self.NEEDS_RESELECTION:
             return result
 
@@ -183,12 +226,11 @@ class FollowLogic:
 
         if self.state == self.TRACKING:
             if matching is None:
-                # No appearance identity is retained for follow mode, so do not
-                # trust centroid reacquisition after even a short occlusion.
-                self.target_id = None
-                self.state = self.NEEDS_RESELECTION
-                self._notice_latched.add("reselect_target")
-                result.update(state=self.state, notice=self._notice_once("target_lost"))
+                # Search briefly for this exact short-lived track ID. Never lock
+                # onto a different face automatically when the target vanishes.
+                self.state = self.SEARCHING_FOR_TARGET
+                self._target_lost_since = now
+                result.update(state=self.state)
                 self._request_stop_once(result)
                 return result
             self._stop_latched = False
