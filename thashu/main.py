@@ -200,6 +200,12 @@ def transition_runtime(target_state):
     if current == RuntimeState.IDLE and _follow_start_pending:
         _auto_face_track_id = None
         follow_logic.start()
+        tilt_sequence = servo_tracker.set_follow_tilt()
+        print(
+            "[FOLLOW] Camera tilt fixed at "
+            f"{int(servo_tracker.tilt)} degrees "
+            f"(servo sequence {tilt_sequence})"
+        )
         if _follow_region_pending is not None:
             follow_logic.request_region(_follow_region_pending)
         _follow_start_pending = False
@@ -387,9 +393,9 @@ def update_follow_from_vision(snapshot):
             print(f"[FOLLOW] Controller link lost; follow stopped (STOP sequence {sequence})")
             announce_follow_notice("link_lost")
             return
-        frame_w, frame_h = snapshot.get("frame_size", (640, 480))
-        x, y = target["center"]
-        servo_tracker.update(x, y, frame_w, frame_h)
+        frame_w, _frame_h = snapshot.get("frame_size", (640, 480))
+        x, _y = target["center"]
+        servo_tracker.update_pan_only(x, frame_w)
     elif decision["state"] in (FollowLogic.WAITING_FOR_TARGET, FollowLogic.SEARCHING_FOR_TARGET):
         observed_at = snapshot.get("observed_at")
         frame_age = time.monotonic() - observed_at if isinstance(observed_at, (int, float)) else None
