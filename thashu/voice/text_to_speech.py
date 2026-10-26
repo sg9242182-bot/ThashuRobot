@@ -1,8 +1,10 @@
+import hashlib
 import os
 import subprocess
 import threading
 
 from core.model_paths import model_path
+from core.quick_responses import QuickResponses
 from voice.sound_player import _lock, play
 
 PIPER_PATH = os.environ.get(
@@ -48,7 +50,21 @@ COMMAND_VOICE_PROMPTS = {
     "look_right": "Looking right.",
     "look_center": "Looking straight ahead.",
 }
-_PROMPT_TO_VOICE = {text: name for name, text in COMMAND_VOICE_PROMPTS.items()}
+def _quick_response_voice_prompts():
+    """Build stable cache names for every possible fixed quick-response reply."""
+    prompts = {}
+    for replies in QuickResponses().data.values():
+        for reply in replies:
+            digest = hashlib.sha256(reply.encode("utf-8")).hexdigest()[:16]
+            prompts[f"quick_{digest}"] = reply
+    return prompts
+
+
+# QuickResponses chooses among variants, so pre-cache every unique possible line.
+# The name is a content hash, keeping filenames stable without storing long text.
+ALL_VOICE_PROMPTS = _quick_response_voice_prompts()
+ALL_VOICE_PROMPTS.update(COMMAND_VOICE_PROMPTS)
+_PROMPT_TO_VOICE = {text: name for name, text in ALL_VOICE_PROMPTS.items()}
 
 
 def _voice_path(name):
@@ -58,7 +74,7 @@ def _voice_path(name):
 def prepare_command_voice_cache():
     """Pre-render short command replies to WAV so playback avoids live Piper latency."""
     os.makedirs(VOICE_CACHE_DIR, exist_ok=True)
-    for name, prompt in COMMAND_VOICE_PROMPTS.items():
+    for name, prompt in ALL_VOICE_PROMPTS.items():
         output_path = _voice_path(name)
         if os.path.isfile(output_path) and os.path.getsize(output_path) > 44:
             print(f"[PIPER] Cached voice ready: {name}")
