@@ -73,7 +73,7 @@ class ServoTracker:
             self._last_log = now
  
     def search_step(self):
-        """Sweep the head slowly while follow mode searches for a face."""
+        """Sweep the head slowly while follow mode searches for a person."""
         now = time.monotonic()
         if not self._search_active:
             self._search_active = True
