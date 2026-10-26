@@ -9,6 +9,7 @@ public:
 
     float getDistanceCm() const;
     bool isValid() const;
+    bool isOutOfRange() const;
     bool isFresh() const;
     bool isObstacleDetected() const;
 
@@ -25,7 +26,9 @@ private:
 
     float distanceCm = 0.0f;
     bool valid = false;
+    bool outOfRange = false;
     bool obstacleDetected = false;
+    bool hasReading = false;
 
     unsigned long lastMeasurementTime = 0;
     unsigned long measurementStartTime = 0;
