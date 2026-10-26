@@ -65,6 +65,7 @@ class VisionCore:
         self.frame_size = (640, 480)
         self.person_present = False
         self._reported_face_count = 0
+        self._reported_person_count = 0
         # Haar detections can flicker between frames. Only publish a face after
         # it is spatially consistent across three consecutive camera frames.
         self._detection_candidates = []
@@ -103,6 +104,7 @@ class VisionCore:
             self.latest_frame_at = None
             self.person_present = False
             self._reported_face_count = 0
+            self._reported_person_count = 0
             self._tracker_reset_pending = True
 
     def start(self):
@@ -140,6 +142,7 @@ class VisionCore:
                 self.current_people = []
                 self.latest_frame_at = None
                 self.person_present = False
+                self._reported_person_count = 0
             thread = self._thread
 
         if thread is not None and thread is not threading.current_thread():
@@ -441,6 +444,23 @@ class VisionCore:
                 self.latest_frame_at = frame_timestamp
                 self.frame_size = (frame_width, frame_height)
                 self.person_present = bool(faces or current_people)
+                previous_person_count = self._reported_person_count
+                self._reported_person_count = len(current_people)
+
+            if len(current_people) != previous_person_count:
+                if previous_person_count == 0 and current_people:
+                    print(
+                        "[VISION] Upper body detected "
+                        f"(count={len(current_people)}, "
+                        f"tracks={[person['track_id'] for person in current_people]})"
+                    )
+                elif not current_people:
+                    print("[VISION] No upper bodies detected")
+                else:
+                    print(
+                        "[VISION] Upper-body count changed: "
+                        f"{previous_person_count} -> {len(current_people)}"
+                    )
 
             if face_count != previous_count:
                 if previous_count == 0 and face_count > 0:
