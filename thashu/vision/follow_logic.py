@@ -92,7 +92,7 @@ class FollowLogic:
             and not face.get("ambiguous", True)
         )
 
-    def _fresh_faces(self, snapshot, now):
+    def _fresh_people(self, snapshot, now):
         observed_at = snapshot.get("observed_at")
         if not isinstance(observed_at, (int, float)):
             return None, None
@@ -101,7 +101,10 @@ class FollowLogic:
             return None, None
         size = snapshot.get("frame_size") or (self.frame_w, self.frame_h)
         width = int(size[0]) if size and size[0] else self.frame_w
-        return snapshot.get("faces") or [], width
+        people = snapshot.get("persons")
+        if people is None:  # Preserve compatibility with older snapshots/tests.
+            people = snapshot.get("faces")
+        return people or [], width
 
     def _choose(self, faces, width, region=None):
         candidates = [
@@ -115,7 +118,7 @@ class FollowLogic:
         """Return a target/stop/notice decision from one perception snapshot.
 
         The caller owns servo and motor interfaces. A missing, ambiguous, or stale
-        target never gets replaced silently by another face.
+        target never gets replaced silently by another person.
         """
         now = time.monotonic() if now is None else now
         result = {"state": self.state, "target": None, "stop_motion": False, "notice": None}
@@ -126,8 +129,8 @@ class FollowLogic:
             result.update(state=self.OFF, stop_motion=True, notice="paused_for_interaction")
             return result
 
-        faces, width = self._fresh_faces(snapshot or {}, now)
-        if faces is None:
+        people, width = self._fresh_people(snapshot or {}, now)
+        if people is None:
             if self.state == self.TRACKING:
                 self.state = self.SEARCHING_FOR_TARGET
                 self._target_lost_since = now
@@ -144,14 +147,14 @@ class FollowLogic:
             return result
 
         if self.state == self.WAITING_FOR_TARGET:
-            if not faces:
+            if not people:
                 if self._waiting_since is None:
                     self._waiting_since = now
                 if now - self._waiting_since >= self.NO_TARGET_NOTICE_DELAY_SECONDS:
                     result["notice"] = self._notice_once("no_target")
                 return result
             self._waiting_since = None
-            selected = self._choose(faces, width)
+            selected = self._choose(people, width)
             if selected is not None:
                 self.target_id = selected["track_id"]
                 self.state = self.TRACKING
@@ -167,7 +170,7 @@ class FollowLogic:
             if self.pending_region is None:
                 result.update(notice=self._notice_once("selection_required"))
                 return result
-            selected = self._choose(faces, width, self.pending_region)
+            selected = self._choose(people, width, self.pending_region)
             self.pending_region = None
             if selected is None:
                 result.update(notice=self._notice_once("selection_not_unique"))
@@ -181,7 +184,7 @@ class FollowLogic:
 
         if self.state == self.SEARCHING_FOR_TARGET:
             matching = next(
-                (face for face in faces if face.get("track_id") == self.target_id),
+                (person for person in people if person.get("track_id") == self.target_id),
                 None,
             )
             if matching is not None and matching.get("ambiguous", False):
@@ -210,7 +213,7 @@ class FollowLogic:
             return result
 
         matching = next(
-            (face for face in faces if face.get("track_id") == self.target_id),
+            (person for person in people if person.get("track_id") == self.target_id),
             None,
         )
         if matching is not None and matching.get("ambiguous", False):
@@ -227,7 +230,7 @@ class FollowLogic:
         if self.state == self.TRACKING:
             if matching is None:
                 # Search briefly for this exact short-lived track ID. Never lock
-                # onto a different face automatically when the target vanishes.
+                # onto a different person automatically when the target vanishes.
                 self.state = self.SEARCHING_FOR_TARGET
                 self._target_lost_since = now
                 result.update(state=self.state)
@@ -241,20 +244,20 @@ class FollowLogic:
         return result
 
     # Compatibility helpers for older callers. Target choice is deliberately
-    # restricted to exactly one face; a largest-face heuristic is unsafe.
-    def select_target(self, faces):
-        if len(faces or []) != 1:
+    # restricted to exactly one person; a largest-target heuristic is unsafe.
+    def select_target(self, people):
+        if len(people or []) != 1:
             return None
-        face = faces[0]
-        return face.get("center") if isinstance(face, dict) else (
-            (face[0] + face[2]) // 2,
-            (face[1] + face[3]) // 2,
+        person = people[0]
+        return person.get("center") if isinstance(person, dict) else (
+            (person[0] + person[2]) // 2,
+            (person[1] + person[3]) // 2,
         )
 
     def should_move_motors(self, cx, cy, threshold=0.25):
         """Legacy advisory only; this method does not issue hardware commands."""
         return "NONE"
 
-    def should_stop_motors(self, faces):
+    def should_stop_motors(self, people):
         """Legacy helper reports no-face; callers must issue STOP themselves."""
-        return not bool(faces)
+        return not bool(people)
