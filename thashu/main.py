@@ -524,6 +524,11 @@ def main():
 
         # ── IDLE: watch for wake word ─────────────────────────────────────
         if runtime.current == RuntimeState.IDLE:
+            # Servo motors can sound like a wake phrase. Keep openWakeWord's
+            # rolling buffer advancing with silence until 1.2 s after the last
+            # servo command, then resume normal detection.
+            if servo_tracker.last_command_at:
+                wake.suppress_until(servo_tracker.last_command_at + 1.2)
             if wake.process(chunk):
                 transition_runtime(RuntimeState.WAKE_DETECTED)
 
