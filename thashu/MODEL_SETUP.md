@@ -55,7 +55,6 @@ find "$THASHU_MODELS_DIR" -type f -printf '%p %s bytes\n' | sort
 | Feature | Path under `$THASHU_MODELS_DIR` | Source |
 |---|---|---|
 | Person / upper-body tracking | `pose_landmarker_lite.task` | MediaPipe Pose Landmarker Lite |
-|---|---|---|
 | Face recognition | `face/w600k_r50.onnx` | InsightFace `buffalo_l.zip` |
 | Wake word | `openwakeword/hey_jarvis_v0.1.onnx` | openWakeWord downloader |
 | Wake word support | `openwakeword/melspectrogram.onnx`, `embedding_model.onnx` | Same openWakeWord download |
