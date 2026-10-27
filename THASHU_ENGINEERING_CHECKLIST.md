@@ -440,7 +440,7 @@ Implementation and validation note (2026-10-17): Updated `thashu/vision/vision_c
 
 Phase 5 — Commanded Person Follow & Upper-Body Tracking
 
-Status: IN PROGRESS — architecture audit and servo-only follow implementation are complete; Pi hardware validation, calibrated chassis following, obstacle rerouting, and physical acceptance remain open.
+Status: IN PROGRESS — Pose Lite detector integration is on phase-5; full application validation, reliable range calibration, chassis following, obstacle rerouting, and physical acceptance remain open.
 
 Initial architecture audit (2026-10-25; before the implementation below):
 - `VisionCore` is perception-only and pauses inference outside IDLE, preserving Phase 4. It currently publishes face boxes/names/presence, but not track IDs or observation timestamps.
@@ -530,6 +530,8 @@ Implementation snapshot (2026-10-26): Added thashu/vision/person_detection.py be
 - `thashu/tests/test_vision_lifecycle.py`: verifies published short-lived track IDs and capture freshness while preserving the no-actuator VisionCore contract.
 - Verification on a temporary mirror of the branch source: Python compile checks passed; 11 follow-mode tests passed; 5 vision lifecycle tests passed. Raspberry Pi camera/servo tests have not been run.
 - Chassis motion is intentionally absent from this implementation tranche. No verified mapping connects the selected face to a fixed ToF beam or a safe follow-distance band. The existing ESP32 interlocks also require all front ToFs and rear sonar clear for turns. Implement and physically validate short motion leases, target-distance hysteresis, sensor-verified retreat/turn/recheck rerouting, and no-safe-route stop/report before enabling wheel follow. Do not mark chassis-follow or obstacle-reroute acceptance complete.
+
+Pose Lite benchmark and integration update (2026-10-27): The user tested MediaPipe 0.10.15 on the Raspberry Pi 4 (aarch64, Python 3.11) in an isolated venv with the 5.8 MB Pose Landmarker Lite task model. The one-person image-mode benchmark ran at about 6 FPS. Moving-distance trials reported pose/shoulder visibility on 181/182 frames at 150 cm, 182/183 at 160 cm, and 183/183 at 200 cm. Median shoulder widths were 109.8, 103.4, and 95.7 px, with overlapping 10th–90th percentile ranges (94.6–113.0, 64.4–106.8, 93.0–99.7 px); this is insufficient for a safe chassis-distance controller. On 2026-10-27, `thashu/vision/person_detection.py` was changed to use MediaPipe Pose Lite while preserving the existing box interface; `requirements.txt` pins the tested MediaPipe/OpenCV/NumPy/Protobuf/FlatBuffers runtime, and `MODEL_SETUP.md` documents the persistent model path. The new integration configures up to four poses, which was not part of the one-person benchmark. The integrated app, four-person selection, servo tracking with the new detector, dependency installation in the main environment, and chassis control remain unverified. No Phase 5 acceptance box is checked by this benchmark.
 
 \---
 
