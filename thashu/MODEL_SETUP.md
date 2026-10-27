@@ -54,6 +54,8 @@ find "$THASHU_MODELS_DIR" -type f -printf '%p %s bytes\n' | sort
 
 | Feature | Path under `$THASHU_MODELS_DIR` | Source |
 |---|---|---|
+| Person / upper-body tracking | `pose_landmarker_lite.task` | MediaPipe Pose Landmarker Lite |
+|---|---|---|
 | Face recognition | `face/w600k_r50.onnx` | InsightFace `buffalo_l.zip` |
 | Wake word | `openwakeword/hey_jarvis_v0.1.onnx` | openWakeWord downloader |
 | Wake word support | `openwakeword/melspectrogram.onnx`, `embedding_model.onnx` | Same openWakeWord download |
@@ -72,7 +74,17 @@ cd ~/ThashuRobot/thashu
 source ~/.venvs/thashu/bin/activate
 export THASHU_MODELS_DIR="$HOME/.local/share/thashu/models"
 python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 python -m pip install openwakeword huggingface_hub faster-whisper scipy
+```
+
+### Pose Lite person tracking
+
+The detector uses MediaPipe Pose Landmarker Lite through the tested Raspberry Pi-compatible MediaPipe 0.10.15 runtime. Keep the task model in the persistent model directory:
+
+```bash
+curl -fL 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task' -o "$THASHU_MODELS_DIR/pose_landmarker_lite.task"
+test -s "$THASHU_MODELS_DIR/pose_landmarker_lite.task"
 ```
 
 ### Wake word
@@ -133,6 +145,7 @@ python -c 'from voice.speech_to_text import _get_model; _get_model()'
 
 ```bash
 find "$THASHU_MODELS_DIR" -type f -printf '%p %s bytes\n' | sort
+test -s "$THASHU_MODELS_DIR/pose_landmarker_lite.task"
 test -s "$THASHU_MODELS_DIR/face/w600k_r50.onnx"
 test -s "$THASHU_MODELS_DIR/openwakeword/hey_jarvis_v0.1.onnx"
 test -s "$THASHU_MODELS_DIR/openwakeword/melspectrogram.onnx"
@@ -147,6 +160,7 @@ git -C ~/ThashuRobot check-ignore -v thashu/models/face/w600k_r50.onnx
 
 ## References
 
+- [MediaPipe Pose Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker)
 - [openWakeWord model downloader](https://github.com/dscripka/openWakeWord)
 - [InsightFace model-zoo release and checksum](https://github.com/deepinsight/insightface/releases/tag/model-zoo)
 - [InsightFace model licensing](https://github.com/deepinsight/insightface/blob/master/model_zoo/README.md)
