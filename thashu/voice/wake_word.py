@@ -154,6 +154,8 @@ class WakeWordEngine:
 
         self.last_detected = 0.0
         self.lock_event = threading.Event()
+        self._suppress_until = 0.0
+        self._suppression_active = False
 
         print(f"[WAKE] Initialized (model={self.model_name!r})")
 
@@ -175,6 +177,12 @@ class WakeWordEngine:
         self._hit_streak = 0
         self._recent_speech_chunks = 0
         self.lock_event.clear()
+
+    def suppress_until(self, monotonic_deadline: float):
+        """Mute servo-motion audio in the rolling wake model until it has settled."""
+        self._suppress_until = max(self._suppress_until, float(monotonic_deadline))
+        self._hit_streak = 0
+        self._recent_speech_chunks = 0
 
     # ── Detection ────────────────────────────────────────────────────────────
 
@@ -209,6 +217,25 @@ class WakeWordEngine:
 
         if self.lock_event.is_set():
             return False
+
+        if time.monotonic() < self._suppress_until:
+            # Keep the model's rolling audio window current without letting
+            # servo motor noise (or speech during the brief guard) activate it.
+            silence = np.zeros((len(audio_chunk) + RESAMPLE_DOWN - 1) // RESAMPLE_DOWN, dtype=np.int16)
+            try:
+                self.model.predict(silence)
+            except Exception as e:
+                print(f"[WAKE] Error while clearing servo-motion audio: {e}")
+            self._hit_streak = 0
+            self._recent_speech_chunks = 0
+            if not self._suppression_active:
+                print("[WAKE] Detection paused while servo moves/settles")
+                self._suppression_active = True
+            return False
+
+        if self._suppression_active:
+            print("[WAKE] Detection re-armed after servo settled")
+            self._suppression_active = False
 
         if time.time() - self.last_detected < self.cooldown:
             return False
