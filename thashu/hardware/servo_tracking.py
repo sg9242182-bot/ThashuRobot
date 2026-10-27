@@ -23,6 +23,7 @@ class ServoTracker:
         self.deadzone = 0.04
  
         self._last_send = 0
+        self.last_command_at = 0.0
         self._last_log  = 0
         self._search_active = False
         self._search_direction = 1
@@ -30,6 +31,13 @@ class ServoTracker:
         self._search_last_step = 0.0
         print("[SERVO] Initialized")
  
+    def _send_servo_command(self, command):
+        """Send a servo position and timestamp it for wake-noise suppression."""
+        sequence = self.gpio.send(command)
+        if sequence is not None:
+            self.last_command_at = time.monotonic()
+        return sequence
+
     def update(self, target_x, target_y, frame_w, frame_h):
         self._search_active = False
         cx = frame_w // 2
@@ -67,7 +75,7 @@ class ServoTracker:
             return
         self._last_send = now
  
-        self.gpio.send(f"SERVO|PAN_TILT|{int(self.pan)}|{int(self.tilt)}")
+        self._send_servo_command(f"SERVO|PAN_TILT|{int(self.pan)}|{int(self.tilt)}")
  
         # ── Debug log (once per second) ───────────────────────────────────────
         if now - self._last_log > 1.0:
@@ -80,7 +88,7 @@ class ServoTracker:
         angle = self.FOLLOW_FIXED_TILT_DEG if angle is None else float(angle)
         self.tilt = max(self.tilt_min, min(self.tilt_max, angle))
         self._last_send = time.time()
-        return self.gpio.send(
+        return self._send_servo_command(
             f"SERVO|PAN_TILT|{int(self.pan)}|{int(self.tilt)}"
         )
 
@@ -109,7 +117,7 @@ class ServoTracker:
         if now - self._last_send < 0.1:
             return
         self._last_send = now
-        self.gpio.send(
+        self._send_servo_command(
             f"SERVO|PAN_TILT|{int(self.pan)}|{int(self.tilt)}"
         )
 
@@ -136,7 +144,7 @@ class ServoTracker:
 
 
         self.pan = next_pan
-        self.gpio.send(f"SERVO|PAN_TILT|{int(self.pan)}|{int(self.tilt)}")
+        self._send_servo_command(f"SERVO|PAN_TILT|{int(self.pan)}|{int(self.tilt)}")
 
     def stop_search(self):
         self._search_active = False
@@ -162,7 +170,7 @@ class ServoTracker:
         self.pan = max(self.pan_min, min(self.pan_max, self.pan))
         self.tilt = max(self.tilt_min, min(self.tilt_max, self.tilt))
         self._last_send = time.time()
-        return self.gpio.send(
+        return self._send_servo_command(
             f"SERVO|PAN_TILT|{int(self.pan)}|{int(self.tilt)}"
         )
 
@@ -170,5 +178,5 @@ class ServoTracker:
         self._search_active = False
         self.pan  = 90.0
         self.tilt = 90.0
-        return self.gpio.send("SERVO|PAN_TILT|90|90")
+        return self._send_servo_command("SERVO|PAN_TILT|90|90")
         
