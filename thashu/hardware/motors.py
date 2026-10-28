@@ -16,17 +16,17 @@ class MotorController:
         return s
 
     def forward(self, speed=None):
-        self.gpio.send(f"MOTOR|FORWARD|{self._speed(speed)}")
+        return self.gpio.send(f"MOTOR|FORWARD|{self._speed(speed)}")
 
     def backward(self, speed=None):
-        self.gpio.send(f"MOTOR|BACKWARD|{self._speed(speed)}")
+        return self.gpio.send(f"MOTOR|BACKWARD|{self._speed(speed)}")
 
     def left(self, speed=None):
-        self.gpio.send(f"MOTOR|LEFT|{self._speed(speed)}")
+        return self.gpio.send(f"MOTOR|LEFT|{self._speed(speed)}")
 
     def right(self, speed=None):
-        self.gpio.send(f"MOTOR|RIGHT|{self._speed(speed)}")
+        return self.gpio.send(f"MOTOR|RIGHT|{self._speed(speed)}")
 
     def stop(self):
         # STOP is deliberately a dedicated high-priority protocol command.
-        self.gpio.send("STOP")
+        return self.gpio.send("STOP")
