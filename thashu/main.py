@@ -808,7 +808,7 @@ def main():
                     response = "I stopped following."
                 elif follow_command == "START":
                     queue_follow_start()
-                    response = "Follow mode is on. I will scan with my camera and track one selected face; the wheels stay stopped until follow distance and route safety are calibrated."
+                    response = "Follow mode is on. I'll search for one person and adjust my distance with short motor steps. If an obstacle blocks the path, I'll stop; automatic rerouting isn't enabled yet."
                 elif follow_command in ("LEFT", "CENTER", "RIGHT"):
                     queue_follow_start(follow_command)
                     response = f"I'll select the unique person on your {follow_command.lower()} after the camera resumes."
