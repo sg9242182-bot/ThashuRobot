@@ -562,7 +562,24 @@ def update_follow_from_vision(snapshot):
     decision = follow_logic.update(snapshot, runtime_idle=True)
     if decision["stop_motion"]:
         sequence = stop_motion()
-        print(f"[FOLLOW] No safe target action; STOP sent (sequence {sequence})")
+        observed_at = (snapshot or {}).get("observed_at")
+        frame_age = (
+            time.monotonic() - observed_at
+            if isinstance(observed_at, (int, float))
+            else None
+        )
+        tracks = [
+            (person.get("track_id"), bool(person.get("ambiguous", False)))
+            for person in ((snapshot or {}).get("persons") or [])
+            if isinstance(person, dict)
+        ]
+        reason = decision.get("notice") or "locked target missing, stale, or ambiguous"
+        age_text = f"{frame_age:.2f}s" if frame_age is not None else "unavailable"
+        print(
+            f"[FOLLOW] Safety STOP sent (sequence {sequence}); reason={reason}, "
+            f"state={decision['state']}, locked_track={follow_logic.target_id}, "
+            f"visible_tracks={tracks}, frame_age={age_text}"
+        )
     target = decision["target"]
     if target is not None:
         servo_tracker.stop_search()
