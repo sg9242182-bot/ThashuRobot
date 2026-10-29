@@ -140,6 +140,53 @@ def get_follow_command(user_input: str):
     return _FOLLOW_SELECTION_PHRASES.get(normalized)
 
 
+_RECOGNITION_ENROLL_PHRASES = {
+    "remember me",
+    "remember this person",
+    "remember this face",
+    "enroll me",
+    "register my face",
+}
+_RECOGNITION_CANCEL_PHRASES = {
+    "cancel enrollment",
+    "cancel registration",
+    "forget it",
+    "never mind",
+}
+_RECOGNITION_YES_PHRASES = {"yes", "yes confirm", "confirm", "save it"}
+_RECOGNITION_NO_PHRASES = {"no", "no cancel", "cancel", "do not save"}
+
+
+def _normalize_phrase(user_input):
+    return re.sub(r"[^a-z0-9']+", " ", (user_input or "").lower()).strip()
+
+
+def get_recognition_command(user_input):
+    """Return only exact, deterministic person-enrollment control phrases."""
+    normalized = _normalize_phrase(user_input)
+    if normalized in _RECOGNITION_ENROLL_PHRASES:
+        return "ENROLL"
+    if normalized in _RECOGNITION_CANCEL_PHRASES:
+        return "CANCEL"
+    if normalized in _RECOGNITION_YES_PHRASES:
+        return "CONFIRM"
+    if normalized in _RECOGNITION_NO_PHRASES:
+        return "REJECT"
+    return None
+
+
+def get_registration_name(user_input):
+    """Extract a short user-provided name only from explicit self-identification."""
+    normalized = _normalize_phrase(user_input)
+    match = re.fullmatch(r"(?:my name is|i am|i'm|call me) ([a-z][a-z .'-]{0,62})", normalized)
+    if not match:
+        return None
+    name = " ".join(match.group(1).split()).strip(" .'-")
+    if not name or len(name.split()) > 4:
+        return None
+    return name.title()
+
+
 _DIRECTION_COMMANDS = {
     "backward": "BACKWARD",
     "go backward": "BACKWARD",
