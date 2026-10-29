@@ -1160,3 +1160,6 @@ Phase 6 enrollment capture latency follow-up (2026-10-29): The user reports iden
 
 
 Phase 6 enrollment completion feedback and detector performance fix (2026-10-29): In response to repeated “still collecting clear views” reports, updated `thashu/vision/vision_core.py` to remove an accidental duplicate YuNet face/landmark inference on every camera frame. Enrollment recognition remains accelerated while active and logs each accepted sample. Updated `thashu/main.py` so the Pi main loop announces when all five required face images have been captured, then asks for the name; timeout or multiple-face failure is also announced. The capture prompt reports the accepted count, and a combined natural-name plus letter-spelling utterance can use the spelled suffix (e.g. “my name is Tharun T H A R U N”). No tests or Pi validation have been run; observe the `[VISION] Enrollment face samples n/5` and `[VISION] Required face images captured (5/5)` logs after pulling.
+
+
+Enrollment completion announcement follows the normal runtime supervisor transitions (IDLE → SPEAKING → RETURN_TO_IDLE → IDLE), keeping vision paused during voice playback as required by the existing lifecycle design. This code path has not yet been run on the Raspberry Pi.
