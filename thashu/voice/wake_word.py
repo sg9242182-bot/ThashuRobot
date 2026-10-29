@@ -154,8 +154,6 @@ class WakeWordEngine:
 
         self.last_detected = 0.0
         self.lock_event = threading.Event()
-        self._suppression_requested = False
-        self._suppression_active = False
 
         print(f"[WAKE] Initialized (model={self.model_name!r})")
 
@@ -177,13 +175,6 @@ class WakeWordEngine:
         self._hit_streak = 0
         self._recent_speech_chunks = 0
         self.lock_event.clear()
-
-    def set_suppressed(self, suppressed: bool):
-        """Suppress wake detection only during an explicitly active follow search."""
-        self._suppression_requested = bool(suppressed)
-        if suppressed:
-            self._hit_streak = 0
-            self._recent_speech_chunks = 0
 
     # ── Detection ────────────────────────────────────────────────────────────
 
@@ -207,36 +198,17 @@ class WakeWordEngine:
         Feed one 48 kHz int16 chunk from AudioManager. Returns True the
         instant the wake word is detected, False otherwise.
 
-        None/lock/suppression/cooldown checks run before normal resampling.
-        During an explicit follow-search suppression, silence is fed to the
-        model so its rolling window advances without learning servo noise.
-        Otherwise, each chunk is resampled and fed unconditionally — see the
-        module docstring for why audio must not be gated by volume.
+        None/lock/cooldown checks run before resampling or inference, in
+        that order, so a locked or cooling-down chunk costs as little CPU
+        as possible. Every other chunk is resampled and fed to the model
+        unconditionally — see the module docstring for why this must not
+        be gated by volume.
         """
         if audio_chunk is None:
             return False
 
         if self.lock_event.is_set():
             return False
-
-        if self._suppression_requested:
-            # Keep the model's rolling audio window current without letting
-            # servo motor noise (or speech during the brief guard) activate it.
-            silence = np.zeros((len(audio_chunk) + RESAMPLE_DOWN - 1) // RESAMPLE_DOWN, dtype=np.int16)
-            try:
-                self.model.predict(silence)
-            except Exception as e:
-                print(f"[WAKE] Error while clearing servo-motion audio: {e}")
-            self._hit_streak = 0
-            self._recent_speech_chunks = 0
-            if not self._suppression_active:
-                print("[WAKE] Detection paused while servo moves/settles")
-                self._suppression_active = True
-            return False
-
-        if self._suppression_active:
-            print("[WAKE] Detection re-armed after servo settled")
-            self._suppression_active = False
 
         if time.time() - self.last_detected < self.cooldown:
             return False
