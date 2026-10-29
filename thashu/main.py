@@ -868,7 +868,10 @@ def main():
                 elif removal_name:
                     matched_name = vision.database.resolve_name(removal_name)
                     if matched_name is None:
-                        response = f"I could not find one clear saved face name matching {removal_name}."
+                        response = (
+                            f"I couldn't find one clear saved name matching {removal_name}. "
+                            "Try saying forget followed by the name spelled as ordinary letters, like T H A R U N."
+                        )
                     else:
                         _identity_pending_name = matched_name
                         _identity_enrollment_state = "delete_confirm"
@@ -887,7 +890,7 @@ def main():
                         _identity_enrollment_state = "spelling"
                         response = (
                             f"I heard the name {_identity_pending_name}. "
-                            "Please say the name using phonetic words, for example Tiger Hotel Alpha Romeo Uniform November."
+                            "Please spell the name using ordinary letter names, for example T H A R U N."
                         )
                     elif status.get("status") in ("ambiguous", "timed_out"):
                         vision.clear_enrollment()
@@ -908,7 +911,7 @@ def main():
                     else:
                         response = (
                             "I didn't catch the spelling. Please say each letter separately, "
-                            "for example Tiger Hotel Alpha Romeo Uniform November."
+                            "for example T H A R U N."
                         )
                 elif _identity_enrollment_state == "delete_confirm" and identity_command == "CONFIRM":
                     try:
