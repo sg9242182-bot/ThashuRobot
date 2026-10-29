@@ -152,9 +152,10 @@ _RECOGNITION_CANCEL_PHRASES = {
     "cancel registration",
     "forget it",
     "never mind",
+    "cancel",
 }
 _RECOGNITION_YES_PHRASES = {"yes", "yes confirm", "confirm", "save it"}
-_RECOGNITION_NO_PHRASES = {"no", "no cancel", "cancel", "do not save"}
+_RECOGNITION_NO_PHRASES = {"no", "no cancel", "do not save"}
 
 
 def _normalize_phrase(user_input):
