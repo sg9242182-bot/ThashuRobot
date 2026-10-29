@@ -176,6 +176,70 @@ def get_recognition_command(user_input):
     return None
 
 
+_RECOGNITION_QUERY_PHRASES = {
+    "do you remember me",
+    "do you remember who i am",
+    "do you know me",
+    "do you know who i am",
+    "who am i",
+    "what is my name",
+    "what is my name again",
+}
+
+
+def is_recognition_query(user_input):
+    """Recognize direct questions about the currently visible enrolled person."""
+    return _normalize_phrase(user_input) in _RECOGNITION_QUERY_PHRASES
+
+
+_LETTER_NAMES = {
+    "a": "a", "ay": "a",
+    "b": "b", "bee": "b",
+    "c": "c", "see": "c", "sea": "c",
+    "d": "d", "dee": "d",
+    "e": "e",
+    "f": "f", "ef": "f",
+    "g": "g", "gee": "g",
+    "h": "h", "aitch": "h",
+    "i": "i", "eye": "i",
+    "j": "j", "jay": "j",
+    "k": "k", "kay": "k",
+    "l": "l", "el": "l",
+    "m": "m", "em": "m",
+    "n": "n", "en": "n",
+    "o": "o", "oh": "o",
+    "p": "p", "pee": "p",
+    "q": "q", "cue": "q", "queue": "q",
+    "r": "r", "ar": "r",
+    "s": "s", "ess": "s",
+    "t": "t", "tee": "t", "tea": "t",
+    "u": "u", "you": "u",
+    "v": "v", "vee": "v",
+    "w": "w", "doubleyou": "w",
+    "x": "x", "ex": "x",
+    "y": "y", "why": "y",
+    "z": "z", "zee": "z", "zed": "z",
+}
+
+
+def get_spelled_registration_name(user_input):
+    """Parse letter-by-letter spelling after the explicit enrollment prompt."""
+    tokens = _normalize_phrase(user_input).split()
+    if tokens and tokens[0] in {"spell", "spelling", "letters"}:
+        tokens = tokens[1:]
+    ignored = {"the", "name", "is", "spelled", "as", "it", "letter", "letters"}
+    tokens = [token for token in tokens if token not in ignored]
+    if len(tokens) < 2:
+        return None
+    letters = []
+    for token in tokens:
+        letter = _LETTER_NAMES.get(token)
+        if letter is None:
+            return None
+        letters.append(letter)
+    return "".join(letters).title()
+
+
 def get_remove_identity_name(user_input):
     """Return a name only for an explicit request to remove its stored face identity."""
     normalized = _normalize_phrase(user_input)
