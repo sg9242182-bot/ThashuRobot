@@ -530,16 +530,16 @@ def main():
         vis = vision.get_state()
         update_follow_from_vision(vis)
         update_idle_face_tracking(vis)
-        wake.set_suppressed(_follow_search_active)
 
         is_speech_now = vad.is_speech(chunk)
         attn.update(vis["faces"], is_speech_now)
 
         # ── IDLE: watch for wake word ─────────────────────────────────────
         if runtime.current == RuntimeState.IDLE:
-            # Wake suppression is limited to active follow-search sweeps.
-            # Idle face tracking and tracking an acquired follow target remain wakeable.
-            if wake.process(chunk):
+            # Ignore wake input only while the camera is actively sweeping
+            # to acquire a follow target. Idle face tracking and target tracking
+            # continue to listen for the wake word.
+            if not _follow_search_active and wake.process(chunk):
                 transition_runtime(RuntimeState.WAKE_DETECTED)
 
                 print("[SYSTEM] ═══════════════════════════")
