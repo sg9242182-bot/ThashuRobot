@@ -197,7 +197,8 @@ def safe_play(path: str):
 
 
 def _announce_enrollment_status(message):
-    """Speak an enrollment update while safely muting the microphone/wake detector."""
+    """Speak an enrollment update through the normal supervised runtime states."""
+    transition_runtime(RuntimeState.SPEAKING)
     wake.lock()
     audio.pause()
     try:
@@ -208,6 +209,8 @@ def _announce_enrollment_status(message):
     finally:
         audio.resume()
         wake.unlock()
+        transition_runtime(RuntimeState.RETURN_TO_IDLE)
+        transition_runtime(RuntimeState.IDLE)
 
 
 def _registration_details(text):
