@@ -207,11 +207,11 @@ class WakeWordEngine:
         Feed one 48 kHz int16 chunk from AudioManager. Returns True the
         instant the wake word is detected, False otherwise.
 
-        None/lock/cooldown checks run before resampling or inference, in
-        that order, so a locked or cooling-down chunk costs as little CPU
-        as possible. Every other chunk is resampled and fed to the model
-        unconditionally — see the module docstring for why this must not
-        be gated by volume.
+        None/lock/suppression/cooldown checks run before normal resampling.
+        During an explicit follow-search suppression, silence is fed to the
+        model so its rolling window advances without learning servo noise.
+        Otherwise, each chunk is resampled and fed unconditionally — see the
+        module docstring for why audio must not be gated by volume.
         """
         if audio_chunk is None:
             return False
