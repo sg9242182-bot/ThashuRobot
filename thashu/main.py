@@ -483,6 +483,11 @@ def _start_follow_pulse(direction):
     if acknowledgement != "OK":
         print(f"[FOLLOW] {direction} pulse not confirmed: {acknowledgement or 'ACK_TIMEOUT'}")
         _stop_follow_pulse("Motor command was not confirmed")
+        _follow_next_step_at = time.monotonic() + 2.0
+        if acknowledgement in ("ERROR|OBSTACLE", "ERROR|SAFETY_STOP"):
+            _announce_follow_blocked("obstacle_blocked")
+        elif acknowledgement == "ERROR|SENSOR_NOT_READY":
+            _announce_follow_blocked("sensor_not_ready")
         return
 
     _follow_next_step_at = time.monotonic() + FOLLOW_PULSE_INTERVAL_SECONDS
