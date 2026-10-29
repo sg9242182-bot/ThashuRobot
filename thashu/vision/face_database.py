@@ -117,6 +117,40 @@ class FaceDatabase:
         self.save()
         return True
 
+    def add_person_samples(self, name, embeddings, *, confirmed=False):
+        """Persist a batch collected from one stable face after spoken confirmation."""
+        if confirmed is not True:
+            raise PermissionError("Face enrollment requires explicit identity confirmation")
+        if self.load_error is not None:
+            raise OSError("Face database could not be loaded; refusing to overwrite it")
+        name = self._clean_name(name)
+        vectors = [self._normalize(item) for item in embeddings]
+        if len(vectors) < 5:
+            raise ValueError("At least five quality-approved observations are required")
+        if name in self.data:
+            raise ValueError("That confirmed name already exists; refusing to merge identities")
+
+        matrix = np.stack(vectors)
+        similarities = matrix @ matrix.T
+        pair_scores = similarities[np.triu_indices(len(vectors), k=1)]
+        if pair_scores.size and float(np.median(pair_scores)) < 0.45:
+            raise ValueError("Enrollment observations are inconsistent; no identity was saved")
+
+        # Refuse an enrollment that looks like an existing identity, instead of
+        # silently creating a duplicate label for a face already in the store.
+        for existing_name, stored_embeddings in self.data.items():
+            score = max(
+                float(np.dot(vector, self._normalize(stored)))
+                for vector in vectors
+                for stored in stored_embeddings
+            )
+            if score >= self.threshold:
+                raise ValueError(f"Enrollment resembles the existing identity {existing_name}")
+
+        self.data[name] = [vector.tolist() for vector in vectors[-self.MAX_EMBEDDINGS_PER_PERSON:]]
+        self.save()
+        return True
+
     def match(self, embedding, threshold=None, margin=None):
         """Return (name, score) only when best score and separation both pass."""
         if not self.data:
