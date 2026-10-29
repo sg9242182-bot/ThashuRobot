@@ -219,6 +219,15 @@ _LETTER_NAMES = {
     "x": "x", "ex": "x",
     "y": "y", "why": "y",
     "z": "z", "zee": "z", "zed": "z",
+    # NATO phonetic alphabet words survive speech recognition more reliably
+    # than isolated letter names; accept them alongside ordinary letter names.
+    "alpha": "a", "bravo": "b", "charlie": "c", "delta": "d",
+    "echo": "e", "foxtrot": "f", "golf": "g", "hotel": "h",
+    "india": "i", "juliet": "j", "kilo": "k", "lima": "l",
+    "mike": "m", "november": "n", "oscar": "o", "papa": "p",
+    "quebec": "q", "romeo": "r", "sierra": "s", "tango": "t",
+    "uniform": "u", "victor": "v", "whiskey": "w", "xray": "x",
+    "yankee": "y", "zulu": "z",
 }
 
 
@@ -227,7 +236,7 @@ def get_spelled_registration_name(user_input):
     tokens = _normalize_phrase(user_input).split()
     if tokens and tokens[0] in {"spell", "spelling", "letters"}:
         tokens = tokens[1:]
-    ignored = {"the", "name", "is", "spelled", "as", "it", "letter", "letters"}
+    ignored = {"the", "name", "is", "spelled", "as", "it", "letter", "letters", "in", "like"}
     tokens = [token for token in tokens if token not in ignored]
     if len(tokens) < 2:
         return None
