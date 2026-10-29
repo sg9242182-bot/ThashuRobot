@@ -828,10 +828,11 @@ def main():
                 registration_name = get_registration_name(text)
                 removal_name = get_remove_identity_name(text)
                 if identity_command == "CANCEL" and _identity_enrollment_state != "idle":
+                    was_deleting = _identity_enrollment_state == "delete_confirm"
                     vision.clear_enrollment()
                     _identity_enrollment_state = "idle"
                     _identity_pending_name = None
-                    response = "I cancelled face registration."
+                    response = "I cancelled that identity change." if was_deleting else "I cancelled face registration."
                 elif identity_command == "ENROLL":
                     if not getattr(vision.detector, "recognition_ready", False):
                         response = "Face registration is unavailable because the landmark model is not installed."
@@ -891,10 +892,11 @@ def main():
                     _identity_enrollment_state = "idle"
                     _identity_pending_name = None
                 elif _identity_enrollment_state in ("confirm", "delete_confirm") and identity_command == "REJECT":
+                    was_deleting = _identity_enrollment_state == "delete_confirm"
                     vision.clear_enrollment()
                     _identity_enrollment_state = "idle"
                     _identity_pending_name = None
-                    response = "I did not save the face identity."
+                    response = "I cancelled deleting the face identity." if was_deleting else "I did not save the face identity."
                 elif _identity_enrollment_state == "confirm":
                     response = "Please say yes to confirm saving the name for this face, or no to cancel."
                 elif _identity_enrollment_state == "delete_confirm":
