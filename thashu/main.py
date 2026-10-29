@@ -10,7 +10,7 @@ from voice.audio_manager  import AudioManager
 from voice.wake_word      import WakeWordEngine
 from voice.vad            import VoiceActivityDetector
 from voice.speech_to_text import transcribe 
-from voice.text_to_speech import speak
+from voice.text_to_speech import speak, play_cached_response
 from voice.sound_player   import play
 from core.brain           import Brain
 from core.attention       import AttentionSystem
@@ -371,7 +371,11 @@ def announce_safety_message(message):
     audio.pause()
     eyes.alert()
     try:
-        speak(message)
+        if not play_cached_response(message):
+            print(
+                "[SAFETY] Obstacle WAV is missing; run "
+                "prepare_command_voice_cache({obstacle_stop, obstacle_blocked_v2}) once."
+            )
         time.sleep(0.6)
     except Exception as exc:
         print(f"[SAFETY] Could not speak safety message: {exc}")
