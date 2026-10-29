@@ -107,6 +107,7 @@ class VisionCore:
             self._reported_face_count = 0
             self._reported_person_count = 0
             self._tracker_reset_pending = True
+            self._recognition_votes.clear()
 
     def start(self):
         """Start the camera and one vision worker; repeated starts are harmless."""
@@ -181,6 +182,42 @@ class VisionCore:
                 "observed_at": self.latest_frame_at,
                 "frame_size": self.frame_size,
             }
+
+    def begin_enrollment(self, required_samples=5, timeout=45.0):
+        """Collect a short-lived batch from one stable, unambiguous face."""
+        with self._lock:
+            self._enrollment = {
+                "status": "collecting",
+                "started_at": time.monotonic(),
+                "expires_at": time.monotonic() + float(timeout),
+                "required_samples": max(5, int(required_samples)),
+                "track_id": None,
+                "samples": [],
+            }
+
+    def enrollment_status(self):
+        with self._lock:
+            state = getattr(self, "_enrollment", None)
+            if not state:
+                return {"status": "idle", "sample_count": 0}
+            return {
+                "status": state["status"],
+                "sample_count": len(state["samples"]),
+                "required_samples": state["required_samples"],
+                "expires_at": state["expires_at"],
+            }
+
+    def enrollment_samples(self):
+        """Return copies of ready embeddings; caller must clear after commit/cancel."""
+        with self._lock:
+            state = getattr(self, "_enrollment", None)
+            if not state or state["status"] != "ready":
+                return None
+            return [sample.copy() for sample in state["samples"]]
+
+    def clear_enrollment(self):
+        with self._lock:
+            self._enrollment = None
 
     def _stabilize_detections(self, detections):
         """Filter single-frame Haar false positives before tracking or reporting."""
@@ -410,6 +447,19 @@ class VisionCore:
                     assignments[0] = next(iter(tracked))
 
             now = time.time()
+            with self._lock:
+                enrollment = getattr(self, "_enrollment", None)
+                if enrollment and enrollment["status"] == "collecting":
+                    if time.monotonic() >= enrollment["expires_at"]:
+                        enrollment["status"] = "timed_out"
+                    elif len(faces) > 1:
+                        enrollment["status"] = "ambiguous"
+                        enrollment["samples"].clear()
+                    elif len(faces) == 1 and (
+                        not assignments.get(0) or assignments.get(0) in ambiguous_ids
+                    ):
+                        enrollment["samples"].clear()
+                        enrollment["track_id"] = None
             if now - last_recog > recog_interval and faces:
                 for face_index, (x1, y1, x2, y2) in enumerate(faces):
                     if not self._processing_enabled.is_set():
@@ -451,6 +501,22 @@ class VisionCore:
                         self.database.match(embedding) if embedding is not None
                         else (None, -1.0)
                     )
+                    with self._lock:
+                        enrollment = getattr(self, "_enrollment", None)
+                        if enrollment and enrollment["status"] == "collecting":
+                            if (len(faces) != 1 or track_id in ambiguous_ids
+                                    or embedding is None):
+                                enrollment["samples"].clear()
+                                enrollment["track_id"] = None
+                            elif enrollment["track_id"] not in (None, track_id):
+                                enrollment["status"] = "ambiguous"
+                                enrollment["samples"].clear()
+                            else:
+                                enrollment["track_id"] = track_id
+                                enrollment["samples"].append(embedding.copy())
+                                if len(enrollment["samples"]) >= enrollment["required_samples"]:
+                                    enrollment["status"] = "ready"
+
                     with self._lock:
                         if not self._processing_enabled.is_set():
                             break
