@@ -21,7 +21,7 @@ from vision.follow_logic   import FollowLogic
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
 from hardware.servo_tracking import ServoTracker
-from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name
+from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, is_recognition_query
 from core.model_paths import model_path, project_path
 
 # ── Sounds ────────────────────────────────────────────────────────────────────
@@ -87,6 +87,8 @@ _follow_motion_active = False
 _follow_safety_notice_latched = False
 _identity_enrollment_state = "idle"
 _identity_pending_name = None
+_last_idle_recognized_person = None
+_last_idle_recognized_at = 0.0
 _motion_timer = None
 _motion_generation = 0
 _motion_lock = threading.Lock()
@@ -683,6 +685,7 @@ def process_safety_events():
 # ── Main loop ──────────────────────────────────────────────────────────────────
 def main():
     global _identity_enrollment_state, _identity_pending_name
+    global _last_idle_recognized_person, _last_idle_recognized_at
     print("[SYSTEM] Jarvis started")
 
     # Start systems
@@ -731,6 +734,27 @@ def main():
         vis = vision.get_state()
         update_follow_from_vision(vis)
         update_idle_face_tracking(vis)
+
+        # Preserve the latest unique, fresh known face across the wake-word
+        # transition, which pauses VisionCore and clears its live snapshot.
+        faces = vis.get("faces") or []
+        known_faces = [
+            face for face in faces
+            if isinstance(face, dict)
+            and face.get("name") not in (None, "", "Unknown")
+            and not face.get("ambiguous", True)
+        ]
+        observed_at = vis.get("observed_at")
+        frame_fresh = (
+            isinstance(observed_at, (int, float))
+            and 0.0 <= time.monotonic() - observed_at <= 0.75
+        )
+        if len(faces) == 1 and len(known_faces) == 1 and frame_fresh:
+            _last_idle_recognized_person = known_faces[0]["name"]
+            _last_idle_recognized_at = time.monotonic()
+        elif len(faces) != 1 or not known_faces or not frame_fresh:
+            _last_idle_recognized_person = None
+            _last_idle_recognized_at = 0.0
 
         is_speech_now = vad.is_speech(chunk)
         attn.update(vis["faces"], is_speech_now)
@@ -842,22 +866,28 @@ def main():
                         _identity_pending_name = None
                         response = "I will collect a few clear views of one face. Please stay in view, then tell me the person's name."
                 elif removal_name:
-                    if removal_name not in vision.database.data:
-                        response = f"I do not have a saved face identity for {removal_name}."
+                    matched_name = vision.database.resolve_name(removal_name)
+                    if matched_name is None:
+                        response = f"I could not find one clear saved face name matching {removal_name}."
                     else:
-                        _identity_pending_name = removal_name
+                        _identity_pending_name = matched_name
                         _identity_enrollment_state = "delete_confirm"
-                        response = f"Should I delete the saved face identity for {removal_name}? Say yes to confirm or no to cancel."
+                        if matched_name.casefold() == removal_name.casefold():
+                            response = f"Should I delete the saved face identity for {matched_name}? Say yes to confirm or no to cancel."
+                        else:
+                            response = (
+                                f"I didn't find {removal_name}, but I found {matched_name}. "
+                                f"Do you want me to delete {matched_name}? Say yes to confirm or no to cancel."
+                            )
                 elif _identity_enrollment_state == "capturing" and registration_name:
                     status = vision.enrollment_status()
                     samples = vision.enrollment_samples()
                     if status.get("status") == "ready" and samples:
                         _identity_pending_name = registration_name
-                        _identity_enrollment_state = "confirm"
+                        _identity_enrollment_state = "spelling"
                         response = (
                             f"I heard the name {_identity_pending_name}. "
-                            f"Should I save the single face I captured as {_identity_pending_name}? "
-                            "Say yes to confirm or no to cancel."
+                            "Please spell it one letter at a time, for example T H A R U N."
                         )
                     elif status.get("status") in ("ambiguous", "timed_out"):
                         vision.clear_enrollment()
@@ -865,6 +895,21 @@ def main():
                         response = "I could not get a stable single face. Please try again with only one face in view."
                     else:
                         response = "I have not collected enough clear views yet. Please wait in view, then tell me the name again."
+                elif _identity_enrollment_state == "spelling":
+                    spelled_name = get_spelled_registration_name(text)
+                    if spelled_name:
+                        _identity_pending_name = spelled_name
+                        _identity_enrollment_state = "confirm"
+                        spelled_letters = " ".join(spelled_name.upper())
+                        response = (
+                            f"I heard {spelled_letters}, which is {spelled_name}. "
+                            f"Should I save this face as {spelled_name}? Say yes to confirm or no to cancel."
+                        )
+                    else:
+                        response = (
+                            "I didn't catch the spelling. Please say each letter separately, "
+                            "for example T H A R U N."
+                        )
                 elif _identity_enrollment_state == "delete_confirm" and identity_command == "CONFIRM":
                     try:
                         vision.database.remove_person(_identity_pending_name, confirmed=True)
@@ -897,6 +942,8 @@ def main():
                     _identity_enrollment_state = "idle"
                     _identity_pending_name = None
                     response = "I cancelled deleting the face identity." if was_deleting else "I did not save the face identity."
+                elif _identity_enrollment_state == "spelling":
+                    response = "Please spell the name one letter at a time, or say cancel."
                 elif _identity_enrollment_state == "confirm":
                     response = "Please say yes to confirm saving the name for this face, or no to cancel."
                 elif _identity_enrollment_state == "delete_confirm":
@@ -909,6 +956,21 @@ def main():
                         response = "I could not get a stable single face. Please try again with only one face in view."
                     else:
                         response = "I am still collecting clear views. Stay in view, then say my name is followed by the name."
+                elif is_recognition_query(text):
+                    recently_recognized = (
+                        _last_idle_recognized_person is not None
+                        and time.monotonic() - _last_idle_recognized_at <= 20.0
+                    )
+                    if recently_recognized:
+                        response = f"Yes, I recognize you as {_last_idle_recognized_person}."
+                    elif len(vision.database.data) == 1:
+                        saved_name = next(iter(vision.database.data))
+                        response = (
+                            f"I remember a saved face identity as {saved_name}, "
+                            "but I can't confirm who is in front of me right now."
+                        )
+                    else:
+                        response = "I don't recognize a confirmed face right now."
                 elif (follow_command := get_follow_command(text)) == "STOP":
                     follow_logic.stop()
                     servo_tracker.stop_search()
