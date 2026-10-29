@@ -7,7 +7,7 @@ Use these persistent, user-owned locations on the Raspberry Pi:
 - Virtual environment: `~/.venvs/thashu`
 - Model weights: `~/.local/share/thashu/models/`
 
-The code defaults to that model directory. Set `THASHU_MODELS_DIR` only if you deliberately choose another location.
+The code defaults to that model directory. Set `THASHU_MODELS_DIR` only if you deliberately choose another location. `THASHU_DATA_DIR` can similarly override the local data directory.
 
 ## Create the virtual environment
 
@@ -63,7 +63,7 @@ find "$THASHU_MODELS_DIR" -type f -printf '%p %s bytes\n' | sort
 | Piper voice | `piper/en_US-lessac-low.onnx` and matching `.onnx.json` | Piper voices repository |
 | Speech recognition | `whisper/` | faster-whisper downloads Whisper tiny on first initialization |
 
-The face detector uses OpenCV's installed Haar cascade; it has no separate MobileNet model files. Piper's executable is software, not a model weight. The code defaults to `~/piper/piper/piper`; set `THASHU_PIPER_BIN` if it is installed elsewhere.
+The face detector uses the machine-local YuNet landmark model when installed and falls back to OpenCV's Haar cascade for detection-only behavior. Confirmed face embeddings are stored under `~/.local/share/thashu/data/people_faces.json`, outside the checkout; the new enrollment flow stores no face photos. Piper's executable is software, not a model weight. The code defaults to `~/piper/piper/piper`; set `THASHU_PIPER_BIN` if it is installed elsewhere.
 
 ## Download the models
 
