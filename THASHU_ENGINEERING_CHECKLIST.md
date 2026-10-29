@@ -507,7 +507,7 @@ Verification plan:
 - Record actual Pi/ESP32 versions, tested sensor states, observed logs, and user-reported physical results before checking acceptance.
 
 Acceptance:
-\[ ] Follow-mode activation confirmation plays a pre-rendered cached WAV without invoking Piper; cached playback is verified on the Pi.
+\[x] Follow-mode activation confirmation plays a pre-rendered cached WAV without invoking Piper; cached playback is verified on the Pi.
 \[x] Follow mode is OFF on boot; passive face-only servo tracking never moves the chassis or enables follow mode.
 \[x] While IDLE, a unique stable face is passively servo-tracked whether known or unknown; tracking stops on wake-word detection and does not resume until IDLE vision has fresh detections.
 \[x] Explicit “follow me” starts the mode; “stop following” and STOP stop it immediately.
@@ -560,6 +560,9 @@ prepare_command_voice_cache({"follow_started"})
 PY
 ```
 Verify the activation produces “Follow mode is on.” and the terminal prints `[VOICE] Cached WAV played: follow_started`. The code change is on phase-5; Pi generation/playback is still unverified. This is an additional open acceptance item alongside test 2.
+
+
+Two-person follow trial log review (2026-10-29): The pasted Pi log confirms `[VOICE] Cached WAV played: follow_started`, so the follow-activation WAV criterion is verified. During the two-person trial, upper-body detections fluctuated between counts 1 and 2. After follow resumed, the first fresh snapshot showed one track (ID 0); the count then rose to 2, and two bounded forward pulses were accepted before the locked track was reported missing and a Safety STOP was sent. Later, both tracks were marked ambiguous, follow entered `NEEDS_RESELECTION`, and Thashu announced that it could not identify the selected person. No target transfer is evident in this log, and it does show a safe stop on missing/ambiguous target. However, it does not prove correct handling when two people are stably visible before follow starts: no initial selection prompt was logged, and the detector count flickered. Test 2 remains open. Retest with two people continuously visible before saying “follow me”; verify it requests explicit selection and sends no motor command until selection, then cross/occlude the selected target and verify it stops without switching.
 
 
 \---
