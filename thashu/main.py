@@ -195,6 +195,34 @@ def safe_play(path: str):
     audio.resume()
     time.sleep(0.15)
 
+
+def _announce_enrollment_status(message):
+    """Speak an enrollment update while safely muting the microphone/wake detector."""
+    wake.lock()
+    audio.pause()
+    try:
+        speak(message)
+        time.sleep(0.4)
+    except Exception as exc:
+        print(f"[VISION] Could not announce enrollment status: {exc}")
+    finally:
+        audio.resume()
+        wake.unlock()
+
+
+def _registration_details(text):
+    """Return (name, spelling_was_given) from a spoken self-introduction."""
+    name = get_registration_name(text)
+    if not name:
+        return None, False
+    words = name.split()
+    for start in range(len(words)):
+        spelled = get_spelled_registration_name(" ".join(words[start:]))
+        if spelled:
+            return spelled, True
+    return name, False
+
+
 def transition_runtime(target_state):
     global _auto_face_track_id, _follow_start_pending, _follow_region_pending, _follow_search_active
 
@@ -725,6 +753,34 @@ def main():
 
     while True:
         process_safety_events()
+
+        if runtime.current == RuntimeState.IDLE and _identity_enrollment_state == "capturing":
+            capture = vision.enrollment_status()
+            if capture.get("status") == "ready":
+                _identity_enrollment_state = "awaiting_name"
+                print(
+                    "[VISION] Required face images captured "
+                    f"({capture.get('sample_count', 0)}/{capture.get('required_samples', 5)}); "
+                    "waiting for the spoken name"
+                )
+                _announce_enrollment_status(
+                    "I have finished taking the face pictures. "
+                    "Tell me your name, and spell it with letters if the first name I hear is wrong."
+                )
+                continue
+            if capture.get("status") in ("ambiguous", "timed_out"):
+                _identity_enrollment_state = "idle"
+                vision.clear_enrollment()
+                message = (
+                    "I saw more than one face, so I cancelled face registration. "
+                    "Please try again with only one face in view."
+                    if capture.get("status") == "ambiguous"
+                    else "I could not capture enough clear face pictures in time. Please try again."
+                )
+                print(f"[VISION] Enrollment ended: {capture.get('status')}")
+                _announce_enrollment_status(message)
+                continue
+
         chunk = audio.read()
 
         if chunk is None:
@@ -849,7 +905,7 @@ def main():
                 brain_start = time.time()
 
                 identity_command = get_recognition_command(text)
-                registration_name = get_registration_name(text)
+                registration_name, registration_was_spelled = _registration_details(text)
                 removal_name = get_remove_identity_name(text)
                 if identity_command == "CANCEL" and _identity_enrollment_state != "idle":
                     was_deleting = _identity_enrollment_state == "delete_confirm"
@@ -885,16 +941,24 @@ def main():
                                 f"I didn't find {removal_name}, but I found {matched_name}. "
                                 f"Do you want me to delete {matched_name}? Say yes to confirm or no to cancel."
                             )
-                elif _identity_enrollment_state == "capturing" and registration_name:
+                elif _identity_enrollment_state in ("capturing", "awaiting_name") and registration_name:
                     status = vision.enrollment_status()
                     samples = vision.enrollment_samples()
                     if status.get("status") == "ready" and samples:
                         _identity_pending_name = registration_name
-                        _identity_enrollment_state = "spelling"
-                        response = (
-                            f"I heard the name {_identity_pending_name}. "
-                            "Please spell the name using ordinary letter names, for example T H A R U N."
-                        )
+                        if registration_was_spelled:
+                            _identity_enrollment_state = "confirm"
+                            spelled_letters = " ".join(registration_name.upper())
+                            response = (
+                                f"I heard {spelled_letters}, which is {registration_name}. "
+                                f"Should I save this face as {registration_name}? Say yes to confirm or no to cancel."
+                            )
+                        else:
+                            _identity_enrollment_state = "spelling"
+                            response = (
+                                f"I heard the name {_identity_pending_name}. "
+                                "Please spell the name using ordinary letter names, for example T H A R U N."
+                            )
                     elif status.get("status") in ("ambiguous", "timed_out"):
                         vision.clear_enrollment()
                         _identity_enrollment_state = "idle"
@@ -904,7 +968,7 @@ def main():
                         required = status.get("required_samples", 5)
                         response = (
                             f"I have {count} of {required} clear face views so far. "
-                            "Please keep still for a few seconds, then tell me your name again."
+                            "I will tell you when they are ready. Please stay still and try again in a few seconds."
                         )
                 elif _identity_enrollment_state == "spelling":
                     spelled_name = get_spelled_registration_name(text)
