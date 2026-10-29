@@ -1,5 +1,6 @@
 """Persistent face embeddings; unknown people are never enrolled automatically."""
 
+import difflib
 import json
 import os
 import tempfile
@@ -110,6 +111,40 @@ class FaceDatabase:
                 self.data[name] = previous
             raise
         return True
+
+    def resolve_name(self, spoken_name):
+        """Resolve a spoken name to one saved label; callers must confirm fuzzy matches."""
+        query = " ".join(str(spoken_name or "").strip().split())
+        if not query:
+            return None
+
+        exact = [
+            name for name in self.data
+            if name.casefold() == query.casefold()
+        ]
+        if len(exact) == 1:
+            return exact[0]
+
+        def normalized(value):
+            return "".join(ch.casefold() for ch in value if ch.isalnum())
+
+        query_key = normalized(query)
+        if len(query_key) < 3:
+            return None
+        scored = sorted(
+            (
+                difflib.SequenceMatcher(None, query_key, normalized(name)).ratio(),
+                name,
+            )
+            for name in self.data
+        )
+        scored.reverse()
+        if not scored or scored[0][0] < 0.65:
+            return None
+        second_score = scored[1][0] if len(scored) > 1 else 0.0
+        if scored[0][0] - second_score < 0.10:
+            return None
+        return scored[0][1]
 
     def remove_person(self, name, *, confirmed=False):
         """Delete a stored identity only after an explicit user confirmation."""
