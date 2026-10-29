@@ -171,7 +171,7 @@ def safe_play(path: str):
     time.sleep(0.15)
 
 def transition_runtime(target_state):
-    global _auto_face_track_id, _follow_start_pending, _follow_region_pending
+    global _auto_face_track_id, _follow_start_pending, _follow_region_pending, _follow_search_active
 
     if runtime.current == RuntimeState.IDLE and target_state != RuntimeState.IDLE:
         if not follow_logic.enabled:
