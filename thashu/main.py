@@ -21,7 +21,7 @@ from vision.follow_logic   import FollowLogic
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
 from hardware.servo_tracking import ServoTracker
-from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command
+from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name
 from core.model_paths import model_path, project_path
 
 # ── Sounds ────────────────────────────────────────────────────────────────────
@@ -85,6 +85,8 @@ _follow_last_observation = None
 _follow_next_step_at = 0.0
 _follow_motion_active = False
 _follow_safety_notice_latched = False
+_identity_enrollment_state = "idle"
+_identity_pending_name = None
 _motion_timer = None
 _motion_generation = 0
 _motion_lock = threading.Lock()
@@ -680,6 +682,7 @@ def process_safety_events():
 
 # ── Main loop ──────────────────────────────────────────────────────────────────
 def main():
+    global _identity_enrollment_state, _identity_pending_name
     print("[SYSTEM] Jarvis started")
 
     # Start systems
@@ -821,7 +824,67 @@ def main():
 
                 brain_start = time.time()
 
-                if (follow_command := get_follow_command(text)) == "STOP":
+                identity_command = get_recognition_command(text)
+                registration_name = get_registration_name(text)
+                if identity_command == "CANCEL":
+                    vision.clear_enrollment()
+                    _identity_enrollment_state = "idle"
+                    _identity_pending_name = None
+                    response = "I cancelled face registration."
+                elif identity_command == "ENROLL":
+                    vision.begin_enrollment(required_samples=5, timeout=45.0)
+                    _identity_enrollment_state = "capturing"
+                    _identity_pending_name = None
+                    response = "I will collect a few clear views of one face. Please stay in view, then tell me the person's name."
+                elif _identity_enrollment_state == "capturing" and registration_name:
+                    status = vision.enrollment_status()
+                    samples = vision.enrollment_samples()
+                    if status.get("status") == "ready" and samples:
+                        _identity_pending_name = registration_name
+                        _identity_enrollment_state = "confirm"
+                        response = (
+                            f"I heard the name {_identity_pending_name}. "
+                            f"Should I save the single face I captured as {_identity_pending_name}? "
+                            "Say yes to confirm or no to cancel."
+                        )
+                    elif status.get("status") in ("ambiguous", "timed_out"):
+                        vision.clear_enrollment()
+                        _identity_enrollment_state = "idle"
+                        response = "I could not get a stable single face. Please try again with only one face in view."
+                    else:
+                        response = "I have not collected enough clear views yet. Please wait in view, then tell me the name again."
+                elif _identity_enrollment_state == "confirm" and identity_command == "CONFIRM":
+                    samples = vision.enrollment_samples()
+                    try:
+                        if not samples:
+                            raise ValueError("Enrollment samples expired")
+                        vision.database.add_person_samples(
+                            _identity_pending_name, samples, confirmed=True
+                        )
+                        response = f"I will remember {_identity_pending_name}."
+                        print(f"[VISION] Confirmed face identity enrolled: {_identity_pending_name}")
+                    except (ValueError, OSError, PermissionError) as exc:
+                        print(f"[VISION] Enrollment rejected: {exc}")
+                        response = "I could not safely save that face identity. Please try registration again."
+                    vision.clear_enrollment()
+                    _identity_enrollment_state = "idle"
+                    _identity_pending_name = None
+                elif _identity_enrollment_state == "confirm" and identity_command == "REJECT":
+                    vision.clear_enrollment()
+                    _identity_enrollment_state = "idle"
+                    _identity_pending_name = None
+                    response = "I did not save the face identity."
+                elif _identity_enrollment_state == "confirm":
+                    response = "Please say yes to confirm saving the name for this face, or no to cancel."
+                elif _identity_enrollment_state == "capturing":
+                    status = vision.enrollment_status()
+                    if status.get("status") in ("ambiguous", "timed_out"):
+                        vision.clear_enrollment()
+                        _identity_enrollment_state = "idle"
+                        response = "I could not get a stable single face. Please try again with only one face in view."
+                    else:
+                        response = "I am still collecting clear views. Stay in view, then say my name is followed by the name."
+                elif (follow_command := get_follow_command(text)) == "STOP":
                     follow_logic.stop()
                     servo_tracker.stop_search()
                     stop_sequence = stop_motion()
