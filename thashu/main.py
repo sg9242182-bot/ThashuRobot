@@ -21,7 +21,7 @@ from vision.follow_logic   import FollowLogic
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
 from hardware.servo_tracking import ServoTracker
-from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name
+from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name
 from core.model_paths import model_path, project_path
 
 # ── Sounds ────────────────────────────────────────────────────────────────────
@@ -826,16 +826,27 @@ def main():
 
                 identity_command = get_recognition_command(text)
                 registration_name = get_registration_name(text)
-                if identity_command == "CANCEL":
+                removal_name = get_remove_identity_name(text)
+                if identity_command == "CANCEL" and _identity_enrollment_state != "idle":
                     vision.clear_enrollment()
                     _identity_enrollment_state = "idle"
                     _identity_pending_name = None
                     response = "I cancelled face registration."
                 elif identity_command == "ENROLL":
-                    vision.begin_enrollment(required_samples=5, timeout=45.0)
-                    _identity_enrollment_state = "capturing"
-                    _identity_pending_name = None
-                    response = "I will collect a few clear views of one face. Please stay in view, then tell me the person's name."
+                    if not getattr(vision.detector, "recognition_ready", False):
+                        response = "Face registration is unavailable because the landmark model is not installed."
+                    else:
+                        vision.begin_enrollment(required_samples=5, timeout=45.0)
+                        _identity_enrollment_state = "capturing"
+                        _identity_pending_name = None
+                        response = "I will collect a few clear views of one face. Please stay in view, then tell me the person's name."
+                elif removal_name:
+                    if removal_name not in vision.database.data:
+                        response = f"I do not have a saved face identity for {removal_name}."
+                    else:
+                        _identity_pending_name = removal_name
+                        _identity_enrollment_state = "delete_confirm"
+                        response = f"Should I delete the saved face identity for {removal_name}? Say yes to confirm or no to cancel."
                 elif _identity_enrollment_state == "capturing" and registration_name:
                     status = vision.enrollment_status()
                     samples = vision.enrollment_samples()
@@ -853,6 +864,16 @@ def main():
                         response = "I could not get a stable single face. Please try again with only one face in view."
                     else:
                         response = "I have not collected enough clear views yet. Please wait in view, then tell me the name again."
+                elif _identity_enrollment_state == "delete_confirm" and identity_command == "CONFIRM":
+                    try:
+                        vision.database.remove_person(_identity_pending_name, confirmed=True)
+                        response = f"I deleted the saved face identity for {_identity_pending_name}."
+                        print(f"[VISION] Confirmed face identity removed: {_identity_pending_name}")
+                    except (ValueError, OSError, PermissionError) as exc:
+                        print(f"[VISION] Identity deletion rejected: {exc}")
+                        response = "I could not safely delete that face identity."
+                    _identity_enrollment_state = "idle"
+                    _identity_pending_name = None
                 elif _identity_enrollment_state == "confirm" and identity_command == "CONFIRM":
                     samples = vision.enrollment_samples()
                     try:
@@ -869,13 +890,15 @@ def main():
                     vision.clear_enrollment()
                     _identity_enrollment_state = "idle"
                     _identity_pending_name = None
-                elif _identity_enrollment_state == "confirm" and identity_command == "REJECT":
+                elif _identity_enrollment_state in ("confirm", "delete_confirm") and identity_command == "REJECT":
                     vision.clear_enrollment()
                     _identity_enrollment_state = "idle"
                     _identity_pending_name = None
                     response = "I did not save the face identity."
                 elif _identity_enrollment_state == "confirm":
                     response = "Please say yes to confirm saving the name for this face, or no to cancel."
+                elif _identity_enrollment_state == "delete_confirm":
+                    response = "Please say yes to confirm deleting this saved face identity, or no to cancel."
                 elif _identity_enrollment_state == "capturing":
                     status = vision.enrollment_status()
                     if status.get("status") in ("ambiguous", "timed_out"):
