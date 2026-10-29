@@ -37,7 +37,7 @@ COMMAND_VOICE_PROMPTS = {
     "controller_unavailable": "I couldn't reach the motor controller, so I can't move.",
     "not_understood": "I don't understand, please say that again.",
     "follow_stopped": "I stopped following.",
-    "follow_started": "Follow mode is on. I will scan with my camera and track one selected face; the wheels stay stopped until follow distance and route safety are calibrated.",
+    "follow_started": "Follow mode is on.",
     "follow_selection_required": "I see several people. Say follow left, follow center, or follow right.",
     "follow_no_face": "I haven't found a face yet. I'm scanning with my camera and will keep searching.",
     "follow_target_lost": "I lost the selected person. I stopped tracking them. Say follow me again when they are visible to select again.",
