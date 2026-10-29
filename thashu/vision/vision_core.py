@@ -529,10 +529,16 @@ class VisionCore:
                         else:
                             previous_name, votes = None, 0
                         self._recognition_votes[track_id] = (previous_name, votes)
-                        self.current_names[track_id] = (
+                        published_name = (
                             recognized if recognized is not None and votes >= 3
                             else "Unknown"
                         )
+                        old_published_name = self.current_names.get(track_id, "Unknown")
+                        self.current_names[track_id] = published_name
+                        if published_name != old_published_name and published_name != "Unknown":
+                            print(f"[VISION] Recognized enrolled person: {published_name}")
+                        elif old_published_name != "Unknown" and published_name == "Unknown":
+                            print("[VISION] Identity confidence lost; reporting Unknown")
 
                 last_recog = now
 
