@@ -488,11 +488,12 @@ class VisionCore:
                     if landmark_item is None or best_overlap < 0.30:
                         continue
 
-                    face_img = frame[y1:y2, x1:x2]
+                    ax1, ay1, ax2, ay2 = landmark_item["bbox"]
+                    face_img = frame[ay1:ay2, ax1:ax2]
                     embedding = self.recognizer.get_embedding(
                         face_img,
                         landmark_item["landmarks"],
-                        bbox_origin=(x1, y1),
+                        bbox_origin=(ax1, ay1),
                     )
                     if not self._processing_enabled.is_set():
                         break
