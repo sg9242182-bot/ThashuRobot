@@ -55,7 +55,8 @@ find "$THASHU_MODELS_DIR" -type f -printf '%p %s bytes\n' | sort
 | Feature | Path under `$THASHU_MODELS_DIR` | Source |
 |---|---|---|
 | Person / upper-body tracking | `pose_landmarker_lite.task` | MediaPipe Pose Landmarker Lite |
-| Face recognition | `face/w600k_r50.onnx` | InsightFace `buffalo_l.zip` |
+| Face recognition embeddings | `face/w600k_r50.onnx` | InsightFace `buffalo_l.zip` |
+| Face detection and five-point alignment landmarks | `face/face_detection_yunet_2023mar.onnx` | OpenCV Zoo YuNet (MIT) |
 | Wake word | `openwakeword/hey_jarvis_v0.1.onnx` | openWakeWord downloader |
 | Wake word support | `openwakeword/melspectrogram.onnx`, `embedding_model.onnx` | Same openWakeWord download |
 | Local LLM | `llm/qwen2.5-0.5b-instruct-q4_k_m.gguf` | Official Qwen GGUF repository |
@@ -115,6 +116,19 @@ PY
 ```
 
 InsightFace labels its pretrained recognition models for non-commercial research use. Check that license before using this model commercially.
+
+### Face landmarks for recognition
+
+Face recognition requires the YuNet detector because the ArcFace embedding is aligned from five detected landmarks. Without this asset the camera can still detect faces with Haar, but those detections are not assigned a known identity and remain Unknown.
+
+OpenCV 4.10's contrib build provides FaceDetectorYN. Download the small OpenCV Zoo model into the machine-local model directory:
+
+```bash
+curl -fL 'https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx' -o "$THASHU_MODELS_DIR/face/face_detection_yunet_2023mar.onnx"
+test -s "$THASHU_MODELS_DIR/face/face_detection_yunet_2023mar.onnx"
+```
+
+The OpenCV Zoo YuNet model is MIT-licensed; the separate InsightFace recognition weights retain their non-commercial research limitation: https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet
 
 ### Qwen local LLM
 
