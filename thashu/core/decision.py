@@ -178,6 +178,8 @@ def get_recognition_command(user_input):
 def get_remove_identity_name(user_input):
     """Return a name only for an explicit request to remove its stored face identity."""
     normalized = _normalize_phrase(user_input)
+    if normalized in _RECOGNITION_CANCEL_PHRASES:
+        return None
     match = re.fullmatch(r"(?:forget|remove|delete) ([a-z][a-z .'-]{0,62})", normalized)
     if not match:
         return None
