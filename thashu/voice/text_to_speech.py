@@ -74,10 +74,33 @@ def _voice_path(name):
     return os.path.join(VOICE_CACHE_DIR, f"{name}.wav")
 
 
-def prepare_command_voice_cache():
-    """Pre-render short command replies to WAV so playback avoids live Piper latency."""
+def play_cached_response(text: str) -> bool:
+    """Play an already-rendered exact reply without starting Piper."""
+    if not text or not text.strip():
+        return False
+    voice_name = _PROMPT_TO_VOICE.get(text.strip())
+    if not voice_name:
+        return False
+    voice_path = _voice_path(voice_name)
+    if not os.path.isfile(voice_path) or os.path.getsize(voice_path) <= 44:
+        return False
+    play(voice_path, blocking=True)
+    print(f"[VOICE] Cached WAV played: {voice_name}")
+    return True
+
+
+def prepare_command_voice_cache(names=None):
+    """Pre-render selected command replies, or every reply when names is omitted."""
     os.makedirs(VOICE_CACHE_DIR, exist_ok=True)
-    for name, prompt in ALL_VOICE_PROMPTS.items():
+    if names is None:
+        prompts = ALL_VOICE_PROMPTS
+    else:
+        requested = {names} if isinstance(names, str) else set(names)
+        unknown = requested.difference(ALL_VOICE_PROMPTS)
+        if unknown:
+            raise ValueError(f"Unknown voice cache name(s): {', '.join(sorted(unknown))}")
+        prompts = {name: ALL_VOICE_PROMPTS[name] for name in requested}
+    for name, prompt in prompts.items():
         output_path = _voice_path(name)
         if os.path.isfile(output_path) and os.path.getsize(output_path) > 44:
             print(f"[PIPER] Cached voice ready: {name}")
