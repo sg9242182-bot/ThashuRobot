@@ -2,7 +2,6 @@
 
 import json
 import os
-import re
 import tempfile
 
 import numpy as np
@@ -33,7 +32,7 @@ class FaceDatabase:
         if not isinstance(name, str):
             raise ValueError("Person name must be text")
         name = " ".join(name.strip().split())
-        if not name or len(name) > 64 or not re.fullmatch(r"[w .'-]+", name, re.UNICODE):
+        if not name or len(name) > 64 or not all(ch.isalnum() or ch in " _.-'" for ch in name):
             raise ValueError("Person name is empty or contains unsupported characters")
         return name
 
