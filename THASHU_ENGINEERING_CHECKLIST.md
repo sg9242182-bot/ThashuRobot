@@ -440,7 +440,7 @@ Implementation and validation note (2026-10-17): Updated `thashu/vision/vision_c
 
 Phase 5 — Commanded Person Follow & Upper-Body Tracking
 
-Status: IN PROGRESS — bounded follow and stop-on-obstacle behavior are implemented; user reports movement/obstacle-stop tests passed. Cached WAV playback and remaining failure/acceptance tests remain open. Autonomous pathfinding/rerouting is explicitly out of scope.
+Status: IN PROGRESS — user reports the four directed follow checks and voice STOP passed; cached obstacle WAV playback also passed. Remaining Phase 5 acceptance and failure-case checks are listed below. Autonomous pathfinding/rerouting is explicitly out of scope.
 
 Initial architecture audit (2026-10-25; before the implementation below):
 - `VisionCore` is perception-only and pauses inference outside IDLE, preserving Phase 4. It currently publishes face boxes/names/presence, but not track IDs or observation timestamps.
@@ -532,6 +532,12 @@ Implementation snapshot (2026-10-26): Added thashu/vision/person_detection.py be
 - Chassis motion is intentionally absent from this implementation tranche. No verified mapping connects the selected face to a fixed ToF beam or a safe follow-distance band. The existing ESP32 interlocks also require all front ToFs and rear sonar clear for turns. This was a historical pre-calibration gate and is superseded by the 2026-10-29 bounded-follow implementation and the user's measured camera calibration. The user explicitly excludes autonomous rerouting and SLAM; follow must stop and wait for the direct path to clear.
 
 Pose Lite benchmark and integration update (2026-10-27): The user tested MediaPipe 0.10.15 on the Raspberry Pi 4 (aarch64, Python 3.11) in an isolated venv with the 5.8 MB Pose Landmarker Lite task model. The one-person image-mode benchmark ran at about 6 FPS. Moving-distance trials reported pose/shoulder visibility on 181/182 frames at 150 cm, 182/183 at 160 cm, and 183/183 at 200 cm. Median shoulder widths were 109.8, 103.4, and 95.7 px, with overlapping 10th–90th percentile ranges (94.6–113.0, 64.4–106.8, 93.0–99.7 px); this is insufficient for a safe chassis-distance controller. On 2026-10-27, `thashu/vision/person_detection.py` was changed to use MediaPipe Pose Lite while preserving the existing box interface; `requirements.txt` pins the tested MediaPipe/OpenCV/NumPy/Protobuf/FlatBuffers runtime, and `MODEL_SETUP.md` documents the persistent model path. The new integration configures up to four poses, which was not part of the one-person benchmark. The integrated app, four-person selection, servo tracking with the new detector, dependency installation in the main environment, and chassis control remain unverified. No Phase 5 acceptance box is checked by this benchmark.
+
+
+User-reported verification update (2026-10-29; supersedes earlier pending-test notes above):
+- The user reports that directed follow checks 1–4 passed and voice STOP works. The numbered checks were not individually identified in the report, so this aggregate confirmation is recorded without checking unrelated detailed acceptance boxes.
+- The user separately confirms the cached obstacle-announcement WAV playback test passed.
+- Phase 5 remains IN PROGRESS. The detailed unchecked acceptance criteria above still require explicit evidence, especially multi-person/ambiguous target selection and crossing/occlusion identity stability, failure handling for stale camera/sensor data and camera/servo/motor/audio/ESP32-link faults, and the complete automated/Pi/controlled physical acceptance suite. Do not mark Phase 5 complete until those remaining items are verified.
 
 \---
 
