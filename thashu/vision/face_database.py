@@ -25,6 +25,7 @@ class FaceDatabase:
         self.margin = float(margin)
         if not -1.0 <= self.threshold <= 1.0 or not 0.0 <= self.margin <= 2.0:
             raise ValueError("Invalid face recognition thresholds")
+        self.load_error = None
         self.data = self.load()
 
     @staticmethod
@@ -90,6 +91,8 @@ class FaceDatabase:
         """Persist one enrollment sample only after the explicit confirmation flow."""
         if confirmed is not True:
             raise PermissionError("Face enrollment requires explicit identity confirmation")
+        if self.load_error is not None:
+            raise OSError("Face database could not be loaded; refusing to overwrite it")
         name = self._clean_name(name)
         vector = self._normalize(embedding)
         existing = self.data.get(name, [])
@@ -105,6 +108,8 @@ class FaceDatabase:
         """Delete a stored identity only after an explicit user confirmation."""
         if confirmed is not True:
             raise PermissionError("Identity deletion requires explicit confirmation")
+        if self.load_error is not None:
+            raise OSError("Face database could not be loaded; refusing to overwrite it")
         name = self._clean_name(name)
         if name not in self.data:
             return False
