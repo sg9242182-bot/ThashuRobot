@@ -887,7 +887,7 @@ def main():
                         _identity_enrollment_state = "spelling"
                         response = (
                             f"I heard the name {_identity_pending_name}. "
-                            "Please spell it one letter at a time, for example T H A R U N."
+                            "Please say the name using phonetic words, for example Tiger Hotel Alpha Romeo Uniform November."
                         )
                     elif status.get("status") in ("ambiguous", "timed_out"):
                         vision.clear_enrollment()
@@ -908,7 +908,7 @@ def main():
                     else:
                         response = (
                             "I didn't catch the spelling. Please say each letter separately, "
-                            "for example T H A R U N."
+                            "for example Tiger Hotel Alpha Romeo Uniform November."
                         )
                 elif _identity_enrollment_state == "delete_confirm" and identity_command == "CONFIRM":
                     try:
@@ -943,7 +943,7 @@ def main():
                     _identity_pending_name = None
                     response = "I cancelled deleting the face identity." if was_deleting else "I did not save the face identity."
                 elif _identity_enrollment_state == "spelling":
-                    response = "Please spell the name one letter at a time, or say cancel."
+                    response = "Please say the name using phonetic words, or say cancel."
                 elif _identity_enrollment_state == "confirm":
                     response = "Please say yes to confirm saving the name for this face, or no to cancel."
                 elif _identity_enrollment_state == "delete_confirm":
