@@ -398,11 +398,6 @@ class VisionCore:
                 landmark_detections = self.detector.detect_with_landmarks(frame)
                 detections = [item["bbox"] for item in landmark_detections]
             else:
-                landmark_detections = []
-            if getattr(self.detector, "recognition_ready", False):
-                landmark_detections = self.detector.detect_with_landmarks(frame)
-                detections = [item["bbox"] for item in landmark_detections]
-            else:
                 detections = self.detector.detect(frame)
             if not self._processing_enabled.is_set():
                 continue
