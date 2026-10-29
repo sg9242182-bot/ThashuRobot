@@ -258,7 +258,12 @@ def get_remove_identity_name(user_input):
     if not match:
         return None
     name = " ".join(match.group(1).split()).strip(" .'-")
-    if not name or len(name.split()) > 4:
+    if not name:
+        return None
+    spelled_name = get_spelled_registration_name(name)
+    if spelled_name:
+        return spelled_name
+    if len(name.split()) > 4:
         return None
     return name.title()
 
