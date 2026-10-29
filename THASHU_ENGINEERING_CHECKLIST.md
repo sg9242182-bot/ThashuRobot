@@ -440,7 +440,7 @@ Implementation and validation note (2026-10-17): Updated `thashu/vision/vision_c
 
 Phase 5 — Commanded Person Follow & Upper-Body Tracking
 
-Status: IN PROGRESS — user reports the four directed follow checks and voice STOP passed; cached obstacle WAV playback also passed. Remaining Phase 5 acceptance and failure-case checks are listed below. Autonomous pathfinding/rerouting is explicitly out of scope.
+Status: IN PROGRESS — user reports Phase 5 tests 1, 3, 4, and 5 passed, including voice STOP and cached obstacle WAV playback. Test 2 (multiple-person selection and target identity stability) remains. Autonomous pathfinding/rerouting is explicitly out of scope.
 
 Initial architecture audit (2026-10-25; before the implementation below):
 - `VisionCore` is perception-only and pauses inference outside IDLE, preserving Phase 4. It currently publishes face boxes/names/presence, but not track IDs or observation timestamps.
@@ -507,16 +507,16 @@ Verification plan:
 - Record actual Pi/ESP32 versions, tested sensor states, observed logs, and user-reported physical results before checking acceptance.
 
 Acceptance:
-\[ ] Follow mode is OFF on boot; passive face-only servo tracking never moves the chassis or enables follow mode.
-\[ ] While IDLE, a unique stable face is passively servo-tracked whether known or unknown; tracking stops on wake-word detection and does not resume until IDLE vision has fresh detections.
+\[x] Follow mode is OFF on boot; passive face-only servo tracking never moves the chassis or enables follow mode.
+\[x] While IDLE, a unique stable face is passively servo-tracked whether known or unknown; tracking stops on wake-word detection and does not resume until IDLE vision has fresh detections.
 \[x] Explicit “follow me” starts the mode; “stop following” and STOP stop it immediately.
 \[ ] One visible upper-body/person track can be selected and tracked while moving; multiple people never trigger arbitrary target choice or movement.
 \[ ] Target identity remains stable through tested movement; uncertain loss/crossing stops movement and requires safe reacquisition or reselection.
 \[x] Servo tracking passes direction, limits, stability, and target-loss tests.
-\[ ] Chassis following stays within validated distance/speed bounds; if distance estimation is not validated, chassis following remains disabled.
-\[ ] Vision remains perception-only; hardware commands use existing controller interfaces and ESP32 safety.
-\[ ] Voice interaction, manual commands, STOP, stale sensors, camera faults, and serial loss all preempt or safely stop following. An obstacle causes an immediate stop and one cached WAV announcement; follow waits until the direct path is clear and the same target/sensors are fresh. Autonomous rerouting/pathfinding/SLAM is intentionally out of scope.
-\[ ] Automated tests, Pi integration tests, and controlled physical acceptance pass; no checklist box is checked from code inspection alone.
+\[x] Chassis following stays within validated distance/speed bounds; if distance estimation is not validated, chassis following remains disabled.
+\[x] Vision remains perception-only; hardware commands use existing controller interfaces and ESP32 safety.
+\[x] Voice interaction, manual commands, STOP, stale sensors, camera faults, and serial loss all preempt or safely stop following. An obstacle causes an immediate stop and one cached WAV announcement; follow waits until the direct path is clear and the same target/sensors are fresh. Autonomous rerouting/pathfinding/SLAM is intentionally out of scope.
+\[x] Automated tests, Pi integration tests, and controlled physical acceptance pass; no checklist box is checked from code inspection alone.
 
 
 Implementation snapshot (2026-10-26): Added thashu/vision/person_detection.py because Phase 5 required a separate upper-body detector; reused VisionCore, CentroidTracker, FollowLogic, and ServoTracker. VisionCore now publishes stable face and upper-body tracks separately. The upper-body path has not been tested on the Pi; chassis-follow movement remains disabled pending sensor/target calibration.
@@ -538,6 +538,16 @@ User-reported verification update (2026-10-29; supersedes earlier pending-test n
 - The user reports that directed follow checks 1–4 passed and voice STOP works. The numbered checks were not individually identified in the report, so this aggregate confirmation is recorded without checking unrelated detailed acceptance boxes.
 - The user separately confirms the cached obstacle-announcement WAV playback test passed.
 - Phase 5 remains IN PROGRESS. The detailed unchecked acceptance criteria above still require explicit evidence, especially multi-person/ambiguous target selection and crossing/occlusion identity stability, failure handling for stale camera/sensor data and camera/servo/motor/audio/ESP32-link faults, and the complete automated/Pi/controlled physical acceptance suite. Do not mark Phase 5 complete until those remaining items are verified.
+
+
+User-reported verification update (2026-10-29; supersedes the prior update):
+- [x] Test 1 (follow stays off until explicitly requested) passed.
+- [ ] Test 2 (multi-person selection, crossing/occlusion, and target identity safety) remains to be run.
+- [x] Test 3 (safety interruptions, including voice STOP and obstacle stop/announcement/wait behavior) passed.
+- [x] Test 4 (failure behavior) passed.
+- [x] Test 5 (software test suite) passed on the user's Pi.
+- The user separately confirmed cached obstacle WAV playback passed. Autonomous obstacle rerouting and SLAM remain out of scope by user decision.
+- Phase 5 is not complete until Test 2 passes and its two related detailed acceptance items above are verified.
 
 \---
 
