@@ -829,7 +829,7 @@ def main():
                     response = "I stopped following."
                 elif follow_command == "START":
                     queue_follow_start()
-                    response = "Follow mode is on. I'll search for one person and adjust my distance with short motor steps. If an obstacle blocks the path, I'll stop; automatic rerouting isn't enabled yet."
+                    response = "Follow mode is on."
                 elif follow_command in ("LEFT", "CENTER", "RIGHT"):
                     queue_follow_start(follow_command)
                     response = f"I'll select the unique person on your {follow_command.lower()} after the camera resumes."
@@ -925,7 +925,14 @@ def main():
 
                     tts_start = time.time()
 
-                    speak(response)
+                    if response == "Follow mode is on.":
+                        if not play_cached_response(response):
+                            print(
+                                "[FOLLOW] Activation WAV is missing; run "
+                                "prepare_command_voice_cache({follow_started}) once."
+                            )
+                    else:
+                        speak(response)
 
                     # A safety stop can arrive while this confirmation is playing.
                     # Handle it before reopening the microphone or returning to IDLE.
