@@ -63,6 +63,7 @@ servo_tracker = ServoTracker()
 _auto_face_track_id = None
 _follow_start_pending = False
 _follow_region_pending = None
+_follow_search_active = False
 _motion_timer = None
 _motion_generation = 0
 _motion_lock = threading.Lock()
@@ -378,8 +379,12 @@ def announce_follow_notice(notice):
 
 
 def update_follow_from_vision(snapshot):
+    global _follow_search_active
+
     if runtime.current != RuntimeState.IDLE or not follow_logic.enabled:
+        _follow_search_active = False
         return
+    _follow_search_active = False
     decision = follow_logic.update(snapshot, runtime_idle=True)
     if decision["stop_motion"]:
         sequence = stop_motion()
@@ -389,6 +394,7 @@ def update_follow_from_vision(snapshot):
         servo_tracker.stop_search()
         if not motors.gpio.is_connected():
             follow_logic.stop()
+            _follow_search_active = False
             sequence = stop_motion()
             print(f"[FOLLOW] Controller link lost; follow stopped (STOP sequence {sequence})")
             announce_follow_notice("link_lost")
@@ -401,10 +407,13 @@ def update_follow_from_vision(snapshot):
         frame_age = time.monotonic() - observed_at if isinstance(observed_at, (int, float)) else None
         if frame_age is not None and 0.0 <= frame_age <= FollowLogic.MAX_FRAME_AGE_SECONDS:
             servo_tracker.search_step()
+            _follow_search_active = True
         else:
             servo_tracker.stop_search()
+            _follow_search_active = False
     else:
         servo_tracker.stop_search()
+        _follow_search_active = False
     if decision["notice"]:
         announce_follow_notice(decision["notice"])
 
@@ -518,17 +527,15 @@ def main():
         vis = vision.get_state()
         update_follow_from_vision(vis)
         update_idle_face_tracking(vis)
+        wake.set_suppressed(_follow_search_active)
 
         is_speech_now = vad.is_speech(chunk)
         attn.update(vis["faces"], is_speech_now)
 
         # ── IDLE: watch for wake word ─────────────────────────────────────
         if runtime.current == RuntimeState.IDLE:
-            # Servo motors can sound like a wake phrase. Keep openWakeWord's
-            # rolling buffer advancing with silence until 1.2 s after the last
-            # servo command, then resume normal detection.
-            if servo_tracker.last_command_at:
-                wake.suppress_until(servo_tracker.last_command_at + 1.2)
+            # Wake suppression is limited to active follow-search sweeps.
+            # Idle face tracking and tracking an acquired follow target remain wakeable.
             if wake.process(chunk):
                 transition_runtime(RuntimeState.WAKE_DETECTED)
 
