@@ -29,6 +29,10 @@ class FaceDetector:
                 raise RuntimeError("[VISION] Haar cascade failed to load")
             print("[FACE DETECT] Haar cascade loaded (recognition requires YuNet landmarks)")
 
+    @property
+    def recognition_ready(self):
+        return self._yunet is not None
+
     def detect_with_landmarks(self, frame):
         """Return detections as {bbox, landmarks, score}; landmarks are frame absolute."""
         if self._yunet is None:
