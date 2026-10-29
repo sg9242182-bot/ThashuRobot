@@ -349,6 +349,7 @@ class VisionCore:
 
     def _loop(self):
         recog_interval = 2.0
+        enrollment_recog_interval = 0.4
         last_recog = 0.0
 
         while self._running:
@@ -460,6 +461,14 @@ class VisionCore:
                     ):
                         enrollment["samples"].clear()
                         enrollment["track_id"] = None
+            with self._lock:
+                enrollment = getattr(self, "_enrollment", None)
+                enrollment_active = bool(
+                    enrollment and enrollment["status"] == "collecting"
+                )
+            recog_interval = (
+                enrollment_recog_interval if enrollment_active else 2.0
+            )
             if now - last_recog > recog_interval and faces:
                 for face_index, (x1, y1, x2, y2) in enumerate(faces):
                     if not self._processing_enabled.is_set():
@@ -515,8 +524,14 @@ class VisionCore:
                             else:
                                 enrollment["track_id"] = track_id
                                 enrollment["samples"].append(embedding.copy())
-                                if len(enrollment["samples"]) >= enrollment["required_samples"]:
+                                sample_count = len(enrollment["samples"])
+                                print(
+                                    "[VISION] Enrollment face samples "
+                                    f"{sample_count}/{enrollment['required_samples']}"
+                                )
+                                if sample_count >= enrollment["required_samples"]:
                                     enrollment["status"] = "ready"
+                                    print("[VISION] Face enrollment capture ready")
 
                     with self._lock:
                         if not self._processing_enabled.is_set():
