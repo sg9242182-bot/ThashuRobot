@@ -201,6 +201,9 @@ def transition_runtime(target_state):
     if current == RuntimeState.IDLE and _follow_start_pending:
         _auto_face_track_id = None
         follow_logic.start()
+        # The camera is beginning its target search; mute servo noise from the
+        # initial tilt and sweep until a target is acquired or search stops.
+        _follow_search_active = True
         tilt_sequence = servo_tracker.set_follow_tilt()
         print(
             "[FOLLOW] Camera tilt fixed at "
