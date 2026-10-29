@@ -507,6 +507,7 @@ Verification plan:
 - Record actual Pi/ESP32 versions, tested sensor states, observed logs, and user-reported physical results before checking acceptance.
 
 Acceptance:
+\[ ] Follow-mode activation confirmation plays a pre-rendered cached WAV without invoking Piper; cached playback is verified on the Pi.
 \[x] Follow mode is OFF on boot; passive face-only servo tracking never moves the chassis or enables follow mode.
 \[x] While IDLE, a unique stable face is passively servo-tracked whether known or unknown; tracking stops on wake-word detection and does not resume until IDLE vision has fresh detections.
 \[x] Explicit “follow me” starts the mode; “stop following” and STOP stop it immediately.
@@ -548,6 +549,18 @@ User-reported verification update (2026-10-29; supersedes the prior update):
 - [x] Test 5 (software test suite) passed on the user's Pi.
 - The user separately confirmed cached obstacle WAV playback passed. Autonomous obstacle rerouting and SLAM remain out of scope by user decision.
 - Phase 5 is not complete until Test 2 passes and its two related detailed acceptance items above are verified.
+
+Follow activation WAV update (2026-10-29): The follow-start acknowledgment is now the concise exact reply “Follow mode is on.” `thashu/main.py` uses cache-only playback for that acknowledgment and does not fall back to Piper if the WAV is missing. `thashu/voice/text_to_speech.py` maps the exact reply to the `follow_started` cache key. On the Pi, generate the clip once with:
+```bash
+cd ~/ThashuRobot/thashu
+source ~/.venvs/thashu/bin/activate
+python - <<'PY'
+from voice.text_to_speech import prepare_command_voice_cache
+prepare_command_voice_cache({"follow_started"})
+PY
+```
+Verify the activation produces “Follow mode is on.” and the terminal prints `[VOICE] Cached WAV played: follow_started`. The code change is on phase-5; Pi generation/playback is still unverified. This is an additional open acceptance item alongside test 2.
+
 
 \---
 
