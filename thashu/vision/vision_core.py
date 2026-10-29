@@ -1,7 +1,7 @@
 import threading
 import time
 
-from core.model_paths import model_path, project_path
+from core.model_paths import data_path, model_path
 
 
 class VisionCore:
@@ -26,7 +26,7 @@ class VisionCore:
             from vision.face_detection import FaceDetector
             # FaceDetector uses OpenCV's packaged Haar cascade; it has no local
             # MobileNet model files to load.
-            detector = FaceDetector()
+            detector = FaceDetector(model_path("face", "face_detection_yunet_2023mar.onnx"))
             if person_detector is None:
                 from vision.person_detection import UpperBodyDetector
                 person_detector = UpperBodyDetector()
@@ -35,7 +35,7 @@ class VisionCore:
             recognizer = FaceRecognizer(model_path("face", "w600k_r50.onnx"))
         if database is None:
             from vision.face_database import FaceDatabase
-            database = FaceDatabase(project_path("data", "faces.json"))
+            database = FaceDatabase(data_path("people_faces.json"))
         if tracker is None:
             from vision.tracker import CentroidTracker
             tracker = CentroidTracker(max_disappeared=20)
@@ -66,6 +66,7 @@ class VisionCore:
         self.person_present = False
         self._reported_face_count = 0
         self._reported_person_count = 0
+        self._recognition_votes = {}
         # Haar detections can flicker between frames. Only publish a face after
         # it is spatially consistent across three consecutive camera frames.
         self._detection_candidates = []
@@ -354,7 +355,17 @@ class VisionCore:
             except (AttributeError, TypeError, ValueError):
                 frame_width, frame_height = self.frame_size
 
-            detections = self.detector.detect(frame)
+            landmark_detections = []
+            if getattr(self.detector, "recognition_ready", False):
+                landmark_detections = self.detector.detect_with_landmarks(frame)
+                detections = [item["bbox"] for item in landmark_detections]
+            else:
+                landmark_detections = []
+            if getattr(self.detector, "recognition_ready", False):
+                landmark_detections = self.detector.detect_with_landmarks(frame)
+                detections = [item["bbox"] for item in landmark_detections]
+            else:
+                detections = self.detector.detect(frame)
             if not self._processing_enabled.is_set():
                 continue
             faces = self._stabilize_detections(detections)
@@ -403,19 +414,58 @@ class VisionCore:
                 for face_index, (x1, y1, x2, y2) in enumerate(faces):
                     if not self._processing_enabled.is_set():
                         break
-                    face_img = frame[y1:y2, x1:x2]
-                    embedding = self.recognizer.get_embedding(face_img)
-                    if not self._processing_enabled.is_set():
-                        break
-
                     track_id = assignments.get(face_index)
                     if track_id is None and len(tracked) == 1:
                         track_id = next(iter(tracked))
-                    if embedding is not None and track_id is not None:
-                        name, _score = self.database.match(embedding)
-                        with self._lock:
-                            if self._processing_enabled.is_set():
-                                self.current_names[track_id] = name or "Unknown"
+                    if track_id is None:
+                        continue
+
+                    # Match the stabilized box to the closest current YuNet
+                    # observation. Haar-only detections have no landmarks and
+                    # therefore cannot claim an identity.
+                    landmark_item = None
+                    best_overlap = 0.0
+                    for item in landmark_detections:
+                        ax1, ay1, ax2, ay2 = item["bbox"]
+                        ix1, iy1 = max(x1, ax1), max(y1, ay1)
+                        ix2, iy2 = min(x2, ax2), min(y2, ay2)
+                        intersection = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+                        union = ((x2 - x1) * (y2 - y1)
+                                 + (ax2 - ax1) * (ay2 - ay1) - intersection)
+                        overlap = intersection / union if union > 0 else 0.0
+                        if overlap > best_overlap:
+                            best_overlap, landmark_item = overlap, item
+                    if landmark_item is None or best_overlap < 0.30:
+                        continue
+
+                    face_img = frame[y1:y2, x1:x2]
+                    embedding = self.recognizer.get_embedding(
+                        face_img,
+                        landmark_item["landmarks"],
+                        bbox_origin=(x1, y1),
+                    )
+                    if not self._processing_enabled.is_set():
+                        break
+
+                    recognized, _score = (
+                        self.database.match(embedding) if embedding is not None
+                        else (None, -1.0)
+                    )
+                    with self._lock:
+                        if not self._processing_enabled.is_set():
+                            break
+                        previous_name, votes = self._recognition_votes.get(track_id, (None, 0))
+                        if recognized is not None and recognized == previous_name:
+                            votes += 1
+                        elif recognized is not None:
+                            previous_name, votes = recognized, 1
+                        else:
+                            previous_name, votes = None, 0
+                        self._recognition_votes[track_id] = (previous_name, votes)
+                        self.current_names[track_id] = (
+                            recognized if recognized is not None and votes >= 3
+                            else "Unknown"
+                        )
 
                 last_recog = now
 
