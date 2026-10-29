@@ -1,6 +1,7 @@
 import time
 import threading
 import os
+import statistics
 
 import numpy as np
 import RPi.GPIO as GPIO
@@ -38,6 +39,20 @@ FORWARD_COMMAND_DURATION_SECONDS = 30.0
 LEFT_TURN_COMMAND_DURATION_SECONDS = 2.0
 RIGHT_TURN_COMMAND_DURATION_SECONDS = 2.0
 
+# Phase 5 camera-range calibration from the user's moving trials (fixed 65° tilt):
+# shoulder-width median: 150 cm=109.8 px, 160 cm=103.4 px, 200 cm=95.7 px.
+# The Pose detector's published person-box width is 1.7x shoulder width.
+FOLLOW_BOX_TO_SHOULDER_SCALE = 1.7
+FOLLOW_FORWARD_BELOW_SHOULDER_PX = 97.0
+FOLLOW_REVERSE_ABOVE_SHOULDER_PX = 107.0
+FOLLOW_RANGE_WINDOW = 7
+FOLLOW_RANGE_MIN_SAMPLES = 5
+FOLLOW_PWM = 150
+FOLLOW_PULSE_SECONDS = 0.25
+FOLLOW_PULSE_INTERVAL_SECONDS = 0.75
+FOLLOW_SENSOR_MAX_AGE_SECONDS = 0.75
+FOLLOW_OBSTACLE_CLEARANCE_MM = 300
+
 # ── Shutdown Button ───────────────────────────────────────────────────────────
 BUTTON_PIN = 17
 
@@ -64,6 +79,12 @@ _auto_face_track_id = None
 _follow_start_pending = False
 _follow_region_pending = None
 _follow_search_active = False
+_follow_width_samples = []
+_follow_sample_target_id = None
+_follow_last_observation = None
+_follow_next_step_at = 0.0
+_follow_motion_active = False
+_follow_safety_notice_latched = False
 _motion_timer = None
 _motion_generation = 0
 _motion_lock = threading.Lock()
@@ -220,16 +241,20 @@ def transition_runtime(target_state):
 
 
 def _auto_stop_motion(generation):
-    global _motion_timer
+    global _motion_timer, _follow_motion_active
 
     with _motion_lock:
         if generation != _motion_generation:
             return
         _motion_timer = None
+        follow_pulse = _follow_motion_active
+        _follow_motion_active = False
         sequence = motors.stop()
 
     if sequence is None:
         print("[COMMAND] Timed motor STOP could not be sent; ESP32 watchdog remains the fallback")
+    elif follow_pulse:
+        print(f"[FOLLOW] Bounded motor pulse ended; STOP sent (sequence {sequence})")
     else:
         print(f"[COMMAND] Movement timeout; STOP sent (sequence {sequence})")
 
@@ -240,8 +265,8 @@ def queue_follow_start(region=None):
     _follow_region_pending = region
 
 
-def start_bounded_motion(direction, speed):
-    global _motion_timer, _motion_generation
+def start_bounded_motion(direction, speed, duration_override=None):
+    global _motion_timer, _motion_generation, _follow_motion_active
 
     motor_commands = {
         "FORWARD": motors.forward,
@@ -260,11 +285,14 @@ def start_bounded_motion(direction, speed):
 
         _motion_generation += 1
         generation = _motion_generation
+        _follow_motion_active = False
         sequence = command(speed)
         if sequence is None:
             return None
 
-        if direction == "LEFT":
+        if duration_override is not None:
+            duration = max(0.05, float(duration_override))
+        elif direction == "LEFT":
             duration = LEFT_TURN_COMMAND_DURATION_SECONDS
         elif direction == "RIGHT":
             duration = RIGHT_TURN_COMMAND_DURATION_SECONDS
@@ -285,10 +313,11 @@ def start_bounded_forward(speed):
 
 
 def stop_motion():
-    global _motion_timer, _motion_generation
+    global _motion_timer, _motion_generation, _follow_motion_active
 
     with _motion_lock:
         _motion_generation += 1
+        _follow_motion_active = False
         if _motion_timer is not None:
             _motion_timer.cancel()
             _motion_timer = None
@@ -362,6 +391,8 @@ def announce_follow_notice(notice):
         "reselect_target": "I couldn't safely reacquire the same person. Say follow me again to select a target.",
         "stale_frame": "The camera feed is stale, so I stopped following. Say follow me again after the camera is working.",
         "link_lost": "I lost the motor and servo controller connection, so follow mode stopped. Say follow me again after it reconnects.",
+        "sensor_not_ready": "My safety sensors aren't ready, so I stopped following until they recover.",
+        "obstacle_blocked": "An obstacle blocks my route. I stopped following and will wait for a clear path.",
     }
     message = messages.get(notice)
     if not message:
@@ -381,11 +412,146 @@ def announce_follow_notice(notice):
         eyes.idle()
 
 
+def _follow_sensor_is_clear(value):
+    if value == "FAR":
+        return True
+    return isinstance(value, (int, float)) and value > FOLLOW_OBSTACLE_CLEARANCE_MM
+
+
+def _announce_follow_blocked(reason):
+    global _follow_safety_notice_latched
+    if _follow_safety_notice_latched == reason:
+        return
+    _follow_safety_notice_latched = reason
+    announce_follow_notice(reason)
+
+
+def _stop_follow_pulse(reason):
+    global _follow_next_step_at
+    if _follow_motion_active:
+        sequence = stop_motion()
+        print(f"[FOLLOW] {reason}; STOP sent (sequence {sequence})")
+    _follow_next_step_at = 0.0
+
+
+def _follow_range_width(target, snapshot):
+    box = target.get("bbox")
+    frame_width = (snapshot.get("frame_size") or (640, 480))[0]
+    if not box or len(box) != 4:
+        return None
+    x1, _y1, x2, _y2 = box
+    if x1 <= 1 or x2 >= frame_width - 1 or x2 <= x1:
+        return None
+    return (x2 - x1) / FOLLOW_BOX_TO_SHOULDER_SCALE
+
+
+def _follow_path_is_clear(direction):
+    sensors = motors.gpio.get_sensor_snapshot(
+        max_age=FOLLOW_SENSOR_MAX_AGE_SECONDS
+    )
+    if sensors is None:
+        return False, "sensor_not_ready"
+    if direction == "BACKWARD":
+        clear = _follow_sensor_is_clear(sensors.get("rear_mm"))
+    else:
+        clear = all(
+            _follow_sensor_is_clear(sensors.get(key))
+            for key in ("tof_left_mm", "tof_center_mm", "tof_right_mm")
+        )
+    return clear, None if clear else "obstacle_blocked"
+
+
+def _start_follow_pulse(direction):
+    global _follow_motion_active, _follow_next_step_at
+    if not motors.gpio.is_connected():
+        _stop_follow_pulse("ESP32 link unavailable")
+        announce_follow_notice("link_lost")
+        return
+
+    sequence = start_bounded_motion(
+        direction,
+        FOLLOW_PWM,
+        duration_override=FOLLOW_PULSE_SECONDS,
+    )
+    if sequence is None:
+        print(f"[FOLLOW] {direction} pulse could not be sent")
+        _stop_follow_pulse("Motor command send failed")
+        return
+
+    _follow_motion_active = True
+    acknowledgement = motors.gpio.wait_for_ack(sequence, timeout=0.2)
+    if acknowledgement != "OK":
+        print(f"[FOLLOW] {direction} pulse not confirmed: {acknowledgement or 'ACK_TIMEOUT'}")
+        _stop_follow_pulse("Motor command was not confirmed")
+        return
+
+    _follow_next_step_at = time.monotonic() + FOLLOW_PULSE_INTERVAL_SECONDS
+    print(f"[FOLLOW] {direction} pulse accepted at PWM {FOLLOW_PWM} for {FOLLOW_PULSE_SECONDS:.2f}s")
+
+
+def _update_follow_chassis(target, snapshot):
+    global _follow_width_samples, _follow_sample_target_id
+    global _follow_last_observation, _follow_safety_notice_latched
+
+    if target is None:
+        _follow_width_samples = []
+        _follow_sample_target_id = None
+        _follow_last_observation = None
+        _stop_follow_pulse("Target unavailable")
+        return
+
+    track_id = target.get("track_id")
+    if target.get("ambiguous", False):
+        _follow_width_samples = []
+        _stop_follow_pulse("Target association ambiguous")
+        return
+    if track_id != _follow_sample_target_id:
+        _follow_width_samples = []
+        _follow_sample_target_id = track_id
+        _follow_last_observation = None
+        _stop_follow_pulse("Target changed")
+
+    observed_at = snapshot.get("observed_at")
+    width = _follow_range_width(target, snapshot)
+    if not isinstance(observed_at, (int, float)) or width is None:
+        _follow_width_samples = []
+        _stop_follow_pulse("Range estimate invalid or clipped")
+        return
+    if observed_at != _follow_last_observation:
+        _follow_width_samples.append(width)
+        _follow_width_samples = _follow_width_samples[-FOLLOW_RANGE_WINDOW:]
+        _follow_last_observation = observed_at
+
+    if len(_follow_width_samples) < FOLLOW_RANGE_MIN_SAMPLES:
+        return
+    shoulder_width = statistics.median(_follow_width_samples)
+
+    if shoulder_width < FOLLOW_FORWARD_BELOW_SHOULDER_PX:
+        direction = "FORWARD"
+    elif shoulder_width > FOLLOW_REVERSE_ABOVE_SHOULDER_PX:
+        direction = "BACKWARD"
+    else:
+        _stop_follow_pulse("Inside calibrated distance band")
+        _follow_safety_notice_latched = False
+        return
+
+    path_clear, failure = _follow_path_is_clear(direction)
+    if not path_clear:
+        _stop_follow_pulse("Safety path is not clear")
+        _announce_follow_blocked(failure)
+        return
+
+    _follow_safety_notice_latched = False
+    if time.monotonic() >= _follow_next_step_at and not _follow_motion_active:
+        _start_follow_pulse(direction)
+
+
 def update_follow_from_vision(snapshot):
     global _follow_search_active
 
     if runtime.current != RuntimeState.IDLE or not follow_logic.enabled:
         _follow_search_active = False
+        _update_follow_chassis(None, snapshot or {})
         return
     _follow_search_active = False
     decision = follow_logic.update(snapshot, runtime_idle=True)
@@ -405,6 +571,7 @@ def update_follow_from_vision(snapshot):
         frame_w, _frame_h = snapshot.get("frame_size", (640, 480))
         x, _y = target["center"]
         servo_tracker.update_pan_only(x, frame_w)
+        _update_follow_chassis(target, snapshot)
     elif decision["state"] in (FollowLogic.WAITING_FOR_TARGET, FollowLogic.SEARCHING_FOR_TARGET):
         observed_at = snapshot.get("observed_at")
         frame_age = time.monotonic() - observed_at if isinstance(observed_at, (int, float)) else None
@@ -414,9 +581,11 @@ def update_follow_from_vision(snapshot):
         else:
             servo_tracker.stop_search()
             _follow_search_active = False
+        _update_follow_chassis(None, snapshot or {})
     else:
         servo_tracker.stop_search()
         _follow_search_active = False
+        _update_follow_chassis(None, snapshot or {})
     if decision["notice"]:
         announce_follow_notice(decision["notice"])
 
