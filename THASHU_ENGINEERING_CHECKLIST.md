@@ -569,7 +569,7 @@ Two-person follow trial log review (2026-10-29): The pasted Pi log confirms `[VO
 
 Phase 6 — Person Recognition
 
-Status: IN PROGRESS — architecture audit complete; implementation and validation remain.
+Status: IN PROGRESS — audit and first implementation tranche complete; Pi calibration and full verification remain.
 
 Existing files inspected:
 
@@ -609,7 +609,7 @@ Tasks:
 
 \[x] Prevent automatic identity invention by design: unknown observations never enroll themselves or gain a semantic name.
 
-\[ ] Implement aligned embeddings, robust persistent database, explicit confirmation flow, and runtime identity display.
+\[x] Implement aligned embeddings, robust persistent database, explicit confirmation flow, and runtime identity display.
 
 \[ ] Add/complete automated and Raspberry Pi validation for enrollment, recognition, ambiguity, persistence, deletion/cancellation, and failure cases.
 
@@ -624,6 +624,18 @@ Acceptance:
 \[ ] False identity assignment is prevented by alignment, quality gates, calibrated threshold/margin, and temporal consensus.
 
 \[ ] No raw face photos or unconfirmed identities are persisted; enrolled identities can be explicitly removed.
+
+
+
+Implementation snapshot (2026-10-29; on phase-6):
+- Updated `thashu/vision/face_detection.py` to prefer the machine-local OpenCV Zoo YuNet model for boxes plus five landmarks, with Haar retained as a detection-only fallback. The fallback cannot assign a known identity.
+- Updated `thashu/vision/face_recognition.py` to align YuNet's five landmarks to ArcFace's canonical 112×112 template before ONNX inference. Missing landmarks or failed quality checks return no embedding.
+- Updated `thashu/vision/vision_core.py` to use the new detector, use the external local identity store, collect enrollment samples only from one stable unambiguous face, and require three consistent recognition observations before publishing a known name.
+- Updated `thashu/vision/face_database.py` with normalized vectors, separate best/second-best score margin, minimum five-sample explicit enrollment, duplicate-identity rejection, atomic writes, restrictive file permissions, corrupt-store fail-closed behavior, and explicit-confirmation deletion. No raw image is stored by this implementation.
+- Updated `thashu/core/model_paths.py` and `thashu/MODEL_SETUP.md` for persistent user-local data and the YuNet model at `~/.local/share/thashu/models/face/face_detection_yunet_2023mar.onnx`.
+- Updated `thashu/core/decision.py` and `thashu/main.py` with deterministic “remember me” registration: collect samples after returning to IDLE, accept an explicit name phrase, read back the name/face association, and persist only after “yes”; “no”/cancel discards it. “forget/remove/delete NAME” requires confirmation. Do not associate a face based only on audio.
+- Existing tracked legacy face photos were not modified or imported. The project still needs a deliberate cleanup/migration decision for those historical artifacts; they must not be treated as enrolled identities.
+- No test suite or Pi hardware tests were run in this tranche. The recognition threshold/margin defaults are provisional and must be calibrated with labeled same-person and different-person trials before acceptance. Install/download YuNet on the Pi using `MODEL_SETUP.md`.
 
 Phase 7 — Person \& Conversation Memory
 
