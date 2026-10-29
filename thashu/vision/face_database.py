@@ -98,9 +98,17 @@ class FaceDatabase:
         for stored in existing:
             if float(np.dot(vector, np.asarray(stored, dtype=np.float32))) >= 0.90:
                 return False
-        self.data.setdefault(name, []).append(vector.tolist())
-        self.data[name] = self.data[name][-self.MAX_EMBEDDINGS_PER_PERSON:]
-        self.save()
+        previous = self.data.get(name)
+        updated = list(previous or []) + [vector.tolist()]
+        self.data[name] = updated[-self.MAX_EMBEDDINGS_PER_PERSON:]
+        try:
+            self.save()
+        except OSError:
+            if previous is None:
+                self.data.pop(name, None)
+            else:
+                self.data[name] = previous
+            raise
         return True
 
     def remove_person(self, name, *, confirmed=False):
@@ -112,8 +120,12 @@ class FaceDatabase:
         name = self._clean_name(name)
         if name not in self.data:
             return False
-        del self.data[name]
-        self.save()
+        previous = self.data.pop(name)
+        try:
+            self.save()
+        except OSError:
+            self.data[name] = previous
+            raise
         return True
 
     def add_person_samples(self, name, embeddings, *, confirmed=False):
@@ -147,7 +159,11 @@ class FaceDatabase:
                 raise ValueError(f"Enrollment resembles the existing identity {existing_name}")
 
         self.data[name] = [vector.tolist() for vector in vectors[-self.MAX_EMBEDDINGS_PER_PERSON:]]
-        self.save()
+        try:
+            self.save()
+        except OSError:
+            self.data.pop(name, None)
+            raise
         return True
 
     def match(self, embedding, threshold=None, margin=None):
