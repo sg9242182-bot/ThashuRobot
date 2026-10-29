@@ -569,47 +569,61 @@ Two-person follow trial log review (2026-10-29): The pasted Pi log confirms `[VO
 
 Phase 6 — Person Recognition
 
-Status: NOT STARTED
+Status: IN PROGRESS — architecture audit complete; implementation and validation remain.
 
-Existing files:
+Existing files inspected:
 
-\[ ] `vision/face\_recognition.py`
+\[x] `vision/face_recognition.py`
 
-\[ ] `vision/face\_database.py`
+\[x] `vision/face_database.py`
 
-\[ ] `vision/auto\_capture.py`
+\[x] `vision/auto_capture.py`
 
-\[ ] `memory/people.py`
+\[x] `memory/people.py`
 
-\[ ] `data/people.py`
+\[x] `data/people.py`
+
+Audit findings and design decisions:
+- The current recognizer embeds an unaligned Haar face crop. The detector publishes boxes only, while the InsightFace ArcFace model expects landmark-based face alignment. This preprocessing mismatch makes a hard-coded similarity cutoff unreliable. Official reference implementations align faces using five landmarks before embedding: https://github.com/deepinsight/insightface/blob/master/python-package/insightface/model_zoo/arcface_onnx.py and https://github.com/deepinsight/insightface/blob/master/python-package/insightface/utils/face_align.py
+- The database currently uses a single similarity threshold, has no top-two match margin or multi-frame identity consensus, accepts arbitrary names through add_person(), and writes JSON non-atomically to a repo-relative path. Corrupt JSON silently resets to an empty database.
+- No runtime enrollment flow calls FaceDatabase.add_person(). AutoCapture is unused and stores raw face photos, so it will not be reconnected as-is.
+- PeopleMemory records basic counts/last-seen and has no verified enrollment or confirmed-identity association in the runtime. Existing data/people files are empty.
+- Legacy raw face images are tracked under thashu/vision/data/faces. They are not proof of confirmed identity and will not be imported or deleted by this phase. New identity records will store embeddings and confirmed labels in user-local persistent storage outside Git; no raw face photos are needed.
+- Enrollment must be explicit and consent-based: a user requests remembering a person, one stable face is selected, multiple quality-approved observations are collected in volatile memory, the candidate name is read back, and only an explicit confirmation persists the identity. Unknown people remain Unknown in ordinary operation. Ambiguous faces, weak matches, cancellation, or failed confirmation do not create identities. Speech alone is not linked to a face.
+- Recognition will require quality checks, aligned embeddings, a calibrated best-match threshold plus best-vs-second-best margin, and temporal confirmation across fresh observations. If those checks do not confidently identify one enrolled person, return Unknown.
+- Keep model licensing constraints documented in MODEL_SETUP.md; do not claim commercial-use rights for InsightFace weights.
 
 Tasks:
 
-\[ ] Trace existing face-recognition pipeline.
+\[x] Trace existing face-recognition pipeline.
 
-\[ ] Determine why `FaceDatabase.add\_person()` is currently unused.
+\[x] Determine why `FaceDatabase.add_person()` is currently unused.
 
-\[ ] Determine whether `AutoCapture` should be reconnected.
+\[x] Determine whether `AutoCapture` should be reconnected.
 
-\[ ] Define unknown-person behavior.
+\[x] Define unknown-person behavior.
 
-\[ ] Define confirmed-name registration.
+\[x] Define confirmed-name registration.
 
-\[ ] Define recognition confidence/verification requirements.
+\[ ] Calibrate recognition confidence/verification requirements with labeled positive and negative samples.
 
-\[ ] Prevent automatic identity invention.
+\[x] Prevent automatic identity invention by design: unknown observations never enroll themselves or gain a semantic name.
+
+\[ ] Implement aligned embeddings, robust persistent database, explicit confirmation flow, and runtime identity display.
+
+\[ ] Add/complete automated and Raspberry Pi validation for enrollment, recognition, ambiguity, persistence, deletion/cancellation, and failure cases.
 
 Acceptance:
 
-\[ ] Known person is recognized reliably.
+\[ ] Known person is recognized reliably across repeated sessions and representative lighting/pose changes.
 
-\[ ] Unknown person remains unknown until identity is confirmed.
+\[x] Unknown person remains unknown until identity is explicitly confirmed.
 
-\[ ] Confirmed name + face creates persistent identity.
+\[ ] Confirmed name + face creates persistent identity outside the repository.
 
-\[ ] False identity assignment is prevented.
+\[ ] False identity assignment is prevented by alignment, quality gates, calibrated threshold/margin, and temporal consensus.
 
-\---
+\[ ] No raw face photos or unconfirmed identities are persisted; enrolled identities can be explicitly removed.
 
 Phase 7 — Person \& Conversation Memory
 
