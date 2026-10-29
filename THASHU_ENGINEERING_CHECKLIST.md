@@ -440,14 +440,14 @@ Implementation and validation note (2026-10-17): Updated `thashu/vision/vision_c
 
 Phase 5 — Commanded Person Follow & Upper-Body Tracking
 
-Status: IN PROGRESS — Pose Lite and bounded chassis-follow pulse integration are on phase-5; integrated Pi validation, verified rerouting, and physical acceptance remain open.
+Status: IN PROGRESS — bounded follow and stop-on-obstacle behavior are implemented; user reports movement/obstacle-stop tests passed. Cached WAV playback and remaining failure/acceptance tests remain open. Autonomous pathfinding/rerouting is explicitly out of scope.
 
 Initial architecture audit (2026-10-25; before the implementation below):
 - `VisionCore` is perception-only and pauses inference outside IDLE, preserving Phase 4. It currently publishes face boxes/names/presence, but not track IDs or observation timestamps.
 - `CentroidTracker` uses nearest-centroid greedy matching with no distance gate or ambiguity signal. A crossing/overlap can silently change target identity. Existing `FollowLogic` chooses the largest face and is not safe for this phase; it is not currently wired into the Phase 4 `VisionCore` or main actuator path.
 - `ServoTracker` exists but is not instantiated by `main.py`. Its Pi angle limits (30–150°) differ from ESP32 `ServoManager` limits (45–135°); control must be clamped consistently before physical servo testing.
 - Voice movement handling in `main.py` is deterministic and exact-phrase based; no follow-mode command/state exists. `RuntimeStateMachine` already pauses vision outside IDLE, so follow must stop chassis motion on transition and require fresh target/sensor validation before resuming.
-- `GPIOControl` receives sensor telemetry but exposes no timestamped sensor snapshot for follow decisions. ESP32 `SafetyManager` is authoritative and fails closed: forward/turning require all three front ToF readings clear; reverse/turning require rear ultrasonic clear. Any alternate-route maneuver must stay within those interlocks; if the sensors cannot verify it, stop and report blocked.
+- `GPIOControl` receives timestamped sensor telemetry for follow decisions. ESP32 `SafetyManager` remains authoritative: forward requires all three front ToF readings clear; reverse requires rear ultrasonic clear. If the direct path is blocked, stop and report; no alternate-route/pathfinding behavior is in scope.
 - Motor commands persist until STOP. The current Pi heartbeat is independent of command generation, so follow needs bounded command leases/automatic stops; ordinary heartbeat alone is not a movement lease.
 - The ToFs are fixed front sensors, and no verified mapping from a selected camera target to an individual ToF beam or calibrated follow-distance hysteresis is recorded. Therefore chassis follow must remain disabled until target-range mapping, limits, and short-step behavior pass physical calibration. Servo-only tracking can be validated independently.
 
@@ -475,7 +475,7 @@ Movement, servo, and safety behavior:
 - In explicit upper-body follow mode, hold camera tilt at a fixed calibrated upward angle and move only pan to keep the selected person visible. Normal idle face tracking may continue to use pan and tilt. Calibrate direction, center/dead zones, hard angle limits, rate limits, smoothing, and loss-of-target behavior; never oscillate or drive into mechanical stops.
 - Chassis movement requires a reliable target-distance estimate and calibrated follow-distance hysteresis. Calibrate camera-only range from the selected upper-body box's apparent height at known physical distances while resolution and tilt are fixed; use a measured lookup/interpolation and a conservative deadband rather than assuming every person's torso has the same size. Box clipping, target loss, pose change that invalidates the calibration, or stale frames must stop motion. Low-mounted front ToFs and rear ultrasonic are obstacle/route sensors only; do not treat them as target-range measurements. If camera range cannot be established or validated, keep chassis follow disabled.
 - Define bounded follow speed/acceleration and command refresh/lease behavior. Loss of target, stale camera frames, stale sensor data, ESP32 link loss, invalid safety readings, STOP, or controller errors must stop chassis motion; no stale command may persist.
-- Front ToF and rear ultrasonic checks remain in force. When an obstacle blocks the current route, the ESP32 must stop motion immediately. Follow mode may then attempt a bounded reroute around the obstacle, like a cautious obstacle-avoiding robot, only after the candidate route is positively checked by fresh sensor coverage. Use the three front ToF readings to compare left/center/right clearance; never assume an unseen side path is clear. If the geometry requires turning or reversing, validate the swept path with available sensors before moving; rear ultrasonic is required before any reverse motion. Use low bounded speed, short motion leases, and re-check sensors after each short step. Preserve the selected person target and do not reacquire a different person during rerouting. If no verified safe route is available, readings are stale/ambiguous, target identity is uncertain, or the route cannot be checked, remain stopped, announce that the obstacle blocks following, and wait for a clear path or explicit human intervention. Never route around an obstacle by bypassing ESP32 interlocks, stale-sensor checks, STOP, or manual-control precedence. A safety stop/reroute event must be logged and announced once without repeated spam.
+- Front ToF and rear ultrasonic checks remain in force. When an obstacle blocks the direct route, ESP32 must stop motion immediately and the Pi must announce the stop once. Follow mode must wait while the path remains blocked and may resume only along the same direct path after fresh sensors report clear and the same target remains fresh/stable. Do not turn, reverse, map, invoke SLAM, or attempt autonomous pathfinding/rerouting to get around the obstacle. If readings are stale/ambiguous or the target is uncertain, remain stopped. Never bypass ESP32 interlocks, STOP, or manual-control precedence.
 - Manual movement commands must have a defined precedence: stop follow before taking manual control; STOP always wins. Follow mode must never override voice STOP or a safety stop.
 - Do not store face images, embeddings, or identity associations for follow mode unless a separate user-approved memory requirement explicitly authorizes it.
 
@@ -493,7 +493,7 @@ Required failure and interaction cases:
 - STOP during servo tracking and during chassis movement
 - explicit manual command while following
 - wake/listen/think/speak transitions while following; motion stops and does not resume without fresh validation
-- obstacle stop followed by a sensor-verified bounded left/right reroute, no-safe-route fallback, invalid/stale ToF or ultrasonic reading, and ESP32 serial loss/recovery
+- obstacle stop and WAV announcement, waiting while blocked, and safe same-path resumption after sensors clear (no reroute),
 - camera, vision worker, servo, motor controller, or audio-command failure
 - repeated detections/events must not cause command/audio spam or rapid direction oscillation
 
@@ -502,7 +502,7 @@ Verification plan:
 - Mocked integration tests proving VisionCore emits perception only, no actuation occurs while mode is OFF, all actions use existing hardware controllers, STOP preempts following, and stale/lost target stops movement.
 - Pi camera tests with one and multiple people, including crossing/occlusion and explicit target selection.
 - Servo bench tests for direction, limits, center/dead zone, smoothing, and sustained tracking.
-- Wheels-raised chassis tests for bounded speed, follow-distance hysteresis, target loss, voice STOP, obstacle stop-and-reroute choices, side-path clearance checks, rear-clearance validation before reversing, no-safe-route fallback, stale sensors, and serial disconnect/recovery.
+- Wheels-raised chassis tests for bounded speed, follow-distance hysteresis, target loss, voice STOP, obstacle stop/WAV playback and wait-until-clear behavior (no reroute),
 - Controlled floor tests only after bench and safety tests pass; verify no target switching and no obstacle/sensor bypass.
 - Record actual Pi/ESP32 versions, tested sensor states, observed logs, and user-reported physical results before checking acceptance.
 
@@ -515,7 +515,7 @@ Acceptance:
 \[x] Servo tracking passes direction, limits, stability, and target-loss tests.
 \[ ] Chassis following stays within validated distance/speed bounds; if distance estimation is not validated, chassis following remains disabled.
 \[ ] Vision remains perception-only; hardware commands use existing controller interfaces and ESP32 safety.
-\[ ] Voice interaction, manual commands, STOP, stale sensors, camera faults, and serial loss all preempt or safely stop following. An obstacle triggers an immediate stop, then only a fresh-sensor-verified bounded reroute; when no safe route can be verified, the robot remains stopped and reports why.
+\[ ] Voice interaction, manual commands, STOP, stale sensors, camera faults, and serial loss all preempt or safely stop following. An obstacle causes an immediate stop and one cached WAV announcement; follow waits until the direct path is clear and the same target/sensors are fresh. Autonomous rerouting/pathfinding/SLAM is intentionally out of scope.
 \[ ] Automated tests, Pi integration tests, and controlled physical acceptance pass; no checklist box is checked from code inspection alone.
 
 
@@ -1062,7 +1062,7 @@ Follow-target clarification from user (2026-10-26): Follow mode should track a m
 Passive face-tracking clarification from user (2026-10-26): Independently of follow mode, while the runtime is IDLE the Pi servo controller may center one stable, unambiguous face whether recognized or unknown. It must stop issuing tracking updates immediately when the wake word is detected and must not restart until the runtime returns to IDLE with fresh camera frames. Face presence never enables chassis movement. Implementation is in `thashu/main.py`; multiple/ambiguous faces are not arbitrarily selected. Hardware validation remains pending.
 
 
-Bounded chassis-follow implementation (2026-10-29): Updated `thashu/main.py` to use the user's moving Pose Lite shoulder-width medians (150 cm=109.8 px, 160 cm=103.4 px, 200 cm=95.7 px) with a 7-frame median window. The Pose detector's torso box width is converted back to shoulder width using its current 1.7 scale. Below 97 px requests a 250 ms forward pulse; above 107 px requests a 250 ms reverse pulse; between those thresholds the motors stop. Pulses are PWM 150 and spaced 750 ms apart to allow fresh camera measurements. Movement requires a fresh target, unclipped box, connected ESP32, fresh telemetry, all three front ToFs clear for forward, or rear ultrasonic clear for reverse; the ESP32 remains authoritative and must ACK each pulse. This is implementation only and has not been run on the Pi or tested with wheels lifted. Stop/report is implemented for blocked or stale safety paths, but no autonomous obstacle reroute is implemented. Do not mark chassis-follow or obstacle-reroute acceptance complete; first verify with wheels raised and an accessible physical STOP, then controlled floor tests.
+Bounded chassis-follow implementation (2026-10-29):
 
 
 Follow freshness correction (2026-10-29): The user's Pi run showed the selected upper-body remained visible and unambiguous (track 0), while observation ages repeatedly ranged from 0.35 to 0.58 seconds. The previous `FollowLogic.MAX_FRAME_AGE_SECONDS = 0.35` caused fresh-enough-for-this-measured-pipeline snapshots to enter `SEARCHING_FOR_TARGET` and trigger STOP, even though the same track was still present. Increased the threshold to 0.75 seconds in `thashu/vision/follow_logic.py` (commit `212c5f5`); bounded 250 ms motor pulses, sensor freshness checks, and ESP32 safety interlocks are unchanged. This is a code correction based on the supplied Pi log, not yet hardware-retested. Keep chassis-follow and obstacle-reroute acceptance unchecked until the user retests follow behavior safely on the robot.
@@ -1075,4 +1075,9 @@ from voice.text_to_speech import prepare_command_voice_cache
 prepare_command_voice_cache({"obstacle_stop", "obstacle_blocked_v2"})
 ```
 This uses Piper only during offline WAV generation; runtime plays `obstacle_stop.wav` or `obstacle_blocked_v2.wav` from the user-local voice cache. If a clip is missing, the code logs a warning and does not fall back to live Piper; ESP32 motor STOP/safety remains independent. User reports follow movement and obstacle stopping worked in the latest test; the WAV-only audio path still needs Pi playback validation. No automated tests run. Phase 5 acceptance remains open.
+
+
+
+
+User scope and hardware test update (2026-10-29): The user explicitly declines automatic obstacle pathfinding/rerouting and SLAM for follow mode. Required behavior is stop on the blocked direct path, announce once, and wait; no turn-around or alternate-route attempt. The user reports the latest follow movement and obstacle-stop test worked correctly after the freshness correction. This report does not validate the new WAV-only playback, all failure cases, or full Phase 5 acceptance. Acceptance remains unchecked pending WAV playback and remaining required tests.
 
