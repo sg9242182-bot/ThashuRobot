@@ -1067,3 +1067,12 @@ Bounded chassis-follow implementation (2026-10-29): Updated `thashu/main.py` to 
 
 Follow freshness correction (2026-10-29): The user's Pi run showed the selected upper-body remained visible and unambiguous (track 0), while observation ages repeatedly ranged from 0.35 to 0.58 seconds. The previous `FollowLogic.MAX_FRAME_AGE_SECONDS = 0.35` caused fresh-enough-for-this-measured-pipeline snapshots to enter `SEARCHING_FOR_TARGET` and trigger STOP, even though the same track was still present. Increased the threshold to 0.75 seconds in `thashu/vision/follow_logic.py` (commit `212c5f5`); bounded 250 ms motor pulses, sensor freshness checks, and ESP32 safety interlocks are unchanged. This is a code correction based on the supplied Pi log, not yet hardware-retested. Keep chassis-follow and obstacle-reroute acceptance unchecked until the user retests follow behavior safely on the robot.
 
+
+
+Obstacle announcement WAV-only playback (2026-10-29): Updated `thashu/main.py` so asynchronous obstacle STOP/BLOCKED announcements call the existing cache-only WAV playback path instead of `speak()`; runtime obstacle announcements do not invoke Piper. Updated `thashu/voice/text_to_speech.py` with `play_cached_response()` and optional named generation in the existing cache-preparation function. On the Pi, pre-render just the two required clips once with:
+```python
+from voice.text_to_speech import prepare_command_voice_cache
+prepare_command_voice_cache({"obstacle_stop", "obstacle_blocked_v2"})
+```
+This uses Piper only during offline WAV generation; runtime plays `obstacle_stop.wav` or `obstacle_blocked_v2.wav` from the user-local voice cache. If a clip is missing, the code logs a warning and does not fall back to live Piper; ESP32 motor STOP/safety remains independent. User reports follow movement and obstacle stopping worked in the latest test; the WAV-only audio path still needs Pi playback validation. No automated tests run. Phase 5 acceptance remains open.
+
