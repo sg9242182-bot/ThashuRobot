@@ -456,7 +456,7 @@ class VisionCore:
                         enrollment["status"] = "ambiguous"
                         enrollment["samples"].clear()
                     elif len(faces) == 1 and (
-                        not assignments.get(0) or assignments.get(0) in ambiguous_ids
+                        assignments.get(0) is None or assignments.get(0) in ambiguous_ids
                     ):
                         enrollment["samples"].clear()
                         enrollment["track_id"] = None
