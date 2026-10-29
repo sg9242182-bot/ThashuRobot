@@ -440,7 +440,7 @@ Implementation and validation note (2026-10-17): Updated `thashu/vision/vision_c
 
 Phase 5 — Commanded Person Follow & Upper-Body Tracking
 
-Status: IN PROGRESS — user reports Phase 5 tests 1, 3, 4, and 5 passed, including voice STOP and cached obstacle WAV playback. Test 2 (multiple-person selection and target identity stability) remains. Autonomous pathfinding/rerouting is explicitly out of scope.
+Status: COMPLETE — user reports Phase 5 tests 1–5 passed, including multi-person target selection/stability, voice STOP, failure behavior, software tests, and cached WAV playback. Autonomous pathfinding/rerouting is explicitly out of scope.
 
 Initial architecture audit (2026-10-25; before the implementation below):
 - `VisionCore` is perception-only and pauses inference outside IDLE, preserving Phase 4. It currently publishes face boxes/names/presence, but not track IDs or observation timestamps.
@@ -511,8 +511,8 @@ Acceptance:
 \[x] Follow mode is OFF on boot; passive face-only servo tracking never moves the chassis or enables follow mode.
 \[x] While IDLE, a unique stable face is passively servo-tracked whether known or unknown; tracking stops on wake-word detection and does not resume until IDLE vision has fresh detections.
 \[x] Explicit “follow me” starts the mode; “stop following” and STOP stop it immediately.
-\[ ] One visible upper-body/person track can be selected and tracked while moving; multiple people never trigger arbitrary target choice or movement.
-\[ ] Target identity remains stable through tested movement; uncertain loss/crossing stops movement and requires safe reacquisition or reselection.
+\[x] One visible upper-body/person track can be selected and tracked while moving; multiple people never trigger arbitrary target choice or movement.
+\[x] Target identity remains stable through tested movement; uncertain loss/crossing stops movement and requires safe reacquisition or reselection.
 \[x] Servo tracking passes direction, limits, stability, and target-loss tests.
 \[x] Chassis following stays within validated distance/speed bounds; if distance estimation is not validated, chassis following remains disabled.
 \[x] Vision remains perception-only; hardware commands use existing controller interfaces and ESP32 safety.
@@ -543,12 +543,12 @@ User-reported verification update (2026-10-29; supersedes earlier pending-test n
 
 User-reported verification update (2026-10-29; supersedes the prior update):
 - [x] Test 1 (follow stays off until explicitly requested) passed.
-- [ ] Test 2 (multi-person selection, crossing/occlusion, and target identity safety) remains to be run.
+- [x] Test 2 (multi-person selection, crossing/occlusion, and target identity safety) passed; user confirmed the robot prompts for left/center/right, accepts the chosen direction after the wake word, and passed the selection/target-stability test.
 - [x] Test 3 (safety interruptions, including voice STOP and obstacle stop/announcement/wait behavior) passed.
 - [x] Test 4 (failure behavior) passed.
 - [x] Test 5 (software test suite) passed on the user's Pi.
 - The user separately confirmed cached obstacle WAV playback passed. Autonomous obstacle rerouting and SLAM remain out of scope by user decision.
-- Phase 5 is not complete until Test 2 passes and its two related detailed acceptance items above are verified.
+- All Phase 5 acceptance criteria are now marked passed based on the user-reported tests.
 
 Follow activation WAV update (2026-10-29): The follow-start acknowledgment is now the concise exact reply “Follow mode is on.” `thashu/main.py` uses cache-only playback for that acknowledgment and does not fall back to Piper if the WAV is missing. `thashu/voice/text_to_speech.py` maps the exact reply to the `follow_started` cache key. On the Pi, generate the clip once with:
 ```bash
