@@ -1148,3 +1148,7 @@ Phase 6 identity-name and query follow-up (2026-10-29): Updated `thashu/core/dec
 
 
 Phase 6 voice-only name correction refinement (2026-10-29): The user cannot access a terminal during expo demonstrations. Updated `thashu/core/decision.py` to accept NATO phonetic alphabet words (for example, “Tiger Hotel Alpha Romeo Uniform November”) as spoken name spelling, while retaining letter-name parsing. Updated `thashu/main.py` prompts to request phonetic words instead of isolated letters. Thashu still reads back the reconstructed name and requires a separate voice confirmation before saving. This replaces the prior suggestion of text-entry correction; no terminal is required. No tests or Pi validation have been run.
+
+
+
+Phase 6 user preference correction (2026-10-29): The user prefers ordinary letter-by-letter speech (for example, “T H A R U N”), not NATO words and not terminal text entry. Updated the enrollment prompt to request ordinary letter names. Explicit deletion accepts `forget T H A R U N`; the existing parser also converts spoken letter names before resolving the stored label. It offers any fuzzy saved-name match and requires a separate spoken yes before deletion. The prior NATO-word prompt and terminal-entry suggestion are superseded. No tests or Pi validation have been run.
