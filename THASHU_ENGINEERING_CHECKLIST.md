@@ -1152,3 +1152,7 @@ Phase 6 voice-only name correction refinement (2026-10-29): The user cannot acce
 
 
 Phase 6 user preference correction (2026-10-29): The user prefers ordinary letter-by-letter speech (for example, “T H A R U N”), not NATO words and not terminal text entry. Updated the enrollment prompt to request ordinary letter names. Explicit deletion accepts `forget T H A R U N`; the existing parser also converts spoken letter names before resolving the stored label. It offers any fuzzy saved-name match and requires a separate spoken yes before deletion. The prior NATO-word prompt and terminal-entry suggestion are superseded. No tests or Pi validation have been run.
+
+
+
+Phase 6 enrollment capture latency follow-up (2026-10-29): The user reports identity enrollment remains at “collecting clear views” for a long time. Updated `thashu/vision/vision_core.py` to perform face-embedding capture every 0.4 seconds while enrollment is active (normal recognition cadence remains 2 seconds), log each accepted sample and announce when five are ready. Updated `thashu/main.py` to state the required five-view capture, report current sample progress when the user speaks the name too early, and keep the spoken letter prompt consistent. The implementation requires one stable, unambiguous face with valid YuNet landmarks; if samples do not progress, the Pi log should show whether capture started and the current count. No tests or Pi validation have been run.
