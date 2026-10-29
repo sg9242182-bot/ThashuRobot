@@ -11,7 +11,9 @@ class FollowLogic:
     TRACKING = "TRACKING"
     NEEDS_RESELECTION = "NEEDS_RESELECTION"
 
-    MAX_FRAME_AGE_SECONDS = 0.35
+    # The Pi 4 run measured 0.35–0.58 s end-to-end perception age under load.
+    # Keep a bounded margin above that observed latency; chassis moves remain pulsed.
+    MAX_FRAME_AGE_SECONDS = 0.75
     SEARCH_GRACE_SECONDS = 12.0
     NO_TARGET_NOTICE_DELAY_SECONDS = 15.0
 
