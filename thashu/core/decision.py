@@ -263,7 +263,7 @@ def get_remove_identity_name(user_input):
     spelled_name = get_spelled_registration_name(name)
     if spelled_name:
         return spelled_name
-    if len(name.split()) > 4:
+    if len(name.split()) > 8:
         return None
     return name.title()
 
