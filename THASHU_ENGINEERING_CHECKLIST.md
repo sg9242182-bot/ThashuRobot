@@ -1173,3 +1173,6 @@ Phase 6 turn-mix correction (2026-10-30): User clarified physical motor layout a
 
 
 Phase 6 turn duration adjustment (2026-10-30): Reduced both Pi-bounded LEFT and RIGHT turn durations from 2.0 s to 1.7 s, retaining matched durations and the existing STOP timer/safety behavior. Updated the movement log to report tenths of a second. This is an implementation adjustment only; verify turn amount and direction with wheels lifted, then at low speed on the floor. No hardware test performed.
+
+
+Phase 6 turn duration follow-up (2026-10-30): Superseding the prior 1.7 s setting, both LEFT and RIGHT turn durations are now 1.5 s in `thashu/main.py`. Hardware validation remains pending.
