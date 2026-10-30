@@ -1182,3 +1182,6 @@ Phase 6 turn duration follow-up (2026-10-30): Superseding prior turn-duration se
 
 
 Phase 6 spoken-name greeting cleanup (2026-10-30): Updated `thashu/core/decision.py` to remove common trailing greetings (including “nice to meet you/u”) from an explicit self-introduction before forming the candidate name. Unspelled names still enter the spelling/read-back confirmation flow; the database write remains gated on an explicit yes. This prevents the greeting from becoming part of the stored label, but cannot correct a Whisper mishearing by itself. No tests or Pi validation were run.
+
+
+Phase 6 saved-name cleanup safeguard (2026-10-30): Extended explicit `forget/remove/delete <name>` parsing to accept labels up to eight words, still requiring Thashu to read back the matched identity and receive a separate yes before deletion. This allows removal of an existing malformed label that accidentally includes a greeting. No tests or Pi validation were run.
