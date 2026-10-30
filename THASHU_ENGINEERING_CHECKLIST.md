@@ -1185,3 +1185,6 @@ Phase 6 spoken-name greeting cleanup (2026-10-30): Updated `thashu/core/decision
 
 
 Phase 6 saved-name cleanup safeguard (2026-10-30): Extended explicit `forget/remove/delete <name>` parsing to accept labels up to eight words, still requiring Thashu to read back the matched identity and receive a separate yes before deletion. This allows removal of an existing malformed label that accidentally includes a greeting. No tests or Pi validation were run.
+
+
+Phase 6 enrollment announcement, wake re-arm, and fixed-reply WAV update (2026-10-30): The Pi log exposed a crash when the background enrollment completion notice attempted the invalid IDLE → SPEAKING transition. Added IDLE → SPEAKING as an allowed supervised announcement path, retaining SPEAKING → RETURN_TO_IDLE → IDLE. The log also showed a second wake activation with high stale scores after Thashu's enrollment prompt and an empty Whisper transcript. `thashu/main.py` now resets openWakeWord's public model history before every post-playback unlock; `wake_word.py` is unchanged. Added fixed identity-enrollment and follow/safety replies to `COMMAND_VOICE_PROMPTS` so the existing `speak()` exact-match cache plays generated WAVs instead of running Piper at runtime. Dynamic responses containing names still use Piper. Regenerate the local WAV cache on the Pi after pulling. No tests or Pi validation were run.
