@@ -36,8 +36,8 @@ GRACE_PERIOD       = 4.0
 SAMPLE_RATE        = 48000
 BLOCK_SIZE         = 5460
 FORWARD_COMMAND_DURATION_SECONDS = 30.0
-LEFT_TURN_COMMAND_DURATION_SECONDS = 2.0
-RIGHT_TURN_COMMAND_DURATION_SECONDS = 2.0
+LEFT_TURN_COMMAND_DURATION_SECONDS = 1.7
+RIGHT_TURN_COMMAND_DURATION_SECONDS = 1.7
 
 # Phase 5 camera-range calibration from the user's moving trials (fixed 65° tilt):
 # shoulder-width median: 150 cm=109.8 px, 160 cm=103.4 px, 200 cm=95.7 px.
@@ -1127,7 +1127,7 @@ def main():
                         duration = FORWARD_COMMAND_DURATION_SECONDS
                     print(
                         f"[COMMAND] Explicit {direction_name.upper()} recognized "
-                        f"(PWM 200); auto-stop in {duration:.0f}s"
+                        f"(PWM 200); auto-stop in {duration:.1f}s"
                     )
                     move_sequence = start_bounded_motion(direction, 200)
                     if move_sequence is None:
