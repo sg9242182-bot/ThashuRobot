@@ -1170,3 +1170,6 @@ Phase 6 turn direction and manual servo command update (2026-10-30): Updated `ES
 
 
 Phase 6 turn-mix correction (2026-10-30): User clarified physical motor layout as M0=Motor 1 front-left, M1=Motor 2 rear-left, M2=Motor 3 front-right, M3=Motor 4 rear-right, and reported the prior turn mix drove the listed motors opposite to the requested turn directions. Updated `ESP32Firmware/ThashuController/communication_manager.cpp` to drive each chassis side as a pair: RIGHT commands M0/M1 reverse and M2/M3 forward, matching the user's specified direction; LEFT is the inverse. This replaces the prior alternating-by-index mix. Pull and reflash the integrated ESP32 sketch, then verify both turns with wheels lifted before floor testing. The code change is not hardware-verified and does not close Phase 6 acceptance.
+
+
+Phase 6 turn duration adjustment (2026-10-30): Reduced both Pi-bounded LEFT and RIGHT turn durations from 2.0 s to 1.7 s, retaining matched durations and the existing STOP timer/safety behavior. Updated the movement log to report tenths of a second. This is an implementation adjustment only; verify turn amount and direction with wheels lifted, then at low speed on the floor. No hardware test performed.
