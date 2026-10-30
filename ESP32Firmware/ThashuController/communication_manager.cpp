@@ -17,6 +17,7 @@ void CommunicationManager::begin(MotorManager& motorManager, SafetyManager& safe
                                   EyeManager& eyeManager, ServoManager& servoManager, ToFManager& tofManager, UltrasonicManager& rearUltrasonic) {
     motors = &motorManager; safety = &safetyManager; eyes = &eyeManager; servos = &servoManager; tof = &tofManager; rear = &rearUltrasonic;
     Serial.println("EVENT|0|READY");
+    Serial.println("INFO|MOTOR_MAP|M0=Motor1(front-left)|M1=Motor2(rear-left)|M2=Motor3(front-right)|M3=Motor4(rear-right)");
 }
 
 void CommunicationManager::reportFault(const char* subsystem, const char* detail) {
