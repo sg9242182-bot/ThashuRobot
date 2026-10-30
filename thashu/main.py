@@ -1027,7 +1027,7 @@ def main():
                     vision.clear_enrollment()
                     _identity_enrollment_state = "idle"
                     _identity_pending_name = None
-                elif _identity_enrollment_state == "confirm" and identity_command in ("TRY_AGAIN", "REJECT"):
+                elif _identity_enrollment_state == "confirm" and identity_command == "TRY_AGAIN":
                     # Keep the captured face samples; only ask for the name spelling again.
                     _identity_enrollment_state = "spelling"
                     _identity_pending_name = None
