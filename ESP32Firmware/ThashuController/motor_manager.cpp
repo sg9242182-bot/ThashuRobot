@@ -3,6 +3,8 @@
 #include <Arduino.h>
 
 namespace {
+// Physical layout: M0=Motor 1 (front-left), M1=Motor 2 (rear-left),
+// M2=Motor 3 (front-right), M3=Motor 4 (rear-right).
 constexpr uint8_t IN1_PINS[4] = {13, 27, 25, 19};
 constexpr uint8_t IN2_PINS[4] = {33, 26, 23, 18};
 // M0 already drives the chassis forward; reverse polarity for M1-M3.
