@@ -279,8 +279,8 @@ def get_registration_name(user_input):
     # Whisper often keeps the greeting in the same transcript as the name.
     # Strip common closings before treating the remaining words as the candidate.
     name = re.split(
-        r"\\s+(?:nice to meet (?:you|u)|pleased to meet (?:you|u)|"
-        r"great to meet (?:you|u)|good to meet (?:you|u)|nice meeting (?:you|u))\\b",
+        r"\s+(?:nice to meet (?:you|u)|pleased to meet (?:you|u)|"
+        r"great to meet (?:you|u)|good to meet (?:you|u)|nice meeting (?:you|u))\b",
         name,
         maxsplit=1,
         flags=re.IGNORECASE,
