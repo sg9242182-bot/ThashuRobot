@@ -155,6 +155,13 @@ _RECOGNITION_CANCEL_PHRASES = {
     "cancel",
 }
 _RECOGNITION_YES_PHRASES = {"yes", "yes confirm", "confirm", "save it"}
+_RECOGNITION_TRY_AGAIN_PHRASES = {
+    "try again",
+    "spell again",
+    "try spelling again",
+    "correct the spelling",
+    "change the spelling",
+}
 _RECOGNITION_NO_PHRASES = {"no", "no cancel", "do not save"}
 
 
@@ -171,6 +178,8 @@ def get_recognition_command(user_input):
         return "CANCEL"
     if normalized in _RECOGNITION_YES_PHRASES:
         return "CONFIRM"
+    if normalized in _RECOGNITION_TRY_AGAIN_PHRASES:
+        return "TRY_AGAIN"
     if normalized in _RECOGNITION_NO_PHRASES:
         return "REJECT"
     return None
