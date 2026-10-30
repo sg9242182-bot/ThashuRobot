@@ -36,8 +36,8 @@ GRACE_PERIOD       = 4.0
 SAMPLE_RATE        = 48000
 BLOCK_SIZE         = 5460
 FORWARD_COMMAND_DURATION_SECONDS = 30.0
-LEFT_TURN_COMMAND_DURATION_SECONDS = 1.7
-RIGHT_TURN_COMMAND_DURATION_SECONDS = 1.7
+LEFT_TURN_COMMAND_DURATION_SECONDS = 1.5
+RIGHT_TURN_COMMAND_DURATION_SECONDS = 1.5
 
 # Phase 5 camera-range calibration from the user's moving trials (fixed 65° tilt):
 # shoulder-width median: 150 cm=109.8 px, 160 cm=103.4 px, 200 cm=95.7 px.
