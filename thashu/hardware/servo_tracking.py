@@ -142,9 +142,9 @@ class ServoTracker:
         self._search_active = False
 
     def look(self, direction):
-        """Move the head by one bounded step and return the serial command sequence."""
+        """Move the head by a larger, quick manual step and return its sequence."""
         self._search_active = False
-        step = 15.0
+        step = 30.0
         if direction == "UP":
             self.tilt -= step
         elif direction == "DOWN":
@@ -163,12 +163,14 @@ class ServoTracker:
         self.tilt = max(self.tilt_min, min(self.tilt_max, self.tilt))
         self._last_send = time.time()
         return self.gpio.send(
-            f"SERVO|PAN_TILT|{int(self.pan)}|{int(self.tilt)}"
+            f"SERVO|MOVE|{int(self.pan)}|{int(self.tilt)}|220"
         )
 
     def center(self):
+        """Return both servos to their calibrated 90-degree center positions."""
         self._search_active = False
-        self.pan  = 90.0
+        self.pan = 90.0
         self.tilt = 90.0
-        return self.gpio.send("SERVO|PAN_TILT|90|90")
+        self._last_send = time.time()
+        return self.gpio.send("SERVO|MOVE|90|90|220")
         
