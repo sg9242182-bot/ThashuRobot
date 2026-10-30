@@ -1176,3 +1176,6 @@ Phase 6 turn duration adjustment (2026-10-30): Reduced both Pi-bounded LEFT and 
 
 
 Phase 6 turn duration follow-up (2026-10-30): Superseding the prior 1.7 s setting, both LEFT and RIGHT turn durations are now 1.5 s in `thashu/main.py`. Hardware validation remains pending.
+
+
+Phase 6 turn duration follow-up (2026-10-30): Superseding prior turn-duration settings, both LEFT and RIGHT are now set to 1.2 s in `thashu/main.py`. Hardware validation remains pending.
