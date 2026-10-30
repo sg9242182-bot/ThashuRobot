@@ -269,12 +269,23 @@ def get_remove_identity_name(user_input):
 
 
 def get_registration_name(user_input):
-    """Extract a short user-provided name only from explicit self-identification."""
+    """Extract a candidate name from self-identification, excluding trailing greetings."""
     normalized = _normalize_phrase(user_input)
     match = re.fullmatch(r"(?:my name is|i am|i'm|call me) ([a-z][a-z .'-]{0,62})", normalized)
     if not match:
         return None
-    name = " ".join(match.group(1).split()).strip(" .'-")
+
+    name = match.group(1)
+    # Whisper often keeps the greeting in the same transcript as the name.
+    # Strip common closings before treating the remaining words as the candidate.
+    name = re.split(
+        r"\\s+(?:nice to meet (?:you|u)|pleased to meet (?:you|u)|"
+        r"great to meet (?:you|u)|good to meet (?:you|u)|nice meeting (?:you|u))\\b",
+        name,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+    name = " ".join(name.split()).strip(" .'-")
     if not name or len(name.split()) > 4:
         return None
     return name.title()
