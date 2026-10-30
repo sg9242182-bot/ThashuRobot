@@ -47,10 +47,23 @@ class FakeMotor:
         return 5
 
 
+class FakeRobotManager:
+    def __init__(self, motor):
+        self.motor = motor
+        self.mode = main.ControlMode.AUTO
+
+    def dispatch(self, command, speed=None):
+        action = getattr(self.motor, command)
+        sequence = action() if speed is None else action(speed)
+        if sequence is not None:
+            self.mode = main.ControlMode.AUTO if command == "stop" else main.ControlMode.MANUAL
+        return sequence
+
+
 class ApiTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.old_services = main.services
-        main.services = main.ApiServices(lambda: FakeMotor(messages=["EVENT|0|READY"]))
+        main.services = main.ApiServices(lambda: FakeRobotManager(FakeMotor(messages=["EVENT|0|READY"])))
         self.token_env = patch.dict(os.environ, {"THASHU_API_TOKEN": "test-token"})
         self.token_env.start()
 
@@ -69,6 +82,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             "api": "ok",
             "esp32_transport": "connected",
             "controller_readiness": "unknown",
+            "control_mode": "AUTO",
         })
 
     async def test_status_reports_unavailable_transport_without_crashing(self):
@@ -78,6 +92,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             status = await self.endpoint("/api/v1/status")()
             self.assertEqual(status["esp32_transport"], "unavailable")
             self.assertEqual(status["controller_readiness"], "unknown")
+            self.assertEqual(status["control_mode"], "unknown")
         finally:
             main.services = old
 
@@ -85,14 +100,18 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         response = await self.endpoint("/api/v1/robot/move")(main.MoveRequest(direction="forward", speed=120))
         self.assertEqual(response.command, "forward")
         self.assertEqual(response.status, "dispatched")
-        motor = await main.services.motor()
+        self.assertEqual(response.control_mode, "MANUAL")
+        manager = await main.services.robot_manager()
+        motor = manager.motor
         self.assertEqual(motor.commands, [("forward", 120)])
 
     async def test_stop_dispatches_dedicated_stop(self):
         response = await self.endpoint("/api/v1/robot/stop")()
         self.assertEqual(response.command, "stop")
         self.assertEqual(response.status, "dispatched")
-        motor = await main.services.motor()
+        self.assertEqual(response.control_mode, "AUTO")
+        manager = await main.services.robot_manager()
+        motor = manager.motor
         self.assertEqual(motor.commands, [("stop", None)])
 
     def test_move_request_rejects_unknown_direction_and_out_of_range_speed(self):

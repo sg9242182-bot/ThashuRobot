@@ -34,14 +34,16 @@ This is a guide, not a requirement to create empty folders now. Reuse the reposi
 ## Initial implementation notes
 
 The endpoints below form the first mobile-facing contract. Flutter sends
-requests to the Pi API. The Pi calls its existing motor service, which writes
-to the ESP32 serial transport. The API response reports dispatch from the Pi;
-it does not wait for a hardware acknowledgement or claim movement completed.
+requests to the Pi API. The API delegates commands to
+`thashu/core/robot_manager.py`, which validates and serializes calls to the
+existing motor service. The Pi motor service writes to the ESP32 serial
+transport. The API response reports dispatch from the Pi; it does not wait for
+a hardware acknowledgement or claim movement completed.
 
 | Interface | Behavior |
 |---|---|
 | `GET /health` | Returns `{"status":"ok"}` when the API process responds. This is liveness only. |
-| `GET /api/v1/status` | Reports API liveness, serial transport (`connected`, `disconnected`, or `unavailable`), and `controller_readiness: "unknown"`. Opening a serial port does not prove the ESP32 emitted `EVENT|0|READY`. |
+| `GET /api/v1/status` | Reports API liveness, serial transport (`connected`, `disconnected`, or `unavailable`), `controller_readiness: "unknown"`, and the Pi control mode (`AUTO`, `MANUAL`, or `unknown` if the manager cannot start). Opening a serial port does not prove the ESP32 emitted `EVENT|0|READY`. |
 | `POST /api/v1/robot/move` | Body: `{"direction":"forward","speed":200}`. Direction is `forward`, `backward`, `left`, or `right`; speed is an integer from 0 to 255 and defaults to 200. |
 | `POST /api/v1/robot/stop` | Empty body. Dispatches the dedicated stop command through the Pi motor service. |
 | `WS /api/v1/telemetry` | Server-to-client stream of raw ESP32 lines, each wrapped as `{"type":"esp32_line","line":"..."}`. Lines are not parsed or represented as command success. |
@@ -49,7 +51,7 @@ it does not wait for a hardware acknowledgement or claim movement completed.
 Successful movement and stop responses use:
 
 ```json
-{"request_id":"<uuid>","command":"forward","status":"dispatched"}
+{"request_id":"<uuid>","command":"forward","status":"dispatched","control_mode":"MANUAL"}
 ```
 
 `status: "dispatched"` means the Pi motor service successfully wrote the
@@ -58,7 +60,16 @@ that the robot completed the movement. Invalid directions or speeds receive
 HTTP 422. If the Pi cannot write the command, the endpoint returns HTTP 503
 with an error code and request ID. Requests are not queued for later delivery.
 
-The telemetry stream consumes the raw inbound queue exposed by `GPIOControl`;
+The Pi manager starts in `AUTO`. A successfully dispatched move changes the
+tracked mode to `MANUAL`; a successfully dispatched stop changes it back to
+`AUTO`. The status response includes `control_mode`. The current vision code
+does not drive the motors automatically, so `AUTO` is a tracked control mode
+until an automatic motor controller is integrated. ESP32 hardware safety still
+has final authority to stop or reject unsafe motion.
+
+The initial robot manager serializes manual API commands. Manual/automatic mode
+arbitration is still open and must be defined before adding mode switching or
+autonomous motor commands. The telemetry stream consumes the raw inbound queue exposed by `GPIOControl`;
 it is a single-consumer feed and should not run alongside another reader of
 that queue.
 

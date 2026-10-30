@@ -1,4 +1,4 @@
-"""FastAPI entry point for read-only robot status and ESP32 telemetry."""
+"""FastAPI entry point for robot status, commands, and ESP32 telemetry."""
 
 import asyncio
 import os
@@ -19,51 +19,52 @@ THASHU_ROOT = REPO_ROOT / "thashu"
 if str(THASHU_ROOT) not in sys.path:
     sys.path.insert(0, str(THASHU_ROOT))
 
+from core.robot_manager import ControlMode
 
-def _default_motor_factory():
+
+def _default_robot_manager_factory():
     # Import lazily so importing the API does not open hardware or start threads.
-    from hardware.motors import MotorController
+    from core.robot_manager import RobotCommandManager
 
-    return MotorController()
+    return RobotCommandManager()
 
 
 class MoveRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     direction: Literal["forward", "backward", "left", "right"]
-    speed: int = Field(default=200, ge=0, le=255)
+    speed: int = Field(default=200, ge=0, le=255, strict=True)
 
 
 class CommandResponse(BaseModel):
     request_id: str
     command: str
     status: Literal["dispatched"]
+    control_mode: Literal["AUTO", "MANUAL"]
 
 
 class ApiServices:
     """Small adapter around existing services; injectable for API tests."""
 
-    def __init__(self, motor_factory: Callable = _default_motor_factory):
-        self._motor_factory = motor_factory
-        self._motor = None
+    def __init__(self, robot_manager_factory: Callable = _default_robot_manager_factory):
+        self._robot_manager_factory = robot_manager_factory
+        self._robot_manager = None
         self._lock = asyncio.Lock()
 
-    async def motor(self):
+    async def robot_manager(self):
         async with self._lock:
-            if self._motor is None:
-                self._motor = await asyncio.to_thread(self._motor_factory)
-            return self._motor
+            if self._robot_manager is None:
+                self._robot_manager = await asyncio.to_thread(self._robot_manager_factory)
+            return self._robot_manager
 
     async def dispatch(self, command: str, speed: int | None = None):
-        motor = await self.motor()
-        action = getattr(motor, command)
-        if speed is None:
-            return await asyncio.to_thread(action)
-        return await asyncio.to_thread(action, speed)
+        manager = await self.robot_manager()
+        return await asyncio.to_thread(manager.dispatch, command, speed)
 
     async def status(self):
         try:
-            motor = await self.motor()
+            manager = await self.robot_manager()
+            motor = manager.motor
             transport = motor.gpio
             connected = bool(await asyncio.to_thread(transport.is_connected))
         except Exception:
@@ -71,10 +72,12 @@ class ApiServices:
                 "api": "ok",
                 "esp32_transport": "unavailable",
                 "controller_readiness": "unknown",
+                "control_mode": "unknown",
             }
         return {
             "api": "ok",
             "esp32_transport": "connected" if connected else "disconnected",
+            "control_mode": manager.mode.value,
             # Serial-open is not proof of EVENT|READY; the transport currently
             # exposes raw messages and has no readiness state tracker.
             "controller_readiness": "unknown",
@@ -82,7 +85,8 @@ class ApiServices:
 
     async def read_message(self):
         try:
-            motor = await self.motor()
+            manager = await self.robot_manager()
+            motor = manager.motor
             transport = motor.gpio
             line = await asyncio.to_thread(transport.read_line, 0.2)
             return line or None
@@ -118,9 +122,9 @@ async def require_api_token(
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     yield
-    motor = services._motor
-    if motor is not None:
-        await asyncio.to_thread(motor.gpio.close)
+    manager = services._robot_manager
+    if manager is not None:
+        await asyncio.to_thread(manager.motor.gpio.close)
 
 
 app = FastAPI(
@@ -160,7 +164,13 @@ async def move(request: MoveRequest):
         raise HTTPException(status_code=503, detail={"error": "robot_unavailable", "request_id": request_id}) from exc
     if sequence is None:
         raise HTTPException(status_code=503, detail={"error": "robot_unavailable", "request_id": request_id})
-    return CommandResponse(request_id=request_id, command=request.direction, status="dispatched")
+    manager = await services.robot_manager()
+    return CommandResponse(
+        request_id=request_id,
+        command=request.direction,
+        status="dispatched",
+        control_mode=manager.mode.value,
+    )
 
 
 @app.post(
@@ -178,7 +188,13 @@ async def stop():
         raise HTTPException(status_code=503, detail={"error": "robot_unavailable", "request_id": request_id}) from exc
     if sequence is None:
         raise HTTPException(status_code=503, detail={"error": "robot_unavailable", "request_id": request_id})
-    return CommandResponse(request_id=request_id, command="stop", status="dispatched")
+    manager = await services.robot_manager()
+    return CommandResponse(
+        request_id=request_id,
+        command="stop",
+        status="dispatched",
+        control_mode=manager.mode.value,
+    )
 
 
 @app.websocket("/api/v1/telemetry")
