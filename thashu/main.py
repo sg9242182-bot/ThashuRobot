@@ -967,7 +967,7 @@ def main():
                             spelled_letters = " ".join(registration_name.upper())
                             response = (
                                 f"I heard {spelled_letters}, which is {registration_name}. "
-                                f"Should I save this face as {registration_name}? Say yes to confirm or no to cancel."
+                                f"Should I save this face as {registration_name}? Say yes to save, try again to spell it again, or cancel to discard registration."
                             )
                         else:
                             _identity_enrollment_state = "spelling"
@@ -1027,16 +1027,20 @@ def main():
                     vision.clear_enrollment()
                     _identity_enrollment_state = "idle"
                     _identity_pending_name = None
-                elif _identity_enrollment_state in ("confirm", "delete_confirm") and identity_command == "REJECT":
-                    was_deleting = _identity_enrollment_state == "delete_confirm"
+                elif _identity_enrollment_state == "confirm" and identity_command in ("TRY_AGAIN", "REJECT"):
+                    # Keep the captured face samples; only ask for the name spelling again.
+                    _identity_enrollment_state = "spelling"
+                    _identity_pending_name = None
+                    response = "Okay. Please spell the name again using ordinary letter names, like T H A R U N."
+                elif _identity_enrollment_state == "delete_confirm" and identity_command == "REJECT":
                     vision.clear_enrollment()
                     _identity_enrollment_state = "idle"
                     _identity_pending_name = None
-                    response = "I cancelled deleting the face identity." if was_deleting else "I did not save the face identity."
+                    response = "I cancelled deleting the face identity."
                 elif _identity_enrollment_state == "spelling":
                     response = "Please spell the name using ordinary letter names, like T H A R U N, or say cancel."
                 elif _identity_enrollment_state == "confirm":
-                    response = "Please say yes to confirm saving the name for this face, or no to cancel."
+                    response = "Please say yes to save this face identity, try again to spell the name again, or cancel to discard registration."
                 elif _identity_enrollment_state == "delete_confirm":
                     response = "Please say yes to confirm deleting this saved face identity, or no to cancel."
                 elif _identity_enrollment_state == "capturing":
