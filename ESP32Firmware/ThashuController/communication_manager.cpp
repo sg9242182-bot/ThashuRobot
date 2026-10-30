@@ -70,14 +70,15 @@ void CommunicationManager::handle(char* line) {
         if (speed == 0) motors->stop();
         else if (forward) motors->setAll(speed);
         else if (reverse) motors->setAll(-speed);
-        // Swap the prior turn mixes: the Pi's LEFT/RIGHT labels were
-        // opposite to the chassis yaw direction.
+        // Physical layout: M0/M1 are the left side; M2/M3 are the right side.
+        // RIGHT uses the direction the user confirmed: left side reverse,
+        // right side forward. LEFT is the inverse.
         else if (left) {
-            motors->setMotor(0,speed); motors->setMotor(1,-speed);
-            motors->setMotor(2,speed); motors->setMotor(3,-speed);
+            motors->setMotor(0,speed); motors->setMotor(1,speed);
+            motors->setMotor(2,-speed); motors->setMotor(3,-speed);
         } else {
-            motors->setMotor(0,-speed); motors->setMotor(1,speed);
-            motors->setMotor(2,-speed); motors->setMotor(3,speed);
+            motors->setMotor(0,-speed); motors->setMotor(1,-speed);
+            motors->setMotor(2,speed); motors->setMotor(3,speed);
         }
         safety->setActiveMotion(motion, (uint8_t)speed);
         acknowledge(sequence, "OK"); return;
