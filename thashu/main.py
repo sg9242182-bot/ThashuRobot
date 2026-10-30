@@ -196,6 +196,19 @@ def safe_play(path: str):
     time.sleep(0.15)
 
 
+def _rearm_wake_after_audio():
+    """Clear openWakeWord's rolling audio history before re-arming after playback."""
+    model = getattr(wake, "model", None)
+    reset = getattr(model, "reset", None)
+    if callable(reset):
+        try:
+            reset()
+            print("[WAKE] Detection history reset after audio playback")
+        except Exception as exc:
+            print(f"[WAKE] Could not reset detection history: {exc}")
+    wake.unlock()
+
+
 def _announce_enrollment_status(message):
     """Speak an enrollment update through the normal supervised runtime states."""
     transition_runtime(RuntimeState.SPEAKING)
@@ -208,7 +221,7 @@ def _announce_enrollment_status(message):
         print(f"[VISION] Could not announce enrollment status: {exc}")
     finally:
         audio.resume()
-        wake.unlock()
+        _rearm_wake_after_audio()
         transition_runtime(RuntimeState.RETURN_TO_IDLE)
         transition_runtime(RuntimeState.IDLE)
 
@@ -416,7 +429,7 @@ def announce_safety_message(message):
         print(f"[SAFETY] Could not speak safety message: {exc}")
     finally:
         audio.resume()
-        wake.unlock()
+        _rearm_wake_after_audio()
         eyes.idle()
 
 
@@ -447,7 +460,7 @@ def announce_follow_notice(notice):
         print(f"[FOLLOW] Could not speak status: {exc}")
     finally:
         audio.resume()
-        wake.unlock()
+        _rearm_wake_after_audio()
         eyes.idle()
 
 
@@ -744,7 +757,7 @@ def main():
 
     time.sleep(0.2)
 
-    wake.unlock()
+    _rearm_wake_after_audio()
 
     print("[SYSTEM] ── Ready. Say 'Hey Thashu'")
 
@@ -835,7 +848,7 @@ def main():
 
                 safe_play(SOUND_YES)
 
-                wake.unlock()
+                _rearm_wake_after_audio()
                 transition_runtime(RuntimeState.LISTENING)
                 # ── Collect command ──────────────────────────────────────
                 
@@ -857,7 +870,7 @@ def main():
 
                     time.sleep(0.8)
 
-                    wake.unlock()
+                    _rearm_wake_after_audio()
 
                     transition_runtime(RuntimeState.RETURN_TO_IDLE)
                     transition_runtime(RuntimeState.IDLE)
@@ -893,7 +906,7 @@ def main():
                     time.sleep(0.8)
 
                     audio.resume()
-                    wake.unlock()
+                    _rearm_wake_after_audio()
 
                     transition_runtime(RuntimeState.RETURN_TO_IDLE)
                     transition_runtime(RuntimeState.IDLE)
@@ -1181,7 +1194,7 @@ def main():
 
                 time.sleep(0.2)
 
-                wake.unlock()
+                _rearm_wake_after_audio()
                 total_time = time.time() - interaction_start
 
                 print("=" * 40)
