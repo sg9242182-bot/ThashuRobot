@@ -1163,3 +1163,7 @@ Phase 6 enrollment completion feedback and detector performance fix (2026-10-29)
 
 
 Enrollment completion announcement follows the normal runtime supervisor transitions (IDLE → SPEAKING → RETURN_TO_IDLE → IDLE), keeping vision paused during voice playback as required by the existing lifecycle design. This code path has not yet been run on the Raspberry Pi.
+
+
+
+Phase 6 turn direction and manual servo command update (2026-10-30): Updated `ESP32Firmware/ThashuController/communication_manager.cpp` to swap the left/right differential motor mixes because the user's chassis yaw did not match the Pi command labels. The existing per-motor forward polarity map is unchanged; forward/backward motor direction behavior is not intentionally altered. Added a bounded timed `SERVO|MOVE|pan|tilt|duration` command handled by the ESP32's existing ServoManager. Updated `thashu/hardware/servo_tracking.py` so manual look commands move 30 degrees (previously 15) over 220 ms, and “look straight” targets exactly pan=90, tilt=90. Servo tracking/follow gains are unchanged. The integrated ESP32 sketch must be reflashed and Pi code pulled. Turn direction, four wheel directions, servo travel/speed, and 90/90 center still require physical validation; no tests or hardware checks have been run.
