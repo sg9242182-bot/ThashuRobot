@@ -69,12 +69,14 @@ void CommunicationManager::handle(char* line) {
         if (speed == 0) motors->stop();
         else if (forward) motors->setAll(speed);
         else if (reverse) motors->setAll(-speed);
+        // Swap the prior turn mixes: the Pi's LEFT/RIGHT labels were
+        // opposite to the chassis yaw direction.
         else if (left) {
-            motors->setMotor(0,-speed); motors->setMotor(1,speed);
-            motors->setMotor(2,-speed); motors->setMotor(3,speed);
-        } else {
             motors->setMotor(0,speed); motors->setMotor(1,-speed);
             motors->setMotor(2,speed); motors->setMotor(3,-speed);
+        } else {
+            motors->setMotor(0,-speed); motors->setMotor(1,speed);
+            motors->setMotor(2,-speed); motors->setMotor(3,speed);
         }
         safety->setActiveMotion(motion, (uint8_t)speed);
         acknowledge(sequence, "OK"); return;
@@ -88,6 +90,17 @@ void CommunicationManager::handle(char* line) {
         else if (!strcmp(field[3],"SLEEP")) eyes->setExpression(EXPR_SLEEPY);
         else { acknowledge(sequence, "ERROR|INVALID_ARGUMENT"); return; }
         safety->notePiFrame();
+        acknowledge(sequence, "OK"); return;
+    }
+    if (!strcmp(field[2], "SERVO") && count == 7 && !strcmp(field[3],"MOVE")) {
+        long pan, tilt, duration;
+        if (!parseLong(field[4], pan) || !parseLong(field[5], tilt) ||
+            !parseLong(field[6], duration) || pan < 0 || pan > 180 ||
+            tilt < 0 || tilt > 180 || duration < 50 || duration > 2000) {
+            acknowledge(sequence, "ERROR|OUT_OF_RANGE"); return;
+        }
+        safety->notePiFrame();
+        servos->moveTo((float)pan, (float)tilt, (unsigned long)duration);
         acknowledge(sequence, "OK"); return;
     }
     if (!strcmp(field[2], "SERVO") && count == 6 && !strcmp(field[3],"PAN_TILT")) {
