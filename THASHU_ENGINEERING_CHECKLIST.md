@@ -1179,3 +1179,6 @@ Phase 6 turn duration follow-up (2026-10-30): Superseding the prior 1.7 s settin
 
 
 Phase 6 turn duration follow-up (2026-10-30): Superseding prior turn-duration settings, both LEFT and RIGHT are now set to 1.2 s in `thashu/main.py`. Hardware validation remains pending.
+
+
+Phase 6 spoken-name greeting cleanup (2026-10-30): Updated `thashu/core/decision.py` to remove common trailing greetings (including “nice to meet you/u”) from an explicit self-introduction before forming the candidate name. Unspelled names still enter the spelling/read-back confirmation flow; the database write remains gated on an explicit yes. This prevents the greeting from becoming part of the stored label, but cannot correct a Whisper mishearing by itself. No tests or Pi validation were run.
