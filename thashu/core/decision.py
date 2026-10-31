@@ -295,8 +295,20 @@ def get_registration_name(user_input):
         flags=re.IGNORECASE,
     )[0]
     name = " ".join(name.split()).strip(" .'-")
-    if not name or len(name.split()) > 4:
+    if not name:
         return None
+
+    words = name.split()
+    if len(words) > 4:
+        # Allow a natural-name guess followed by its letter-by-letter correction
+        # in one utterance, e.g. "my name is Dalun, T-H-A-R-U-N". The caller
+        # extracts the spelled suffix and must use it as the canonical name.
+        has_spelled_suffix = any(
+            get_spelled_registration_name(" ".join(words[start:]))
+            for start in range(1, len(words))
+        )
+        if not has_spelled_suffix:
+            return None
     return name.title()
 
 
