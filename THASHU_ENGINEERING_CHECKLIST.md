@@ -1194,3 +1194,6 @@ Phase 6 enrollment spelling retry update (2026-10-30): Updated `thashu/core/deci
 
 
 Phase 6 live-recognition diagnostic test added (2026-10-31): Added opt-in diagnostics to `thashu/vision/vision_core.py` and `thashu/vision/face_database.py`. Run the Pi app with `THASHU_FACE_MATCH_DEBUG=1 python main.py` to report missing stable tracks/landmarks, unavailable embeddings, database-empty conditions, best and second similarity scores, score delta, configured thresholds, and the three-observation temporal-confirmation count. The diagnostic does not change thresholds or persist face images. It is diagnostic instrumentation only; Pi results, threshold calibration, and Phase 6 recognition acceptance remain pending.
+
+
+Phase 6 enrollment spelling precedence fix (2026-10-31): Updated `thashu/core/decision.py` so a self-introduction longer than four words is accepted only when it contains a valid spelled-letter suffix. The existing runtime parser then selects that suffix (for example, “my name is Dalun, T-H-A-R-U-N” resolves to “Tharun”), and the confirmed pending name is the one persisted. Ordinary unspelled introductions retain the four-word guard. This fixes the combined natural-name-plus-spelling parsing path; Raspberry Pi enrollment and persisted-label verification remain pending. No threshold changes or tests were made.
