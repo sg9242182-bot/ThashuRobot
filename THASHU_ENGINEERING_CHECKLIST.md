@@ -1197,3 +1197,6 @@ Phase 6 live-recognition diagnostic test added (2026-10-31): Added opt-in diagno
 
 
 Phase 6 enrollment spelling precedence fix (2026-10-31): Updated `thashu/core/decision.py` so a self-introduction longer than four words is accepted only when it contains a valid spelled-letter suffix. The existing runtime parser then selects that suffix (for example, “my name is Dalun, T-H-A-R-U-N” resolves to “Tharun”), and the confirmed pending name is the one persisted. Ordinary unspelled introductions retain the four-word guard. This fixes the combined natural-name-plus-spelling parsing path; Raspberry Pi enrollment and persisted-label verification remain pending. No threshold changes or tests were made.
+
+
+Phase 6 speech-confirmation robustness update (2026-10-31): Face enrollment now requires the distinct multiword phrase “confirm save” to persist an identity; “try again” returns to spelling and “cancel registration” discards it. This reduces reliance on ambiguous one-word yes/no recognition. Deletion confirmation remains separate. Existing exact command parsing already includes “turn right” and “look straight”; a transcription error before command parsing still requires the exact `[STT] Heard:` transcript to diagnose. Whisper model and wake-word code were left unchanged. No Pi speech test has been run; command and identity validation remain open.
