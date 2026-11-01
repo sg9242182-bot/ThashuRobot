@@ -5,6 +5,8 @@ import json
 import logging
 import secrets
 import sys
+import threading
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -41,7 +43,7 @@ class MoveRequest(BaseModel):
 
 
 class CommandResponse(BaseModel):
-    request_id: str
+    command_id: str
     command: str
     status: Literal["dispatched"]
     control_mode: Literal["AUTO", "MANUAL"]
@@ -55,6 +57,12 @@ class ApiServices:
         self._robot_manager = None
         self._owns_robot_manager = True
         self._lock = asyncio.Lock()
+        self._command_lock = threading.RLock()
+        self._command_results = {}
+        self._command_subscribers = set()
+        self._command_tasks = set()
+        self._result_retention_seconds = 24 * 60 * 60
+        self._max_command_results = 1000
 
     def attach_robot_manager(self, manager):
         """Use the robot process's existing manager and serial connection."""
@@ -72,6 +80,103 @@ class ApiServices:
     async def dispatch(self, command: str, speed: int | None = None):
         manager = await self.robot_manager()
         return await asyncio.to_thread(manager.dispatch, command, speed)
+
+    def _prune_command_results(self):
+        now = time.monotonic()
+        expired = [
+            command_id
+            for command_id, record in self._command_results.items()
+            if now - record["_created_monotonic"] > self._result_retention_seconds
+        ]
+        for command_id in expired:
+            self._command_results.pop(command_id, None)
+        while len(self._command_results) > self._max_command_results:
+            oldest = next(iter(self._command_results))
+            self._command_results.pop(oldest, None)
+
+    def register_command(self, command_id, command, control_mode):
+        now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        with self._command_lock:
+            self._prune_command_results()
+            self._command_results[command_id] = {
+                "command_id": command_id,
+                "command": command,
+                "status": "dispatched",
+                "error_code": None,
+                "timestamp": now,
+                "control_mode": control_mode,
+                "_created_monotonic": time.monotonic(),
+            }
+            self._prune_command_results()
+
+    def command_result(self, command_id):
+        with self._command_lock:
+            self._prune_command_results()
+            record = self._command_results.get(command_id)
+            if record is None:
+                return None
+            return {
+                key: record[key]
+                for key in ("command_id", "command", "status", "error_code", "timestamp")
+            }
+
+    def subscribe_command_results(self):
+        subscriber = asyncio.Queue(maxsize=64)
+        self._command_subscribers.add(subscriber)
+        return subscriber
+
+    def unsubscribe_command_results(self, subscriber):
+        self._command_subscribers.discard(subscriber)
+
+    async def _publish_command_result(self, command_id, status, error_code):
+        timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        with self._command_lock:
+            record = self._command_results.get(command_id)
+            if record is None:
+                return
+            record.update(status=status, error_code=error_code, timestamp=timestamp)
+            event = {
+                "type": "command_result",
+                "command_id": command_id,
+                "status": status,
+                "error_code": error_code,
+                "timestamp": timestamp,
+            }
+        for subscriber in tuple(self._command_subscribers):
+            if subscriber.full():
+                try:
+                    subscriber.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+            try:
+                subscriber.put_nowait(event)
+            except asyncio.QueueFull:
+                pass
+
+    async def track_command_ack(self, command_id, sequence):
+        try:
+            manager = await self.robot_manager()
+            ack = await asyncio.to_thread(
+                manager.motor.gpio.wait_for_ack, sequence, 0.75
+            )
+        except Exception:
+            ack = None
+
+        if ack is None:
+            status, error_code = "timed_out", "ACK_TIMEOUT"
+        elif ack == "OK":
+            status, error_code = "acknowledged", None
+        elif ack.startswith("ERROR|"):
+            status, error_code = "safety_error", ack.split("|", 1)[1] or "UNKNOWN"
+        else:
+            status, error_code = "safety_error", "UNEXPECTED_ACK"
+
+        await self._publish_command_result(command_id, status, error_code)
+
+    def start_ack_tracking(self, command_id, sequence):
+        task = asyncio.create_task(self.track_command_ack(command_id, sequence))
+        self._command_tasks.add(task)
+        task.add_done_callback(self._command_tasks.discard)
 
     async def status(self):
         try:
@@ -115,7 +220,7 @@ logger = logging.getLogger("thashu.api")
 
 def _log_command_outcome(
     *,
-    request_id: str,
+    command_id: str,
     command: str,
     outcome: str,
     http_status: int,
@@ -127,7 +232,7 @@ def _log_command_outcome(
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
         "component": "pi_api",
         "event": "robot_command",
-        "request_id": request_id,
+        "command_id": command_id,
         "command": command,
         "outcome": outcome,
         "http_status": http_status,
@@ -162,7 +267,7 @@ ROBOT_COMMAND_ERROR_RESPONSES = {
                         "value": {
                             "detail": {
                                 "error": "robot_unavailable",
-                                "request_id": "<uuid>",
+                                "command_id": "<uuid>",
                             }
                         },
                     },
@@ -222,55 +327,83 @@ async def get_status():
     return await services.status()
 
 
+@app.get(
+    "/api/v1/robot/commands/{command_id}",
+    tags=["robot"],
+    dependencies=[Depends(require_api_token)],
+)
+async def get_command_result(command_id: str):
+    """Return the latest known Pi/ESP32 result for a dispatched command."""
+    result = services.command_result(command_id)
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "command_not_found", "command_id": command_id},
+        )
+    return result
+
+
 @app.post(
     "/api/v1/robot/move",
     response_model=CommandResponse,
+    status_code=202,
     tags=["robot"],
     dependencies=[Depends(require_api_token)],
     responses=ROBOT_COMMAND_ERROR_RESPONSES,
 )
 async def move(request: MoveRequest):
-    """Dispatch a validated movement request through the Pi motor service."""
-    request_id = str(uuid4())
+    """Dispatch a movement command and report its later ESP32 result asynchronously."""
+    command_id = str(uuid4())
     try:
         sequence = await services.dispatch(request.direction, request.speed)
     except ValueError as exc:
         _log_command_outcome(
-            request_id=request_id,
+            command_id=command_id,
             command=request.direction,
             outcome="rejected",
             http_status=422,
             error_code="invalid_command",
         )
-        raise HTTPException(status_code=422, detail={"error": "invalid_command", "request_id": request_id}) from exc
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "invalid_command", "command_id": command_id},
+        ) from exc
     except Exception as exc:
         _log_command_outcome(
-            request_id=request_id,
+            command_id=command_id,
             command=request.direction,
             outcome="failed",
             http_status=503,
             error_code="robot_unavailable",
         )
-        raise HTTPException(status_code=503, detail={"error": "robot_unavailable", "request_id": request_id}) from exc
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "robot_unavailable", "command_id": command_id},
+        ) from exc
     if sequence is None:
         _log_command_outcome(
-            request_id=request_id,
+            command_id=command_id,
             command=request.direction,
             outcome="failed",
             http_status=503,
             error_code="robot_unavailable",
         )
-        raise HTTPException(status_code=503, detail={"error": "robot_unavailable", "request_id": request_id})
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "robot_unavailable", "command_id": command_id},
+        )
     manager = await services.robot_manager()
+    services.register_command(command_id, request.direction, manager.mode.value)
+    services.start_ack_tracking(command_id, sequence)
     _log_command_outcome(
-        request_id=request_id,
+        command_id=command_id,
         command=request.direction,
         outcome="dispatched",
-        http_status=200,
+        http_status=202,
         control_mode=manager.mode.value,
     )
     return CommandResponse(
-        request_id=request_id,
+        command_id=command_id,
         command=request.direction,
         status="dispatched",
         control_mode=manager.mode.value,
@@ -280,43 +413,52 @@ async def move(request: MoveRequest):
 @app.post(
     "/api/v1/robot/stop",
     response_model=CommandResponse,
+    status_code=202,
     tags=["robot"],
     dependencies=[Depends(require_api_token)],
     responses=ROBOT_COMMAND_ERROR_RESPONSES,
 )
 async def stop():
-    """Dispatch the dedicated high-priority stop through the Pi motor service."""
-    request_id = str(uuid4())
+    """Dispatch STOP and report its later ESP32 result asynchronously."""
+    command_id = str(uuid4())
     try:
         sequence = await services.dispatch("stop")
     except Exception as exc:
         _log_command_outcome(
-            request_id=request_id,
+            command_id=command_id,
             command="stop",
             outcome="failed",
             http_status=503,
             error_code="robot_unavailable",
         )
-        raise HTTPException(status_code=503, detail={"error": "robot_unavailable", "request_id": request_id}) from exc
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "robot_unavailable", "command_id": command_id},
+        ) from exc
     if sequence is None:
         _log_command_outcome(
-            request_id=request_id,
+            command_id=command_id,
             command="stop",
             outcome="failed",
             http_status=503,
             error_code="robot_unavailable",
         )
-        raise HTTPException(status_code=503, detail={"error": "robot_unavailable", "request_id": request_id})
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "robot_unavailable", "command_id": command_id},
+        )
     manager = await services.robot_manager()
+    services.register_command(command_id, "stop", manager.mode.value)
+    services.start_ack_tracking(command_id, sequence)
     _log_command_outcome(
-        request_id=request_id,
+        command_id=command_id,
         command="stop",
         outcome="dispatched",
-        http_status=200,
+        http_status=202,
         control_mode=manager.mode.value,
     )
     return CommandResponse(
-        request_id=request_id,
+        command_id=command_id,
         command="stop",
         status="dispatched",
         control_mode=manager.mode.value,
@@ -325,7 +467,7 @@ async def stop():
 
 @app.websocket("/api/v1/telemetry")
 async def telemetry(websocket: WebSocket):
-    """Stream raw newline-delimited ESP32 messages in a JSON text frame."""
+    """Stream raw ESP32 lines and asynchronous command_result events."""
     expected_token = get_api_token()
     auth_header = websocket.headers.get("authorization", "")
     scheme, _, provided_token = auth_header.partition(" ")
@@ -340,14 +482,27 @@ async def telemetry(websocket: WebSocket):
         await websocket.close(code=4401, reason="unauthorized")
         return
     await websocket.accept()
+    subscriber = services.subscribe_command_results()
     try:
         while True:
-            line = await services.read_message()
-            if line is None:
-                # Avoid a tight loop while preserving a server-to-client-only
-                # stream. A disconnected client is detected on the next send.
-                await asyncio.sleep(0.05)
+            # Check result events before and after the existing serial queue read.
+            # That queue has a 200 ms timeout, bounding event delivery latency.
+            try:
+                event = subscriber.get_nowait()
+                await websocket.send_json(event)
                 continue
-            await websocket.send_json({"type": "esp32_line", "line": line})
+            except asyncio.QueueEmpty:
+                pass
+            line = await services.read_message()
+            if line is not None:
+                await websocket.send_json({"type": "esp32_line", "line": line})
+            try:
+                event = subscriber.get_nowait()
+                await websocket.send_json(event)
+            except asyncio.QueueEmpty:
+                if line is None:
+                    await asyncio.sleep(0.05)
     except WebSocketDisconnect:
         return
+    finally:
+        services.unsubscribe_command_results(subscriber)
