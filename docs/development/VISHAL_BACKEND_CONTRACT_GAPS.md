@@ -1,29 +1,38 @@
 # Vishal Backend Contract Gap List
 
-This document tracks confirmed behavior and unresolved interface decisions for Vishal's Raspberry Pi backend work. It does not approve new routes or change robot behavior.
+This document records Tharun's hardware-control contract and compares it with the current Pi backend on `vishal-phase1`. It does not add routes or change runtime behavior.
 
-## Confirmed backend contract
+## Confirmed ownership and mobile response meaning
 
-- Flutter communicates with the Pi API; it does not communicate directly with the ESP32.
+- Flutter communicates with the Pi API, not directly with the ESP32.
 - `POST /api/v1/robot/move` accepts `direction` (`forward`, `backward`, `left`, `right`) and an optional integer `speed` from 0 to 255.
-- `POST /api/v1/robot/stop` accepts an empty body.
-- Robot command routes require a Bearer token. The token is configured outside source control.
-- A successful response with `status: "dispatched"` means the Pi wrote a command to its serial transport. It does not prove ESP32 acknowledgement or physical movement.
-- A dispatched move sets the Pi's tracked control mode to `MANUAL`; a dispatched stop sets the tracked mode to `AUTO`. The current backend tracks these labels; it does not implement an automatic motor controller.
-- The core move/stop endpoint details were shared with Niteshvar, who acknowledged them and is waiting for a Pi address and test token. Current response/error examples are documented in `api/README.md`; share any updates with him before client integration.
+- `POST /api/v1/robot/stop` currently accepts an empty body.
+- Robot command routes require a Bearer token stored outside source control.
+- An HTTP response with `status: "dispatched"` means only that the Pi wrote the command to serial. It must never be shown as proof that the ESP32 accepted or completed movement.
+- The core move/stop endpoint details were shared with Niteshvar, who acknowledged them and is waiting for a Pi address and test token.
 
-## Open decisions and owners
+## Tharun's hardware contract
 
-| Item | Current state | Owner / next action |
+- Missing, `NA`, or stale sensor data is not clear. `FAR` means a working sensor sees no obstacle within range and may count as clear.
+- Forward moves require fresh, clear front ToF readings. Reverse moves require a fresh, clear rear reading. The stated follow clearance threshold is 300 mm.
+- Before dispatch, the Pi must require a connected ESP32 and no STOP latch or higher-priority safety event. The ESP32 remains the final safety authority and may reject a command.
+- STOP sends the dedicated ESP32 STOP command and latches motion stopped. It must not automatically restart movement. If Auto was selected, it remains selected but paused; resuming requires an explicit resume/Auto action and fresh safety checks. STOP must not turn a manual session into active Auto.
+- The Pi tracks the command sequence and waits for `ACK|sequence|OK`, a safety rejection, or timeout. Ordinary commands wait up to 750 ms; follow pulses use a shorter wait. On rejection or timeout, report failure and ensure STOP is sent.
+- The app may receive `dispatched` immediately and a later result (`ACKED`, `REJECTED`, `TIMEOUT`, or `STOPPED`) through a status endpoint or event stream. The exact mobile event/status contract remains to be agreed with Niteshvar.
+
+## Verified implementation gaps on `vishal-phase1`
+
+| Item | What the current repository code does | Required follow-up / owner |
 |---|---|---|
-| Safety check before manual movement | The API validates direction and speed, but does not currently evaluate a live robot safety state before dispatch. | Vishal and Tharun: define how the Pi learns whether movement is safe and what response it should return when it is not. |
-| Switching from Manual back to Auto | Stop changes the tracked mode to `AUTO`; an automatic motor controller is not integrated in this backend. | Tharun owns robot behavior; agree what “back to Auto” physically means before describing it as resumed autonomous control. |
-| ESP32 acknowledgement and timeout | The app response intentionally reports Pi dispatch only. The API does not wait for or correlate ESP32 acknowledgements. | Vishal and Tharun: confirm whether the Pi should track ACK, rejection, or timeout internally under the frozen serial protocol. |
-| Telemetry WebSocket | The endpoint currently wraps raw ESP32 lines as `{"type":"esp32_line","line":"..."}`. | Vishal and Niteshvar: confirm whether Flutter needs this feed and agree stale-data, reconnect, and event behavior before expanding it. |
-| Pi network access and test credentials | Pi target is Raspberry Pi OS Bookworm with Python 3.11.2, but the Pi is not yet available for app connection. | Tharun prepares the Pi/private connection; Vishal provides a fresh test token through a secure channel when ready. |
+| Safety pre-check | The API/manager validate direction and speed but do not read fresh ToF data, enforce the 300 mm threshold, or check a Pi-side STOP latch/safety event. The checked-in `thashu/vision/follow_logic.py` is face-follow logic and does not contain that ToF gate. | Tharun: point to the current Pi follow/sensor-safety implementation if it lives elsewhere; confirm the sensor data source and the definition of “fresh.” Vishal: integrate the agreed pre-check only after locating the authoritative source. |
+| STOP and mode | `RobotCommandManager.dispatch("stop")` currently changes the tracked mode to `AUTO`. There is no paused/stopped run state or explicit resume route. | Vishal and Niteshvar: agree how paused vs selected mode is represented to the app. Tharun: confirm how the Pi should enforce the STOP latch and explicit resume. |
+| ESP32 ACK tracking | `GPIOControl.send()` returns a sequence after serial write. `read_line()` queues raw inbound lines; the checked-in code has no sequence-correlated ACK/rejection waiter or 750 ms command timeout. | Vishal: implement the tracker in the Pi transport after confirming exact reply/rejection forms. Tharun: specify the shorter follow-pulse timeout and safety-rejection event format. |
+| Async app result | The API returns only `dispatched`. The existing WebSocket wraps raw lines; it does not publish parsed command outcomes. | Vishal and Niteshvar: choose the agreed status/event shape and delivery path before adding or changing endpoints. |
+| Network and credentials | The Pi target is Bookworm/Python 3.11.2, but it is not yet available for app access. | Tharun: prepare the private connection. Vishal: provide a fresh test token securely when the server can be reached. |
 
 ## Scope notes
 
-- Do not add mode, emergency-stop, reset, mock, or other API routes until their contracts are approved by the relevant owners.
-- Physical robot verification belongs to Tharun. Backend software behavior and API contract documentation belong to Vishal.
-- Update this list when an owner resolves an item; do not treat an assumption as an approval.
+- Do not implement new resume, mode, emergency-stop, or command-result routes until the mobile-facing contract is agreed with Niteshvar.
+- Do not weaken the ESP32 safety authority or treat stale/missing sensor values as clear.
+- Physical robot verification belongs to Tharun. Backend software behavior and API integration belong to Vishal.
+- Resolve gaps with the listed owners, then update this document and the API contract before implementation.
