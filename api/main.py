@@ -318,7 +318,7 @@ async def stop():
 @app.websocket("/api/v1/telemetry")
 async def telemetry(websocket: WebSocket):
     """Stream raw newline-delimited ESP32 messages in a JSON text frame."""
-    expected_token = os.getenv("THASHU_API_TOKEN")
+    expected_token = get_api_token()
     auth_header = websocket.headers.get("authorization", "")
     scheme, _, provided_token = auth_header.partition(" ")
     if not expected_token:
