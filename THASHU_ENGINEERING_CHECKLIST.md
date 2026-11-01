@@ -874,6 +874,72 @@ Existing Files to Inspect First
 
 \[\---
 
+Phase 7 — Person & Conversation Memory
+
+Status: IN PROGRESS — short-term expiry and explicit person/episodic memory flows are implemented; Pi persistence, identity-isolation, recall, and deletion tests remain.
+
+Existing files:
+
+\[x] `memory/short_term.py`
+
+\[x] `memory/long_term.py`
+
+\[x] `memory/storage.py`
+
+\[x] `memory/people.py`
+
+\[x] `data/people.py` (empty placeholder inspected)
+
+\[x] Trace runtime memory read/write call sites and confirm whether person-memory utilities are connected.
+
+\[x] Add per-pair time-based expiry to short-term conversation context (10-minute retention).
+
+\[x] Related core/personality modules inspected: `core/brain.py`, `core/decision.py`, `core/intent.py`, `core/quick_responses.py`, `core/response_manager.py`, `personality/personality_engine.py`
+
+Tasks:
+
+\[x] Separate short-term and permanent memory.
+
+\[x] Define permanent person facts.
+
+\[x] Define significant interaction/episodic memory.
+
+\[x] Associate memories with confirmed people.
+
+\[x] Avoid permanent storage of irrelevant conversation.
+
+\[x] Define memory retrieval behavior.
+
+\[x] Preserve existing useful memory mechanisms.
+
+\[x] Require a separate voice confirmation before deleting a person's saved facts/events.
+
+Acceptance:
+
+\[x] Temporary conversation expires appropriately (Pi quick test: a 3-second expiry cleared an entry; six insertions retained only the newest five).
+
+\[ ] Important person facts persist after restart.
+
+\[ ] Significant interactions persist after restart.
+
+\[ ] Memories are correctly associated with confirmed people; unknown/ambiguous faces cannot access another person's records.
+
+\[ ] Memory retrieval is relevant and bounded.
+
+\[ ] A person can explicitly delete their saved facts/events after a separate confirmation.
+
+Audit and implementation record (2026-11-01):
+
+- Initial call-site trace: `Brain` uses `ShortTermMemory` for conversation context and constructs `LongTermMemory` without calling its read/write API. `PeopleMemory` had no runtime caller. Face identity embeddings remain in the separate confirmed-face database.
+- `memory/short_term.py` retains at most five pairs and expires each pair after ten minutes using a monotonic clock. The user verified expiry with a three-second test and confirmed the five-pair cap on the Pi.
+- Permanent saves require exact commands: “remember that …” for a person fact and “remember this event …” for a user-designated event. Normal conversation remains short-term. Each saved item is limited to 240 characters; at most 50 facts and 50 events are retained per person.
+- `main.py` permits save and recall only when exactly one known, unambiguous face was recognized within the 20-second wake-transition window. Unknown or ambiguous faces cannot access another person's memories.
+- “What do you remember about me?” returns at most the five newest records for that recognized person. “Forget all my memories” asks for a separate “confirm delete memories” or “cancel memory deletion” response and rechecks the same recognized person before deletion.
+- `memory/storage.py` uses machine-local storage under `~/.local/share/thashu/data/memory_db/long_term.json` by default, reads the former checkout-local store as a fallback without deleting it, and uses atomic replacement. Writes are refused if the store is unreadable.
+- The user-reported quick expiry and five-entry-bound tests passed on the Pi. Permanent-memory voice, persistence-after-restart, isolation, retrieval, and deletion tests have not yet been run. Phase 7 remains open.
+
+\---
+
 Phase 8 — Place / Environment Memory
 
 Status: NOT STARTED
