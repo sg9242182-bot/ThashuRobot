@@ -2,7 +2,7 @@ import time
 
 
 class ShortTermMemory:
-    """Recent conversation context with a bounded size and inactivity expiry."""
+    """Recent conversation context with a bounded size and per-pair time-to-live."""
 
     DEFAULT_MAX_SIZE = 5
     DEFAULT_EXPIRATION_SECONDS = 10 * 60
@@ -15,7 +15,7 @@ class ShortTermMemory:
         self._added_at = []
 
     def _expire(self, now=None):
-        """Drop oldest conversation pairs after the configured idle window."""
+        """Drop conversation pairs older than the configured retention window."""
         now = time.monotonic() if now is None else now
         cutoff = now - self.expiration_seconds
         while self._added_at and self._added_at[0] <= cutoff:
