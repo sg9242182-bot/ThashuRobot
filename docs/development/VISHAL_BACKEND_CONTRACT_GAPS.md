@@ -10,7 +10,7 @@ This document tracks confirmed behavior and unresolved interface decisions for V
 - Robot command routes require a Bearer token. The token is configured outside source control.
 - A successful response with `status: "dispatched"` means the Pi wrote a command to its serial transport. It does not prove ESP32 acknowledgement or physical movement.
 - A dispatched move sets the Pi's tracked control mode to `MANUAL`; a dispatched stop sets the tracked mode to `AUTO`. The current backend tracks these labels; it does not implement an automatic motor controller.
-- The mobile API contract and current error examples are documented in `api/README.md` and were shared with Niteshvar. He acknowledged the endpoints and is waiting for a Pi address and test token.
+- The core move/stop endpoint details were shared with Niteshvar, who acknowledged them and is waiting for a Pi address and test token. Current response/error examples are documented in `api/README.md`; share any updates with him before client integration.
 
 ## Open decisions and owners
 
