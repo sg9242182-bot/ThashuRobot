@@ -659,7 +659,7 @@ Existing files:
 \[x] `data/people.py` (empty placeholder inspected)
 
 \[x] Trace runtime memory read/write call sites and confirm whether person-memory utilities are connected.
-\[x] Add inactivity expiry to short-term conversation context (10 minutes; implementation recorded below).
+\[x] Add per-pair time-based expiry to short-term conversation context (10-minute retention; implementation recorded below).
 
 \[x] Related core/personality modules inspected: core/brain.py, core/decision.py, core/intent.py, core/quick_responses.py, core/response_manager.py, personality/personality_engine.py
 
