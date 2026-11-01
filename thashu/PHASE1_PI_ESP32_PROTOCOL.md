@@ -1,44 +1,51 @@
-# Thashu Phase 1 — Pi ↔ ESP32 Hardware Protocol
+# THASHU Pi ↔ ESP32 Serial Protocol
 
-**Version:** 1.0  
-**Status:** Frozen for Phase 1 implementation  
-**Transport:** USB CDC serial  
-**Baud:** 115200
+**Status:** Current integrated firmware behavior, confirmed by the ESP32 owner  
+**Transport:** USB CDC serial at 115200 baud  
+**Wire protocol version:** None is carried in command or response frames. Versioning/compatibility policy remains an open Phase 2 decision.
 
-## 1. Ownership
+## Source of truth and ownership
 
-### Raspberry Pi
-- High-level movement decisions
-- AI, vision, voice, memory and behavior
-- Semantic eye/expression requests
-- No direct GPIO/pin knowledge
+This document describes the integrated firmware under `ESP32Firmware/ThashuController` and the Pi transport under `thashu/hardware`. The separate `ESP32Firmware/communicationmanager/communication_manager.cpp` copy is stale in some behavior. The old `command_parser.cpp` is not used by the integrated sketch. Do not use those files to infer the live contract.
 
-### ESP32
-- Motor actuation through 2× DRV8833
-- Hardware STOP and watchdog
-- ToF/ultrasonic acquisition
-- OLED rendering
-- Ear-servo control
-- Hardware-level validation/fault handling
+The Pi owns high-level behavior and sends semantic commands. The integrated ESP32 firmware owns motor actuation through TA6586 motor drivers, hardware safety checks, sensors, displays, and servo actuation. Flutter communicates with the Pi API, never directly with this serial protocol.
 
-## 2. Timing
+## Framing and parser behavior
 
-- Pi heartbeat: **100 ms** (10 Hz)
-- ESP32 Pi-communication watchdog: **500 ms**
-- Sensor telemetry target: **20 Hz**
-- Motor control model: **continuous/current-command**
+Frames are ASCII, terminated by line feed. The ESP32 also accepts CRLF by stripping a trailing carriage return before parsing.
 
-The watchdog is enforced by the ESP32. Pi-side reconnect logic is not a substitute for hardware safety.
-
-## 3. Frame format
-
-All frames are ASCII and newline terminated:
+Pi to ESP32 command format:
 
 ```text
-<CLASS>|<SEQUENCE>|<FIELD>|<FIELD>...\n
+CMD|sequence|payload...\n
 ```
 
-Pi commands use `CMD`.
+The integrated ESP32 accumulates partial serial reads until a newline, using a 128-byte command buffer. An overlong frame is discarded through its next newline. The Pi's serial reader uses newline-delimited reads with a 200 ms read timeout.
+
+A line that is not a valid `CMD` frame, or whose sequence is missing, non-numeric, or negative, is silently ignored; it receives no ACK. Unknown but otherwise well-formed command payloads receive `ACK|sequence|ERROR|INVALID_COMMAND`.
+
+There is no protocol-version field in the wire format. The team must decide whether to add version negotiation or explicitly maintain this unversioned format with a compatibility policy before declaring Phase 2 complete.
+
+## Sequence numbers and command correlation
+
+The Pi allocates positive sequence numbers, starting at 1, and increments for each sent frame. It wraps to 1 after 2,147,483,647. The ESP32 echoes the sequence in ACK and ENCODERS responses. The integrated firmware does not deduplicate commands; repeated frames are processed again.
+
+The Pi must correlate replies by sequence and track ACK timeouts. The current Pi API also assigns a UUID `command_id` to a mobile move/stop request and internally associates it with the serial sequence. A Pi process restart begins the local sequence counter at 1 again; the ESP32 has no duplicate protection across that restart.
+
+## Supported commands
+
+| Payload | Behavior and response |
+|---|---|
+| `STOP` | Stops the motors when parsed, sets active motion to STOPPED, then replies `ACK|sequence|OK`. |
+| `HEARTBEAT` | Updates the ESP32 Pi-frame watchdog and replies `ACK|sequence|ALIVE`. |
+| `MOTOR|FORWARD|speed` | Forward motion, speed 0–255. |
+| `MOTOR|BACKWARD|speed` | Reverse motion, speed 0–255. |
+| `MOTOR|LEFT|speed` | Left turn, speed 0–255. |
+| `MOTOR|RIGHT|speed` | Right turn, speed 0–255. |
+| `EYES|expression` | Supported expressions: `IDLE`, `HAPPY`, `THINKING`, `LISTENING`, `SPEAKING`, `ALERT`, `SLEEP`. |
+| `SERVO|PAN_TILT|pan|tilt` | Sets pan and tilt angles, each 0–180 degrees. |
+| `SERVO|MOVE|pan|tilt|duration_ms` | Moves to the requested angles over 50–2000 ms. |
+| `ENCODERS` | Returns encoder counts; this command replies with `ENC`, not `ACK`. |
 
 Examples:
 
@@ -48,184 +55,82 @@ CMD|105|STOP
 CMD|106|EYES|HAPPY
 CMD|107|SERVO|PAN_TILT|90|90
 CMD|108|HEARTBEAT
+CMD|109|ENCODERS
 ```
 
-## 4. Message classes
+Motor, EYES, and SERVO commands normally reply `ACK|sequence|OK` when accepted by the firmware. This ACK confirms firmware handling of the command; it does not confirm that movement has completed.
 
-### Pi → ESP32
-
-- `CMD` — command
-
-### ESP32 → Pi
-
-- `ACK` — command acknowledgement
-- `TEL` — periodic telemetry
-- `EVENT` — asynchronous hardware event
-- `FAULT` — abnormal hardware condition
-
-## 5. Sequence numbers
-
-- Pi commands receive monotonically increasing sequence numbers.
-- Sequence `0` is reserved for non-correlated messages.
-- Sequence numbers may restart after a Pi transport restart.
-- ESP32 may use the sequence number to detect duplicate commands.
-
-## 6. Motor commands
+For `ENCODERS`, the response is:
 
 ```text
-CMD|N|MOTOR|FORWARD|0-255
-CMD|N|MOTOR|BACKWARD|0-255
-CMD|N|MOTOR|LEFT|0-255
-CMD|N|MOTOR|RIGHT|0-255
-CMD|N|STOP
+ENC|sequence|count0|count1|count2|count3
 ```
 
-The ESP32 owns the actual PWM/GPIO mapping.
+## Acknowledgements and errors
 
-`STOP` is safety-critical and has higher processing priority than normal movement or expression commands.
-
-## 7. Heartbeat
-
-Pi sends:
+ACK frames use:
 
 ```text
-CMD|N|HEARTBEAT
+ACK|sequence|OK
+ACK|sequence|ALIVE
+ACK|sequence|ERROR|error_code
 ```
 
-ESP32 acknowledges:
+Implemented error codes include:
+
+- `INVALID_COMMAND` — unsupported command payload.
+- `INVALID_ARGUMENT` — invalid direction or eye expression.
+- `OUT_OF_RANGE` — motor speed, servo angle, or servo duration is outside allowed bounds.
+- `OBSTACLE` — ESP32 safety checks reject motion due to an obstacle.
+- `SENSOR_NOT_READY` — ESP32 safety checks reject motion because required sensor data is not ready.
+
+The Pi transport tracks ACKs by sequence. The API returns `dispatched` immediately after the Pi writes the command, then reports `acknowledged`, `safety_error`, or `timed_out` through a WebSocket `command_result` event and the command-result lookup route. A timeout means no matching ACK arrived before the configured wait ended; it does not establish whether the ESP32 acted.
+
+## STOP and safety behavior
+
+STOP is not given parser-level priority. It executes when the ESP32 reads it from the serial input stream. Commands are processed in stream order, and there is no duplicate suppression. Do not document STOP as preempting bytes or commands already ahead of it.
+
+ESP32 obstacle checks can stop/reject motion independently. The Pi heartbeat runs every 100 ms; the ESP32 communication watchdog is 500 ms and stops the motors if Pi communication expires. These mechanisms are independent. The ESP32 remains the final hardware safety authority.
+
+## Telemetry, events, and faults
+
+The ESP32 emits sensor telemetry every 50 ms:
 
 ```text
-ACK|N|ALIVE
+TEL|0|SENSORS|TOF_L|value|TOF_C|value|TOF_R|value|US_REAR|value
 ```
 
-If the ESP32 does not receive valid Pi communication for 500 ms, it must enter its safe motor state.
+Distance values are millimetres. `FAR` represents a fresh out-of-range reading; `NA` represents unavailable, invalid, or stale sensor data. The Pi timestamps telemetry when it receives the line; the serial telemetry frame itself has no timestamp.
 
-## 8. Eye commands
-
-Pi sends semantic expressions:
+Known asynchronous frames include:
 
 ```text
-CMD|N|EYES|IDLE
-CMD|N|EYES|HAPPY
-CMD|N|EYES|LISTENING
-CMD|N|EYES|THINKING
-CMD|N|EYES|SPEAKING
-CMD|N|EYES|ALERT
-CMD|N|EYES|SLEEP
-```
-
-The ESP32 owns OLED addresses, drawing and animation.
-
-## 9. Ear commands
-
-Normal runtime behavior should prefer semantic expressions. Direct servo commands are retained for hardware bring-up:
-
-```text
-CMD|N|EXPRESSION|HAPPY
-CMD|N|EXPRESSION|LISTENING
-CMD|N|EXPRESSION|ALERT
-CMD|N|EAR|LEFT|ANGLE
-CMD|N|EAR|RIGHT|ANGLE
-```
-
-The ESP32 clamps servo angles to configured mechanical limits.
-
-## 10. Existing pan/tilt servo
-
-The existing tracking abstraction uses:
-
-```text
-CMD|N|SERVO|PAN_TILT|PAN|TILT
-```
-
-The ESP32 owns the actual servo PWM output.
-
-## 11. Sensor telemetry
-
-Telemetry is targeted at 20 Hz and uses millimetres for distance values.
-
-The exact field layout may be extended without changing the ownership model. Invalid sensor data must not be represented ambiguously as a valid zero-distance measurement.
-
-Example conceptual message:
-
-```text
-TEL|0|SENSORS|TOF_L|420|TOF_C|385|TOF_R|510|US_REAR|730
-```
-
-## 12. Faults and events
-
-Examples:
-
-```text
-FAULT|0|MOTOR|DRIVER
-FAULT|0|SENSOR|TOF_L
-FAULT|0|WATCHDOG|PI_TIMEOUT
-
-EVENT|0|BOOT
 EVENT|0|READY
-EVENT|0|STOPPED
-EVENT|0|OBSTACLE
-EVENT|0|SENSOR_RECOVERED
+EVENT|0|BLOCKED|OBSTACLE
+EVENT|0|STOP|OBSTACLE
+FAULT|0|subsystem|detail
+INFO|MOTOR_MAP|...
 ```
 
-## 13. Acknowledgements
+The ESP32 emits `EVENT|0|READY` during communication-manager startup. Serial port open alone does not prove readiness. The motor-map INFO line identifies M0–M3 layout and is informational.
 
-Successful command execution:
+## Pi transport timing and reconnect behavior
 
-```text
-ACK|N|OK
-```
+- Pi heartbeat interval: 100 ms.
+- ESP32 Pi-communication watchdog: 500 ms.
+- ESP32 sensor telemetry interval: 50 ms.
+- Pi serial reconnect retry interval: 1 second while disconnected.
+- Pi considers the serial receive stream silent after 2 seconds without inbound data and disconnects/reconnects the transport.
 
-Examples of command rejection:
+Pi reconnect behavior does not replace the ESP32 watchdog. Do not assume a successful serial write means the ESP32 received, accepted, or completed a command.
 
-```text
-ACK|N|ERROR|INVALID_COMMAND
-ACK|N|ERROR|INVALID_ARGUMENT
-ACK|N|ERROR|OUT_OF_RANGE
-ACK|N|ERROR|HARDWARE_FAULT
-```
+## Remaining Phase 2 work
 
-A successful USB write is **not** equivalent to successful hardware execution.
+- Agree the protocol-version/compatibility policy; the current wire format has no version field.
+- Decide whether restarting the Pi may reuse sequence numbers, or whether Pi sequence allocation must persist/change so IDs remain unique across restarts.
+- Add shared protocol test fixtures and cover valid, invalid, partial, overlong, and unknown frames plus timeout/reconnect behavior.
+- Record cross-owner or physical hardware verification with Tharun. Do not infer it from API unit tests.
 
-## 14. Startup
+## Phase boundary
 
-ESP32 startup sequence:
-
-1. Initialize hardware.
-2. Force motors to STOP.
-3. Initialize sensors.
-4. Initialize OLEDs.
-5. Initialize servos.
-6. Start watchdog.
-7. Publish `EVENT|0|READY`.
-
-Pi should use the READY event to determine hardware readiness rather than assuming that opening the serial device means the controller is ready.
-
-## 15. Shutdown and failure
-
-Normal shutdown:
-
-```text
-Pi → STOP → ESP32 motor stop → Pi closes transport → OS shutdown
-```
-
-Pi crash/disconnect:
-
-```text
-Pi disappears → ESP32 watchdog expires → motors STOP
-```
-
-These are independent safety mechanisms.
-
-## 16. Priority
-
-The ESP32 behavioral priority is:
-
-1. Safety / STOP / watchdog / hardware fault
-2. Motor commands
-3. Sensor processing/telemetry
-4. OLED/ear expression
-
-## 17. Phase 1 boundary
-
-This protocol does **not** carry LLM, voice, face-recognition, memory, place-recognition, navigation-goal or camera-frame data. Those remain Pi-side responsibilities.
+This serial protocol carries motor, eye, servo, encoder, sensor, readiness, event, and fault information only. LLM, voice, camera frames, face recognition, memory, semantic places, and navigation goals remain Pi-side responsibilities.
