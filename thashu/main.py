@@ -773,16 +773,29 @@ def main():
         if runtime.current == RuntimeState.IDLE and _identity_enrollment_state == "capturing":
             capture = vision.enrollment_status()
             if capture.get("status") == "ready":
-                _identity_enrollment_state = "awaiting_name"
-                print(
-                    "[VISION] Required face images captured "
-                    f"({capture.get('sample_count', 0)}/{capture.get('required_samples', 5)}); "
-                    "waiting for the spoken name"
-                )
-                _announce_enrollment_status(
-                    "I have finished taking the face pictures. "
-                    "Tell me your name, and spell it with letters if the first name I hear is wrong."
-                )
+                if _identity_pending_name:
+                    _identity_enrollment_state = "spelling"
+                    print(
+                        "[VISION] Required face images captured "
+                        f"({capture.get('sample_count', 0)}/{capture.get('required_samples', 5)}); "
+                        f"waiting for spelling of draft name {_identity_pending_name}"
+                    )
+                    _announce_enrollment_status(
+                        f"I have finished taking your face pictures. "
+                        f"I heard your name as {_identity_pending_name}. "
+                        "Please spell it using ordinary letter names."
+                    )
+                else:
+                    _identity_enrollment_state = "awaiting_name"
+                    print(
+                        "[VISION] Required face images captured "
+                        f"({capture.get('sample_count', 0)}/{capture.get('required_samples', 5)}); "
+                        "waiting for the spoken name"
+                    )
+                    _announce_enrollment_status(
+                        "I have finished taking the face pictures. "
+                        "Tell me your name, then spell it using ordinary letter names."
+                    )
                 continue
             if capture.get("status") in ("ambiguous", "timed_out"):
                 _identity_enrollment_state = "idle"
@@ -935,11 +948,20 @@ def main():
                     else:
                         vision.begin_enrollment(required_samples=5, timeout=45.0)
                         _identity_enrollment_state = "capturing"
-                        _identity_pending_name = None
-                        response = (
-                            "I am collecting five clear views of one face. "
-                            "Keep your face centered and still for a few seconds, then tell me your name."
-                        )
+                        # A name in this utterance is only a draft; enrollment
+                        # still requires captured face samples, spelling, and save.
+                        _identity_pending_name = registration_name
+                        if registration_name:
+                            response = (
+                                f"I heard your name as {registration_name}. "
+                                "I am collecting five clear face views first. "
+                                "After that, I will ask you to spell the name."
+                            )
+                        else:
+                            response = (
+                                "I am collecting five clear views of one face. "
+                                "Keep your face centered and still for a few seconds."
+                            )
                 elif removal_name:
                     matched_name = vision.database.resolve_name(removal_name)
                     if matched_name is None:
@@ -958,6 +980,8 @@ def main():
                                 f"Do you want me to delete {matched_name}? Say yes to confirm or no to cancel."
                             )
                 elif _identity_enrollment_state in ("capturing", "awaiting_name") and registration_name:
+                    if _identity_enrollment_state == "capturing" and _identity_pending_name is None:
+                        _identity_pending_name = registration_name
                     status = vision.enrollment_status()
                     samples = vision.enrollment_samples()
                     if status.get("status") == "ready" and samples:
