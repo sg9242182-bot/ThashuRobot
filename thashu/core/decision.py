@@ -414,6 +414,27 @@ def get_person_memory_request(user_input: str):
     return None
 
 
+_MEMORY_DELETE_PHRASES = {
+    "forget all my memories",
+    "forget everything you remember about me",
+    "delete my saved memories",
+}
+_MEMORY_DELETE_CONFIRM_PHRASES = {"confirm delete memories"}
+_MEMORY_DELETE_CANCEL_PHRASES = {"cancel memory deletion"}
+
+
+def get_person_memory_delete_command(user_input: str):
+    """Return an exact delete, confirm, or cancel command for saved memories."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", (user_input or "").lower()).strip()
+    if normalized in _MEMORY_DELETE_PHRASES:
+        return "DELETE"
+    if normalized in _MEMORY_DELETE_CONFIRM_PHRASES:
+        return "CONFIRM"
+    if normalized in _MEMORY_DELETE_CANCEL_PHRASES:
+        return "CANCEL"
+    return None
+
+
 def is_person_memory_query(user_input: str) -> bool:
     """Recognize bounded recall requests without passing them to the LLM."""
     normalized = re.sub(r"[^a-z0-9]+", " ", (user_input or "").lower()).strip()
