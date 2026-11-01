@@ -40,10 +40,10 @@ class PeopleMemory:
         }
         save_data(self.data)
 
-    def remember(self, name: str, kind: str, text: str):
+    def remember(self, name: str, kind: str, text: str, *, confirmed_identity=False):
         """Persist an explicit fact/event for one confirmed person."""
-        if not self._confirmed_name(name):
-            raise ValueError("A confirmed person name is required")
+        if confirmed_identity is not True or not self._confirmed_name(name):
+            raise PermissionError("Memory writes require a confirmed face identity")
         if kind not in self.MEMORY_KINDS:
             raise ValueError("Memory kind must be 'fact' or 'event'")
         if not isinstance(text, str):
