@@ -121,3 +121,15 @@ Robot command endpoints can return these responses:
   ```
 
 The app should treat `dispatched` as “the Pi wrote the command to its serial transport,” not as confirmation that the robot moved. A disconnected screen can be shown for `robot_unavailable` or when the server cannot be reached.
+
+## Command logs
+
+The API writes one sanitized JSON log record for each move or stop outcome. Records include a timestamp, component, request ID, command, outcome, HTTP status, and the control mode on dispatch. Failure records include a stable error code. Bearer tokens and request authorization headers are not included.
+
+Example:
+
+```json
+{"command":"forward","component":"pi_api","control_mode":"MANUAL","event":"robot_command","http_status":200,"outcome":"dispatched","request_id":"<uuid>","timestamp":"<UTC timestamp>"}
+```
+
+Use the response's `request_id` to find its matching API log entry. A `dispatched` log still means the Pi wrote the command to the serial transport; it does not confirm ESP32 acknowledgement or physical movement.
