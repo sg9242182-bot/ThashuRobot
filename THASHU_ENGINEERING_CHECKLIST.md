@@ -1220,3 +1220,10 @@ Phase 6 user-reported verification update (2026-11-01): The user confirms enroll
 
 
 Phase 6 completion report (2026-11-01): The user confirms the remaining Phase 6 test passed. Together with earlier user-reported tests for known-face recognition across distances, poses, and reboot; unknown faces remaining Unknown; face enrollment/save safeguards; identity persistence/deletion; and contextual confirmation-command transcription, Phase 6 acceptance is recorded complete. Validation results in this report are user-reported; no independent test execution was performed in this task.
+
+
+
+
+Follow-mode obstacle avoidance requirement (planned; not an implementation/acceptance claim)
+
+When commanded follow mode is implemented, an obstacle must cause an immediate hardware-level stop. The follow controller may try a bounded route around it only after fresh sensor coverage verifies the candidate path. Use the three front ToF readings to assess left/center/right clearance; never assume an unobserved corridor is clear. Verify the swept path before turning, and require a valid rear ultrasonic reading before reversing. Use low bounded speeds and short motion leases, then re-check sensors after each short step. Keep the same selected person target throughout rerouting; if target identity, sensor freshness, or route safety is uncertain, remain stopped and announce the blocked path once, then wait for a safe route or human intervention. STOP, manual-control precedence, ESP32 interlocks, stale-sensor checks, and link-loss stops must never be bypassed. Do not mark follow or obstacle avoidance operational until automated, Pi integration, and controlled physical tests pass.
