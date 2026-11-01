@@ -68,6 +68,7 @@ class VisionCore:
         self._reported_face_count = 0
         self._reported_person_count = 0
         self._recognition_votes = {}
+        self._last_adaptive_sample_at = {}
         # Haar detections can flicker between frames. Only publish a face after
         # it is spatially consistent across three consecutive camera frames.
         self._detection_candidates = []
@@ -573,10 +574,43 @@ class VisionCore:
                             )
                         old_published_name = self.current_names.get(track_id, "Unknown")
                         self.current_names[track_id] = published_name
-                        if published_name != old_published_name and published_name != "Unknown":
+                        adapt_identity = None
+                        if (
+                            published_name != old_published_name
+                            and published_name != "Unknown"
+                        ):
                             print(f"[VISION] Recognized enrolled person: {published_name}")
                         elif old_published_name != "Unknown" and published_name == "Unknown":
                             print("[VISION] Identity confidence lost; reporting Unknown")
+
+                        enrollment_active = getattr(self, "_enrollment", None) is not None
+                        if (
+                            published_name != "Unknown"
+                            and votes >= 3
+                            and len(faces) == 1
+                            and track_id not in ambiguous_ids
+                            and not enrollment_active
+                            and time.monotonic()
+                                - self._last_adaptive_sample_at.get(published_name, 0.0)
+                                >= 60.0
+                            and callable(
+                                getattr(self.database, "add_high_confidence_sample", None)
+                            )
+                        ):
+                            adapt_identity = published_name
+
+                    if adapt_identity is not None and embedding is not None:
+                        try:
+                            if self.database.add_high_confidence_sample(
+                                adapt_identity, embedding
+                            ):
+                                self._last_adaptive_sample_at[adapt_identity] = time.monotonic()
+                                print(
+                                    "[VISION] Added one high-confidence adaptation sample "
+                                    f"for {adapt_identity}"
+                                )
+                        except Exception as exc:
+                            print(f"[VISION] Skipped automatic face sample: {exc}")
 
                 last_recog = now
 
