@@ -187,6 +187,8 @@ class FaceDatabase:
         # margin, instead of blocking the new person's enrollment.
         overlaps = []
         for existing_name, stored_embeddings in self.data.items():
+            if existing_name == name:
+                continue
             score = max(
                 float(np.dot(vector, self._normalize(stored)))
                 for vector in vectors
