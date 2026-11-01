@@ -69,7 +69,7 @@ class Brain:
         # ===== STEP 4: CONFIRMED PERSON MEMORY =====
         # A spoken name alone is not a confirmed person identity. Face enrollment
         # in main.py owns the only path that stores a name with face embeddings.
-        if re.match(r"^(?:my name is|i am|i'm|call me)\\b", text):
+        if re.match(r"^(?:my name is|i am|i'm|call me)\b", text):
             response = (
                 "I heard your name, but I have not saved it. "
                 "To remember you by face, say remember me and I will start registration."
