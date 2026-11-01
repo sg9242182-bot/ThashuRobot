@@ -866,6 +866,8 @@ def main():
             # to acquire a follow target. Idle face tracking and target tracking
             # continue to listen for the wake word.
             if not _follow_search_active and wake.process(chunk):
+                # Snapshot identity before the interaction pauses vision and STT delays dispatch.
+                recognized_person_at_wake = _recently_recognized_person()
                 transition_runtime(RuntimeState.WAKE_DETECTED)
 
                 print("[SYSTEM] ═══════════════════════════")
@@ -1115,7 +1117,7 @@ def main():
                         )
                 elif _memory_pending is not None:
                     pending = _memory_pending
-                    confirmed_person = _recently_recognized_person()
+                    confirmed_person = recognized_person_at_wake
                     if time.monotonic() > pending["expires_at"]:
                         _memory_pending = None
                         response = "That memory confirmation expired, so I didn't save anything."
@@ -1155,7 +1157,7 @@ def main():
                         )
                 elif _memory_delete_pending is not None:
                     pending_person = _memory_delete_pending
-                    confirmed_person = _recently_recognized_person()
+                    confirmed_person = recognized_person_at_wake
                     if memory_delete_command == "CANCEL":
                         _memory_delete_pending = None
                         response = "I cancelled deleting your saved memories."
@@ -1190,7 +1192,7 @@ def main():
                             "or cancel memory deletion."
                         )
                 elif memory_delete_command == "DELETE":
-                    confirmed_person = _recently_recognized_person()
+                    confirmed_person = recognized_person_at_wake
                     if confirmed_person is None:
                         response = (
                             "I can only delete personal memories when I recognize "
@@ -1206,7 +1208,7 @@ def main():
                             "cancel memory deletion."
                         )
                 elif (memory_request := get_person_memory_request(text)) is not None:
-                    confirmed_person = _recently_recognized_person()
+                    confirmed_person = recognized_person_at_wake
                     if confirmed_person is None:
                         response = (
                             "I can only save a permanent memory when I recognize one "
@@ -1229,7 +1231,7 @@ def main():
                             "waiting for read-back confirmation"
                         )
                 elif is_person_memory_query(text):
-                    confirmed_person = _recently_recognized_person()
+                    confirmed_person = recognized_person_at_wake
                     if confirmed_person is None:
                         response = (
                             "I can only recall personal memories when I recognize "
