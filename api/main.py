@@ -97,6 +97,40 @@ class ApiServices:
 services = ApiServices()
 bearer_scheme = HTTPBearer(auto_error=False)
 
+# Document common command failures in Swagger without changing runtime behavior.
+ROBOT_COMMAND_ERROR_RESPONSES = {
+    401: {
+        "description": "The Bearer token is missing or incorrect.",
+        "content": {
+            "application/json": {
+                "example": {"detail": {"error": "unauthorized"}},
+            }
+        },
+    },
+    503: {
+        "description": "Authentication is not configured, or the Pi cannot dispatch the command.",
+        "content": {
+            "application/json": {
+                "examples": {
+                    "authentication_not_configured": {
+                        "summary": "The API token is not configured",
+                        "value": {"detail": {"error": "authentication_not_configured"}},
+                    },
+                    "robot_unavailable": {
+                        "summary": "The Pi cannot dispatch the command",
+                        "value": {
+                            "detail": {
+                                "error": "robot_unavailable",
+                                "request_id": "<uuid>",
+                            }
+                        },
+                    },
+                }
+            }
+        },
+    },
+}
+
 
 async def require_api_token(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
@@ -152,6 +186,7 @@ async def get_status():
     response_model=CommandResponse,
     tags=["robot"],
     dependencies=[Depends(require_api_token)],
+    responses=ROBOT_COMMAND_ERROR_RESPONSES,
 )
 async def move(request: MoveRequest):
     """Dispatch a validated movement request through the Pi motor service."""
@@ -178,6 +213,7 @@ async def move(request: MoveRequest):
     response_model=CommandResponse,
     tags=["robot"],
     dependencies=[Depends(require_api_token)],
+    responses=ROBOT_COMMAND_ERROR_RESPONSES,
 )
 async def stop():
     """Dispatch the dedicated high-priority stop through the Pi motor service."""
