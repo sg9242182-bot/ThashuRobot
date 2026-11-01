@@ -171,9 +171,15 @@ def _normalize_phrase(user_input):
 
 
 def get_recognition_command(user_input):
-    """Return only exact, deterministic person-enrollment control phrases."""
+    """Return deterministic person-enrollment commands, including a name-led request."""
     normalized = _normalize_phrase(user_input)
-    if normalized in _RECOGNITION_ENROLL_PHRASES:
+    if (
+        normalized in _RECOGNITION_ENROLL_PHRASES
+        or (
+            normalized.startswith("remember me my name is ")
+            and get_registration_name(user_input) is not None
+        )
+    ):
         return "ENROLL"
     if normalized in _RECOGNITION_CANCEL_PHRASES:
         return "CANCEL"
@@ -283,6 +289,9 @@ def get_remove_identity_name(user_input):
 def get_registration_name(user_input):
     """Extract a candidate name from self-identification, excluding trailing greetings."""
     normalized = _normalize_phrase(user_input)
+    # Allow a name in the same utterance as the enrollment request. The name
+    # remains a draft until face capture, spoken spelling, and explicit save.
+    normalized = re.sub(r"^remember me\\s+", "", normalized)
     match = re.fullmatch(r"(?:my name is|i am|i'm|call me) ([a-z][a-z .'-]{0,62})", normalized)
     if not match:
         return None
