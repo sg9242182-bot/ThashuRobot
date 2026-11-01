@@ -21,8 +21,9 @@ from vision.follow_logic   import FollowLogic
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
 from hardware.servo_tracking import ServoTracker
-from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, is_recognition_query
+from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, is_recognition_query, get_person_memory_request, is_person_memory_query
 from core.model_paths import model_path, project_path
+from memory.people import PeopleMemory
 
 # ── Sounds ────────────────────────────────────────────────────────────────────
 SOUND_STARTUP   = project_path("sounds", "startup.wav")
@@ -62,6 +63,7 @@ runtime   = RuntimeStateMachine()
 event_bus = EventBus()
 
 brain  = Brain()
+person_memory = PeopleMemory()
 motors = MotorController()
 audio  = AudioManager(sample_rate=SAMPLE_RATE, blocksize=BLOCK_SIZE)
 wake = WakeWordEngine(
@@ -238,6 +240,16 @@ def _registration_details(text):
             return spelled, True
     return name, False
 
+
+
+def _recently_recognized_person():
+    """Return the one fresh confirmed face carried across wake-word transition."""
+    if (
+        _last_idle_recognized_person is not None
+        and time.monotonic() - _last_idle_recognized_at <= 20.0
+    ):
+        return _last_idle_recognized_person
+    return None
 
 def transition_runtime(target_state):
     global _auto_face_track_id, _follow_start_pending, _follow_region_pending, _follow_search_active
@@ -1091,6 +1103,59 @@ def main():
                             f"I am still collecting clear views, {count} of {required}. "
                             "Stay still and say your name again in a few seconds."
                         )
+                elif (memory_request := get_person_memory_request(text)) is not None:
+                    confirmed_person = _recently_recognized_person()
+                    if confirmed_person is None:
+                        response = (
+                            "I can only save a permanent memory when I recognize one "
+                            "confirmed person. Please face the camera and try again."
+                        )
+                    else:
+                        kind, memory_text = memory_request
+                        try:
+                            saved = person_memory.remember(
+                                confirmed_person,
+                                kind,
+                                memory_text,
+                                confirmed_identity=True,
+                            )
+                            if saved:
+                                print(
+                                    f"[MEMORY] Explicit {kind} saved for "
+                                    f"confirmed person {confirmed_person}"
+                                )
+                                response = (
+                                    f"I saved that {kind} for {confirmed_person}."
+                                )
+                            else:
+                                response = "I already have that saved."
+                        except (OSError, TypeError, ValueError, PermissionError) as exc:
+                            print(f"[MEMORY] Save rejected: {exc}")
+                            response = "I couldn't safely save that memory."
+                elif is_person_memory_query(text):
+                    confirmed_person = _recently_recognized_person()
+                    if confirmed_person is None:
+                        response = (
+                            "I can only recall personal memories when I recognize "
+                            "one confirmed person."
+                        )
+                    else:
+                        records = person_memory.recall(confirmed_person, limit=5)
+                        if not records:
+                            response = (
+                                f"I don't have any saved facts or events for "
+                                f"{confirmed_person} yet."
+                            )
+                        else:
+                            entries = [
+                                f"{record['kind']}: {record['text'][:120]}"
+                                for record in records
+                            ]
+                            response = (
+                                f"For {confirmed_person}, I remember: "
+                                + "; ".join(entries)
+                                + "."
+                            )
                 elif is_recognition_query(text):
                     recently_recognized = (
                         _last_idle_recognized_person is not None
