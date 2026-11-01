@@ -30,6 +30,60 @@ new endpoints or change the runtime contract.
 | Telemetry WebSocket | The API sends raw ESP32 lines from a single-consumer queue. It is not yet a parsed, multi-client event stream for command results and robot state. | Vishal and Niteshvar: agree the event schema, reconnect behavior, and client count before extending telemetry. |
 | Network and credentials | The API binds to localhost by default. Devices in different homes cannot reach one another using `127.0.0.1` or the Pi's home-only LAN address. | Tharun: prepare a private encrypted connection and firewall access when the Pi is available. Vishal: provide a fresh test token securely. Only then set `THASHU_API_HOST=0.0.0.0` for access over that private connection. |
 
+## Phase 2 protocol audit (observed code; not protocol approval)
+
+The following describes the merged `vishal-phase1` source. It is an implementation
+inventory, not a replacement for the frozen protocol contract.
+
+- Transport is USB serial at 115200 baud. Pi frames are ASCII
+  `CMD|sequence|payload...\n`; the ESP32 accepts CRLF by stripping the CR
+  before parsing. The ESP32 command buffer is 128 bytes and discards an
+  overlong frame through its next newline.
+- Pi sequence numbers start at 1 and wrap to 1 after 2,147,483,647. The ESP32
+  parses a non-negative sequence. No duplicate-command suppression is present
+  in the current ESP32 parser.
+- Pi heartbeat is sent every 100 ms. ESP32 watchdog is 500 ms. The Pi also
+  reconnects after 2 seconds without received serial data; this is transport
+  recovery, not the ESP32 safety watchdog.
+- Implemented command payloads include `HEARTBEAT`, `STOP`,
+  `MOTOR|FORWARD/BACKWARD/LEFT/RIGHT|speed`, `EYES|expression`,
+  `SERVO|PAN_TILT|pan|tilt`, `SERVO|MOVE|pan|tilt|duration`, and
+  `ENCODERS`. Motor speed is limited to 0–255. Servo inputs are checked by
+  the ESP32 parser. `ENCODERS` replies with `ENC|sequence|count...`, not
+  an `ACK`.
+- Normal acknowledgements are `ACK|sequence|OK` or
+  `ACK|sequence|ERROR|reason`. Heartbeat replies are
+  `ACK|sequence|ALIVE`. Current rejection reasons include
+  `INVALID_COMMAND`, `INVALID_ARGUMENT`, `OUT_OF_RANGE`, `OBSTACLE`,
+  and `SENSOR_NOT_READY`.
+- Sensor telemetry is sent every 50 ms as
+  `TEL|0|SENSORS|TOF_L|value|TOF_C|value|TOF_R|value|US_REAR|value`;
+  distances are millimetres, with `FAR` for fresh out-of-range and `NA`
+  for unavailable/stale readings. The Pi parser timestamps the received
+  snapshot.
+- Current asynchronous frames include `EVENT|0|READY`,
+  `EVENT|0|BLOCKED|OBSTACLE`, `EVENT|0|STOP|OBSTACLE`, and
+  `FAULT|0|subsystem|detail`. Firmware startup also emits an
+  `INFO|MOTOR_MAP|...` line.
+
+### Contract items requiring Tharun's confirmation
+
+- `thashu/PHASE1_PI_ESP32_PROTOCOL.md` still names DRV8833 hardware and
+  includes legacy `EXPRESSION`/`EAR` payloads. The current hardware baseline
+  is TA6586, and the current ESP32 parser implements `EYES` and `SERVO`
+  payloads instead.
+- The protocol document says STOP has higher priority and that sequence
+  numbers may be used for duplicate detection. The checked-in parser processes
+  serial frames in input order and does not suppress duplicates. Confirm the
+  intended guarantees before changing firmware or describing them as active.
+- Frames have no protocol-version field, and malformed/non-`CMD` frames or
+  invalid sequence text are silently ignored. Confirm whether versioning and
+  explicit malformed-frame errors are required for this phase.
+- Confirm the meaning of `ACK|sequence|OK`: firmware emits it after handling
+  the command, but it does not mean movement has completed. The API currently
+  reports only Pi dispatch and does not forward later ACK/error results to
+  Flutter; the mobile result contract still needs Niteshvar's agreement.
+
 ## Scope notes
 
 - Do not implement resume, mode, emergency-stop, or command-result routes
