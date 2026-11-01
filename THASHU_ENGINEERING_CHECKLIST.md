@@ -619,11 +619,11 @@ Acceptance:
 
 \[x] Unknown person remains unknown until identity is explicitly confirmed.
 
-\[ ] Confirmed name + face creates persistent identity outside the repository.
+\[x] Confirmed name + face creates persistent identity outside the repository. (User-reported Pi verification: persistence after restart passed.)
 
 \[ ] False identity assignment is prevented by alignment, quality gates, calibrated threshold/margin, and temporal consensus.
 
-\[ ] No raw face photos or unconfirmed identities are persisted; enrolled identities can be explicitly removed.
+\[x] No raw face photos or unconfirmed identities are persisted; enrolled identities can be explicitly removed. (User-reported Pi verification: enrollment safeguards and identity deletion passed.)
 
 
 
@@ -1214,3 +1214,6 @@ Phase 6 context-aware short-command transcription (2026-11-01): Updated `thashu/
 
 
 Phase 6 user-reported Pi verification (2026-11-01): The user confirms known-face recognition works at different distances and still works after reboot. The user also confirms the context-aware short-command transcription works. These results are recorded as passed for the tested conditions. Do not treat them as proof of lighting/pose coverage, unknown-person false-match rejection, enrollment/deletion/cancellation/failure safeguards, or the full automated/Pi acceptance suite; those criteria remain open until tested.
+
+
+Phase 6 user-reported verification update (2026-11-01): The user confirms enrollment safeguards and persistence/deletion tests (items 2 and 3 in the remaining-test summary) passed on the Raspberry Pi. The confirmed name-face persistence and explicit identity removal acceptance items are checked above. Full validation remains open for labeled positive/negative threshold calibration, representative lighting/pose coverage, false-match robustness, and any remaining ambiguity/failure scenarios; do not infer these from the reported tests.
