@@ -101,3 +101,23 @@ Run API tests with:
 ```powershell
 python -m unittest api.tests.test_api
 ```
+
+## Error responses for the Flutter client
+
+Robot command endpoints can return these responses:
+
+- **401 Unauthorized** when the Bearer token is missing or incorrect:
+  ```json
+  {"detail":{"error":"unauthorized"}}
+  ```
+- **422 Unprocessable Content** when the move body is invalid. FastAPI returns its standard validation format, with a `detail` list describing the invalid field. For example, an unsupported direction such as `spin` is rejected before any motor command is sent.
+- **503 Service Unavailable** when no API token is configured:
+  ```json
+  {"detail":{"error":"authentication_not_configured"}}
+  ```
+- **503 Service Unavailable** when the Pi cannot dispatch a robot command:
+  ```json
+  {"detail":{"error":"robot_unavailable","request_id":"<uuid>"}}
+  ```
+
+The app should treat `dispatched` as “the Pi wrote the command to its serial transport,” not as confirmation that the robot moved. A disconnected screen can be shown for `robot_unavailable` or when the server cannot be reached.
