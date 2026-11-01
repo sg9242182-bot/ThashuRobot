@@ -86,8 +86,10 @@ class PeopleMemory:
         records.sort(key=lambda record: record.get("saved_at") or "", reverse=True)
         return records[:limit]
 
-    def forget(self, name: str, kind=None, text=None):
+    def forget(self, name: str, kind=None, text=None, *, confirmed=False):
         """Delete one person's memories; callers must require explicit confirmation."""
+        if confirmed is not True:
+            raise PermissionError("Memory deletion requires explicit confirmation")
         if not self._confirmed_name(name):
             return 0
         if kind is not None and kind not in self.MEMORY_KINDS:
