@@ -90,7 +90,7 @@ The Pi transport tracks ACKs by sequence. The API returns `dispatched` immediate
 
 STOP is not given parser-level priority. It executes when the ESP32 reads it from the serial input stream. Commands are processed in stream order, and there is no duplicate suppression. Do not document STOP as preempting bytes or commands already ahead of it.
 
-ESP32 obstacle checks can stop/reject motion independently. The Pi heartbeat runs every 100 ms; the ESP32 communication watchdog is 500 ms and stops the motors if Pi communication expires. These mechanisms are independent. The ESP32 remains the final hardware safety authority.
+ESP32 obstacle checks can stop/reject motion independently. The Pi-side watchdog also stops motors independently according to its runtime policy. The Pi heartbeat runs every 100 ms; the ESP32 communication watchdog is 500 ms and stops the motors if Pi communication expires. These mechanisms are independent. Serial reconnect after missing inbound data is transport recovery, not the Pi motion watchdog. The ESP32 remains the final hardware safety authority.
 
 ## Telemetry, events, and faults
 
