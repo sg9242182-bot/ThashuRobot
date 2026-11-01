@@ -15,7 +15,9 @@ class FaceDatabase:
     MAX_EMBEDDINGS_PER_PERSON = 8
     # Conservative initial gates; the Pi validation must tune/confirm them with
     # labeled same-person and different-person samples before Phase 6 completes.
-    DEFAULT_THRESHOLD = 0.50
+    # Fail closed after a Pi-reported false positive (father matched as owner).
+    # Recalibrate with labeled owner/non-owner samples before lowering this.
+    DEFAULT_THRESHOLD = 0.70
     DEFAULT_MARGIN = 0.08
 
     def __init__(self, db_path="data/people_faces.json",
