@@ -639,21 +639,21 @@ Implementation snapshot (2026-10-29; on phase-6):
 
 Phase 7 — Person \& Conversation Memory
 
-Status: NOT STARTED
+Status: IN PROGRESS — existing memory-file audit recorded; memory contract and call-site tracing are next.
 
 Existing files:
 
-\[ ] `memory/short\_term.py`
+\[x] `memory/short\_term.py`
 
-\[ ] `memory/long\_term.py`
+\[x] `memory/long\_term.py`
 
-\[ ] `memory/storage.py`
+\[x] `memory/storage.py`
 
-\[ ] `memory/people.py`
+\[x] `memory/people.py`
 
-\[ ] `data/people.py`
+\[x] `data/people.py` (empty placeholder inspected)
 
-\[ ] Related core/personality modules
+\[x] Related core/personality modules inspected: core/brain.py, core/decision.py, core/intent.py, core/quick_responses.py, core/response_manager.py, personality/personality_engine.py
 
 Tasks:
 
@@ -682,6 +682,14 @@ Acceptance:
 \[ ] Memories are correctly associated with people.
 
 \[ ] Memory retrieval is relevant and bounded.
+
+Audit findings (2026-11-01):
+- memory/short_term.py holds the latest five input/response pairs by count only; there is no time-based expiration.
+- memory/long_term.py is a generic key/value wrapper over memory/storage.py. Brain constructs it, but current brain.py no longer reads or writes it after the Phase 6 identity guard.
+- memory/storage.py writes to a working-directory-relative data/memory_db/long_term.json; malformed/unreadable JSON silently loads as an empty dictionary, and writes are not atomic.
+- memory/people.py separately stores per-name people_seen counts and last-seen timestamps in the same generic store. Its call sites still need repository-wide tracing before deciding whether to retain, adapt, or retire it.
+- data/people.py is empty. The face database is routed to machine-local storage through data_path("people_faces.json"); Phase 7 must preserve that confirmed-identity boundary.
+- No memory behavior has been changed. Phase 7 acceptance remains open.
 
 \---
 
