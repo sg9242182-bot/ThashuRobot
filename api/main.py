@@ -3,7 +3,6 @@
 import asyncio
 import json
 import logging
-import os
 import secrets
 import sys
 from contextlib import asynccontextmanager
@@ -13,6 +12,8 @@ from typing import Callable, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+from api.config import get_api_token
 from pydantic import BaseModel, ConfigDict, Field
 from uuid import uuid4
 
@@ -167,7 +168,7 @@ ROBOT_COMMAND_ERROR_RESPONSES = {
 async def require_api_token(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ):
-    expected_token = os.getenv("THASHU_API_TOKEN")
+    expected_token = get_api_token()
     if not expected_token:
         raise HTTPException(
             status_code=503,
