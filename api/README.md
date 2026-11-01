@@ -46,19 +46,37 @@ a hardware acknowledgement or claim movement completed.
 | `GET /api/v1/status` | Reports API liveness, serial transport (`connected`, `disconnected`, or `unavailable`), `controller_readiness: "unknown"`, and the Pi control mode (`AUTO`, `MANUAL`, or `unknown` if the manager cannot start). Opening a serial port does not prove the ESP32 emitted `EVENT|0|READY`. |
 | `POST /api/v1/robot/move` | Body: `{"direction":"forward","speed":200}`. Direction is `forward`, `backward`, `left`, or `right`; speed is an integer from 0 to 255 and defaults to 200. |
 | `POST /api/v1/robot/stop` | Empty body. Dispatches the dedicated stop command through the Pi motor service. |
-| `WS /api/v1/telemetry` | Server-to-client stream of raw ESP32 lines, each wrapped as `{"type":"esp32_line","line":"..."}`. Lines are not parsed or represented as command success. |
+| `GET /api/v1/robot/commands/{command_id}` | Returns the current result for a previously dispatched command. Requires the same Bearer token. Results are retained in memory for 24 hours (up to 1,000 commands) and are lost when the API process restarts. |
+| `WS /api/v1/telemetry` | Server-to-client stream of raw ESP32 lines and `command_result` events. Raw lines are not represented as command success. |
 
 Successful movement and stop responses use:
 
 ```json
-{"request_id":"<uuid>","command":"forward","status":"dispatched","control_mode":"MANUAL"}
+{"command_id":"<uuid>","command":"forward","status":"dispatched","control_mode":"MANUAL"}
 ```
 
-`status: "dispatched"` means the Pi motor service successfully wrote the
-command to its serial transport. It does not mean the ESP32 acknowledged it or
-that the robot completed the movement. Invalid directions or speeds receive
-HTTP 422. If the Pi cannot write the command, the endpoint returns HTTP 503
-with an error code and request ID. Requests are not queued for later delivery.
+`status: "dispatched"` means the Pi wrote the command to serial. It does not
+mean the ESP32 acknowledged it or that the robot completed the movement. Move
+and stop return HTTP 202 with a unique `command_id`. The API asynchronously
+waits up to 750 ms for the matching ACK. The WebSocket sends a final event:
+
+```json
+{"type":"command_result","command_id":"<uuid>","status":"acknowledged","error_code":null,"timestamp":"<UTC ISO 8601>"}
+```
+
+Final status values are `acknowledged`, `safety_error`, and `timed_out`.
+Safety errors include the ESP32 reason as `error_code`; timeouts use
+`ACK_TIMEOUT`; acknowledged results have `error_code: null`. An ACK means
+the ESP32 acknowledged handling the command, not that movement completed.
+
+If Flutter misses the WebSocket event, it can call
+`GET /api/v1/robot/commands/{command_id}` with the same Bearer token. The
+response contains `command_id`, `command`, `status`, `error_code`, and
+`timestamp`. While pending, the status is `dispatched`. Results are held in
+process memory for 24 hours, up to 1,000 commands, and are lost if the API
+process restarts. Invalid directions or speeds receive HTTP 422. If the Pi
+cannot write the command, the endpoint returns HTTP 503 with an error code and
+command ID. Requests are not queued for later delivery.
 
 The current implementation starts the manager in `AUTO`, changes the
 tracked mode to `MANUAL` on a dispatched move, and changes it to `AUTO` on a
@@ -131,10 +149,10 @@ Robot command endpoints can return these responses:
   ```
 - **503 Service Unavailable** when the Pi cannot dispatch a robot command:
   ```json
-  {"detail":{"error":"robot_unavailable","request_id":"<uuid>"}}
+  {"detail":{"error":"robot_unavailable","command_id":"<uuid>"}}
   ```
 
-The app should treat `dispatched` as “the Pi wrote the command to its serial transport,” not as confirmation that the robot moved. A disconnected screen can be shown for `robot_unavailable` or when the server cannot be reached.
+The app should treat `dispatched` as “the Pi wrote the command to its serial transport,” not as confirmation that the robot moved. Use the command result event or lookup route to show whether the ESP32 acknowledged, rejected, or timed out. A disconnected screen can be shown for `robot_unavailable` or when the server cannot be reached.
 
 ## Command logs
 
@@ -143,7 +161,7 @@ The API writes one sanitized JSON log record for each move or stop outcome. Reco
 Example:
 
 ```json
-{"command":"forward","component":"pi_api","control_mode":"MANUAL","event":"robot_command","http_status":200,"outcome":"dispatched","request_id":"<uuid>","timestamp":"<UTC timestamp>"}
+{"command":"forward","component":"pi_api","control_mode":"MANUAL","event":"robot_command","http_status":200,"outcome":"dispatched","command_id":"<uuid>","timestamp":"<UTC timestamp>"}
 ```
 
-Use the response's `request_id` to find its matching API log entry. A `dispatched` log still means the Pi wrote the command to the serial transport; it does not confirm ESP32 acknowledgement or physical movement.
+Use the response's `command_id` to find its matching API log entry. A `dispatched` log still means the Pi wrote the command to the serial transport; it does not confirm ESP32 acknowledgement or physical movement.
