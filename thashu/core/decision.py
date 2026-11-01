@@ -272,6 +272,9 @@ def get_remove_identity_name(user_input):
     normalized = _normalize_phrase(user_input)
     if normalized in _RECOGNITION_CANCEL_PHRASES:
         return None
+    # Keep saved-memory deletion phrases out of the face-identity name parser.
+    if normalized in _MEMORY_DELETE_PHRASES:
+        return None
     match = re.fullmatch(r"(?:forget|remove|delete) ([a-z][a-z .'-]{0,62})", normalized)
     if not match:
         return None
