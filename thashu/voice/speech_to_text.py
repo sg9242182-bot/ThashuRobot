@@ -61,10 +61,11 @@ def _get_model():
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def transcribe(audio_48k: np.ndarray) -> str:
+def transcribe(audio_48k: np.ndarray, expected_phrases=None) -> str:
     """
     Transcribe int16 audio at 48 kHz. Returns the transcribed string,
-    or "" on error or too-short input.
+    or "" on error or too-short input. When expected_phrases is supplied,
+    it provides a short context prompt to Whisper; it does not hard-restrict output.
 
     Args:
         audio_48k: int16 numpy array at 48 kHz.
@@ -96,9 +97,20 @@ def transcribe(audio_48k: np.ndarray) -> str:
 
         # ── Transcribe ────────────────────────────────────────────────────────
         model = _get_model()
+        initial_prompt = None
+        if expected_phrases:
+            choices = [str(phrase).strip() for phrase in expected_phrases if str(phrase).strip()]
+            if choices:
+                initial_prompt = "The user is responding with one of these exact commands: " + "; ".join(choices) + "."
+                print("[STT] Confirmation context: " + ", ".join(choices))
         segments, info = model.transcribe(
             audio_16k,
             language="en",
+            beam_size=5,
+            best_of=1,
+            temperature=0.0,  # Disable stochastic fallback sampling for repeatable decoding.
+            condition_on_previous_text=False,
+            initial_prompt=initial_prompt,
             vad_filter=True,      # faster-whisper built-in VAD filter; reduces hallucination
             vad_parameters={
                 "min_silence_duration_ms": 300,

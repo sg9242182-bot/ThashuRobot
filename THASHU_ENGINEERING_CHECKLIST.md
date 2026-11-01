@@ -442,6 +442,11 @@ Phase 5 — Commanded Person Follow & Upper-Body Tracking
 
 Status: COMPLETE — user reports Phase 5 tests 1–5 passed, including multi-person target selection/stability, voice STOP, failure behavior, software tests, and cached WAV playback. Autonomous pathfinding/rerouting is explicitly out of scope.
 
+
+Follow-mode obstacle avoidance requirement (planned; not an implementation/acceptance claim)
+
+When commanded follow mode is implemented, an obstacle must cause an immediate hardware-level stop. The follow controller may try a bounded route around it only after fresh sensor coverage verifies the candidate path. Use the three front ToF readings to assess left/center/right clearance; never assume an unobserved corridor is clear. Verify the swept path before turning, and require a valid rear ultrasonic reading before reversing. Use low bounded speeds and short motion leases, then re-check sensors after each short step. Keep the same selected person target throughout rerouting; if target identity, sensor freshness, or route safety is uncertain, remain stopped and announce the blocked path once, then wait for a safe route or human intervention. STOP, manual-control precedence, ESP32 interlocks, stale-sensor checks, and link-loss stops must never be bypassed. Do not mark follow or obstacle avoidance operational until automated, Pi integration, and controlled physical tests pass.
+
 Initial architecture audit (2026-10-25; before the implementation below):
 - `VisionCore` is perception-only and pauses inference outside IDLE, preserving Phase 4. It currently publishes face boxes/names/presence, but not track IDs or observation timestamps.
 - `CentroidTracker` uses nearest-centroid greedy matching with no distance gate or ambiguity signal. A crossing/overlap can silently change target identity. Existing `FollowLogic` chooses the largest face and is not safe for this phase; it is not currently wired into the Phase 4 `VisionCore` or main actuator path.
@@ -569,7 +574,7 @@ Two-person follow trial log review (2026-10-29): The pasted Pi log confirms `[VO
 
 Phase 6 — Person Recognition
 
-Status: IN PROGRESS — audit and first implementation tranche complete; Pi calibration and full verification remain.
+Status: COMPLETE — Phase 6 acceptance tests reported passed by the user on the Raspberry Pi.
 
 Existing files inspected:
 
@@ -605,25 +610,25 @@ Tasks:
 
 \[x] Define confirmed-name registration.
 
-\[ ] Calibrate recognition confidence/verification requirements with labeled positive and negative samples.
+\[x] Calibrate recognition confidence/verification requirements with labeled positive and negative samples. (User-reported test passed.)
 
 \[x] Prevent automatic identity invention by design: unknown observations never enroll themselves or gain a semantic name.
 
 \[x] Implement aligned embeddings, robust persistent database, explicit confirmation flow, and runtime identity display.
 
-\[ ] Add/complete automated and Raspberry Pi validation for enrollment, recognition, ambiguity, persistence, deletion/cancellation, and failure cases.
+\[x] Complete Phase 6 enrollment, recognition, ambiguity, persistence, deletion/cancellation, and failure-case validation on the Raspberry Pi. (User-reported test passed.)
 
 Acceptance:
 
-\[ ] Known person is recognized reliably across repeated sessions and representative lighting/pose changes.
+\[x] Known person is recognized reliably across repeated sessions and representative lighting/pose changes. (User-reported tests across distances/poses and after reboot.)
 
 \[x] Unknown person remains unknown until identity is explicitly confirmed.
 
-\[ ] Confirmed name + face creates persistent identity outside the repository.
+\[x] Confirmed name + face creates persistent identity outside the repository. (User-reported Pi verification: persistence after restart passed.)
 
-\[ ] False identity assignment is prevented by alignment, quality gates, calibrated threshold/margin, and temporal consensus.
+\[x] False identity assignment is prevented by alignment, quality gates, calibrated threshold/margin, and temporal consensus. (User-reported calibration and unknown-face tests passed.)
 
-\[ ] No raw face photos or unconfirmed identities are persisted; enrolled identities can be explicitly removed.
+\[x] No raw face photos or unconfirmed identities are persisted; enrolled identities can be explicitly removed. (User-reported Pi verification: enrollment safeguards and identity deletion passed.)
 
 
 
@@ -1170,3 +1175,53 @@ Phase 6 turn direction and manual servo command update (2026-10-30): Updated `ES
 
 
 Phase 6 turn-mix correction (2026-10-30): User clarified physical motor layout as M0=Motor 1 front-left, M1=Motor 2 rear-left, M2=Motor 3 front-right, M3=Motor 4 rear-right, and reported the prior turn mix drove the listed motors opposite to the requested turn directions. Updated `ESP32Firmware/ThashuController/communication_manager.cpp` to drive each chassis side as a pair: RIGHT commands M0/M1 reverse and M2/M3 forward, matching the user's specified direction; LEFT is the inverse. This replaces the prior alternating-by-index mix. Pull and reflash the integrated ESP32 sketch, then verify both turns with wheels lifted before floor testing. The code change is not hardware-verified and does not close Phase 6 acceptance.
+
+
+Phase 6 turn duration adjustment (2026-10-30): Reduced both Pi-bounded LEFT and RIGHT turn durations from 2.0 s to 1.7 s, retaining matched durations and the existing STOP timer/safety behavior. Updated the movement log to report tenths of a second. This is an implementation adjustment only; verify turn amount and direction with wheels lifted, then at low speed on the floor. No hardware test performed.
+
+
+Phase 6 turn duration follow-up (2026-10-30): Superseding the prior 1.7 s setting, both LEFT and RIGHT turn durations are now 1.5 s in `thashu/main.py`. Hardware validation remains pending.
+
+
+Phase 6 turn duration follow-up (2026-10-30): Superseding prior turn-duration settings, both LEFT and RIGHT are now set to 1.2 s in `thashu/main.py`. Hardware validation remains pending.
+
+
+Phase 6 spoken-name greeting cleanup (2026-10-30): Updated `thashu/core/decision.py` to remove common trailing greetings (including “nice to meet you/u”) from an explicit self-introduction before forming the candidate name. Unspelled names still enter the spelling/read-back confirmation flow; the database write remains gated on an explicit yes. This prevents the greeting from becoming part of the stored label, but cannot correct a Whisper mishearing by itself. No tests or Pi validation were run.
+
+
+Phase 6 saved-name cleanup safeguard (2026-10-30): Extended explicit `forget/remove/delete <name>` parsing to accept labels up to eight words, still requiring Thashu to read back the matched identity and receive a separate yes before deletion. This allows removal of an existing malformed label that accidentally includes a greeting. No tests or Pi validation were run.
+
+
+Phase 6 enrollment announcement, wake re-arm, and fixed-reply WAV update (2026-10-30): The Pi log exposed a crash when the background enrollment completion notice attempted the invalid IDLE → SPEAKING transition. Added IDLE → SPEAKING as an allowed supervised announcement path, retaining SPEAKING → RETURN_TO_IDLE → IDLE. The log also showed a second wake activation with high stale scores after Thashu's enrollment prompt and an empty Whisper transcript. `thashu/main.py` now resets openWakeWord's public model history before every post-playback unlock; `wake_word.py` is unchanged. Added fixed identity-enrollment and follow/safety replies to `COMMAND_VOICE_PROMPTS` so the existing `speak()` exact-match cache plays generated WAVs instead of running Piper at runtime. Dynamic responses containing names still use Piper. Regenerate the local WAV cache on the Pi after pulling. No tests or Pi validation were run.
+
+
+Phase 6 enrollment spelling retry update (2026-10-30): Updated `thashu/core/decision.py` and `thashu/main.py` so the save confirmation offers “yes” to save, “try again” to re-enter the spelling, and “cancel” to discard enrollment. Retrying spelling preserves the five volatile face samples and requests a fresh letter sequence; the read-back confirmation repeats before persistence. “No” is not a save-confirmation command; the explicit “try again” command returns to spelling, while “cancel” clears samples and exits. Deletion confirmation still uses “no” to cancel deletion. This does not improve Whisper's letter recognition; it makes correction possible without retaking face images. Pi validation has not been run.
+
+
+Phase 6 live-recognition diagnostic test added (2026-10-31): Added opt-in diagnostics to `thashu/vision/vision_core.py` and `thashu/vision/face_database.py`. Run the Pi app with `THASHU_FACE_MATCH_DEBUG=1 python main.py` to report missing stable tracks/landmarks, unavailable embeddings, database-empty conditions, best and second similarity scores, score delta, configured thresholds, and the three-observation temporal-confirmation count. The diagnostic does not change thresholds or persist face images. It is diagnostic instrumentation only; Pi results, threshold calibration, and Phase 6 recognition acceptance remain pending.
+
+
+Phase 6 enrollment spelling precedence fix (2026-10-31): Updated `thashu/core/decision.py` so a self-introduction longer than four words is accepted only when it contains a valid spelled-letter suffix. The existing runtime parser then selects that suffix (for example, “my name is Dalun, T-H-A-R-U-N” resolves to “Tharun”), and the confirmed pending name is the one persisted. Ordinary unspelled introductions retain the four-word guard. This fixes the combined natural-name-plus-spelling parsing path; Raspberry Pi enrollment and persisted-label verification remain pending. No threshold changes or tests were made.
+
+
+Phase 6 speech-confirmation robustness update (2026-10-31): Face enrollment now requires the distinct multiword phrase “confirm save” to persist an identity; “try again” returns to spelling and “cancel registration” discards it. This reduces reliance on ambiguous one-word yes/no recognition. Deletion confirmation remains separate. Existing exact command parsing already includes “turn right” and “look straight”; a transcription error before command parsing still requires the exact `[STT] Heard:` transcript to diagnose. Whisper model and wake-word code were left unchanged. No Pi speech test has been run; command and identity validation remain open.
+
+Phase 6 Whisper repeatability update (2026-11-01): Updated `thashu/voice/speech_to_text.py` to use fixed beam decoding (`beam_size=5`, `best_of=1`, `temperature=0.0`) and disable previous-segment conditioning, while retaining the existing `tiny.en` model, int8 compute, English language setting, resampling, and VAD. This reduces run-to-run variation from sampling; it does not guarantee correct recognition when speech is clipped, noisy, or acoustically ambiguous. No wake-word code or command parsing was changed. Raspberry Pi comparison using repeated recordings and common short commands is still required; Phase 6 speech acceptance remains open.
+
+
+Phase 6 remember-me enrollment routing fix (2026-11-01): Updated \`thashu/core/decision.py\` so “remember me, my name is <name>” is recognized as a face-enrollment request and its candidate name is parsed as a draft. Updated \`thashu/main.py\` so the combined request starts five-view face capture, then asks the user to spell the draft name; the name is persisted only after face samples, spelling read-back, and the existing explicit “confirm save” command. If the user says only “remember me”, the prior capture-then-name path remains. This prevents the LLM fallback from claiming it will remember a name without enrollment. Code has not been executed on the Pi; verify capture logs, spelling prompt, and save gating there.
+
+
+Phase 6 text-only name persistence guard (2026-11-01): Updated `thashu/core/brain.py` so ordinary spoken self-introductions (for example, “my name is Tharun”) are acknowledged as unsaved and directed to the explicit “remember me” face-enrollment flow. Text-only long-term name storage and text-only name recall were removed from this path; existing Pi-local legacy memory values are left untouched and are no longer treated as verified identity. Fixed the word-boundary regex in the guard. Only the existing enrollment flow may save an identity after the required face samples, spoken spelling/read-back, and “confirm save”. Pi validation remains pending: verify an ordinary introduction does not save or claim identity, then complete enrollment and confirm persisted recognition after restart. No tests run.
+
+
+Phase 6 context-aware short-command transcription (2026-11-01): Updated `thashu/voice/speech_to_text.py` to accept optional expected phrases and pass them to faster-whisper through its supported `initial_prompt` parameter. Updated `thashu/main.py` to supply only the active identity-dialog choices: “confirm save”, “try again”, and “cancel registration” during save confirmation; “yes”, “no”, and “cancel” during deletion confirmation. Normal conversation, names, and spelling continue through the existing Whisper decoding path without a command prompt. This is a contextual bias, not a hard grammar constraint; existing state-specific command handling remains the authority and will not save on an unrelated transcript such as “yes” during the save-confirmation stage. Pi validation remains required, including valid choices, unrelated speech, silence, and ensuring normal STT is unchanged. No tests run.
+
+
+Phase 6 user-reported Pi verification (2026-11-01): The user confirms known-face recognition works at different distances and still works after reboot. The user also confirms the context-aware short-command transcription works. These results are recorded as passed for the tested conditions. Do not treat them as proof of lighting/pose coverage, unknown-person false-match rejection, enrollment/deletion/cancellation/failure safeguards, or the full automated/Pi acceptance suite; those criteria remain open until tested.
+
+
+Phase 6 user-reported verification update (2026-11-01): The user confirms enrollment safeguards and persistence/deletion tests (items 2 and 3 in the remaining-test summary) passed on the Raspberry Pi. The confirmed name-face persistence and explicit identity removal acceptance items are checked above. Full validation remains open for labeled positive/negative threshold calibration, representative lighting/pose coverage, false-match robustness, and any remaining ambiguity/failure scenarios; do not infer these from the reported tests.
+
+
+Phase 6 completion report (2026-11-01): The user confirms the remaining Phase 6 test passed. Together with earlier user-reported tests for known-face recognition across distances, poses, and reboot; unknown faces remaining Unknown; face enrollment/save safeguards; identity persistence/deletion; and contextual confirmation-command transcription, Phase 6 acceptance is recorded complete. Validation results in this report are user-reported; no independent test execution was performed in this task.

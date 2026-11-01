@@ -36,8 +36,8 @@ GRACE_PERIOD       = 4.0
 SAMPLE_RATE        = 48000
 BLOCK_SIZE         = 5460
 FORWARD_COMMAND_DURATION_SECONDS = 30.0
-LEFT_TURN_COMMAND_DURATION_SECONDS = 2.0
-RIGHT_TURN_COMMAND_DURATION_SECONDS = 2.0
+LEFT_TURN_COMMAND_DURATION_SECONDS = 1.2
+RIGHT_TURN_COMMAND_DURATION_SECONDS = 1.2
 
 # Phase 5 camera-range calibration from the user's moving trials (fixed 65° tilt):
 # shoulder-width median: 150 cm=109.8 px, 160 cm=103.4 px, 200 cm=95.7 px.
@@ -196,6 +196,19 @@ def safe_play(path: str):
     time.sleep(0.15)
 
 
+def _rearm_wake_after_audio():
+    """Clear openWakeWord's rolling audio history before re-arming after playback."""
+    model = getattr(wake, "model", None)
+    reset = getattr(model, "reset", None)
+    if callable(reset):
+        try:
+            reset()
+            print("[WAKE] Detection history reset after audio playback")
+        except Exception as exc:
+            print(f"[WAKE] Could not reset detection history: {exc}")
+    wake.unlock()
+
+
 def _announce_enrollment_status(message):
     """Speak an enrollment update through the normal supervised runtime states."""
     transition_runtime(RuntimeState.SPEAKING)
@@ -208,7 +221,7 @@ def _announce_enrollment_status(message):
         print(f"[VISION] Could not announce enrollment status: {exc}")
     finally:
         audio.resume()
-        wake.unlock()
+        _rearm_wake_after_audio()
         transition_runtime(RuntimeState.RETURN_TO_IDLE)
         transition_runtime(RuntimeState.IDLE)
 
@@ -416,7 +429,7 @@ def announce_safety_message(message):
         print(f"[SAFETY] Could not speak safety message: {exc}")
     finally:
         audio.resume()
-        wake.unlock()
+        _rearm_wake_after_audio()
         eyes.idle()
 
 
@@ -447,7 +460,7 @@ def announce_follow_notice(notice):
         print(f"[FOLLOW] Could not speak status: {exc}")
     finally:
         audio.resume()
-        wake.unlock()
+        _rearm_wake_after_audio()
         eyes.idle()
 
 
@@ -744,7 +757,7 @@ def main():
 
     time.sleep(0.2)
 
-    wake.unlock()
+    _rearm_wake_after_audio()
 
     print("[SYSTEM] ── Ready. Say 'Hey Thashu'")
 
@@ -760,16 +773,29 @@ def main():
         if runtime.current == RuntimeState.IDLE and _identity_enrollment_state == "capturing":
             capture = vision.enrollment_status()
             if capture.get("status") == "ready":
-                _identity_enrollment_state = "awaiting_name"
-                print(
-                    "[VISION] Required face images captured "
-                    f"({capture.get('sample_count', 0)}/{capture.get('required_samples', 5)}); "
-                    "waiting for the spoken name"
-                )
-                _announce_enrollment_status(
-                    "I have finished taking the face pictures. "
-                    "Tell me your name, and spell it with letters if the first name I hear is wrong."
-                )
+                if _identity_pending_name:
+                    _identity_enrollment_state = "spelling"
+                    print(
+                        "[VISION] Required face images captured "
+                        f"({capture.get('sample_count', 0)}/{capture.get('required_samples', 5)}); "
+                        f"waiting for spelling of draft name {_identity_pending_name}"
+                    )
+                    _announce_enrollment_status(
+                        f"I have finished taking your face pictures. "
+                        f"I heard your name as {_identity_pending_name}. "
+                        "Please spell it using ordinary letter names."
+                    )
+                else:
+                    _identity_enrollment_state = "awaiting_name"
+                    print(
+                        "[VISION] Required face images captured "
+                        f"({capture.get('sample_count', 0)}/{capture.get('required_samples', 5)}); "
+                        "waiting for the spoken name"
+                    )
+                    _announce_enrollment_status(
+                        "I have finished taking the face pictures. "
+                        "Tell me your name, then spell it using ordinary letter names."
+                    )
                 continue
             if capture.get("status") in ("ambiguous", "timed_out"):
                 _identity_enrollment_state = "idle"
@@ -835,7 +861,7 @@ def main():
 
                 safe_play(SOUND_YES)
 
-                wake.unlock()
+                _rearm_wake_after_audio()
                 transition_runtime(RuntimeState.LISTENING)
                 # ── Collect command ──────────────────────────────────────
                 
@@ -857,7 +883,7 @@ def main():
 
                     time.sleep(0.8)
 
-                    wake.unlock()
+                    _rearm_wake_after_audio()
 
                     transition_runtime(RuntimeState.RETURN_TO_IDLE)
                     transition_runtime(RuntimeState.IDLE)
@@ -875,7 +901,17 @@ def main():
 
                 stt_start = time.time()
 
-                text = transcribe(raw_audio)
+                expected_phrases = None
+                if _identity_enrollment_state == "confirm":
+                    expected_phrases = [
+                        "confirm save",
+                        "try again",
+                        "cancel registration",
+                    ]
+                elif _identity_enrollment_state == "delete_confirm":
+                    expected_phrases = ["yes", "no", "cancel"]
+
+                text = transcribe(raw_audio, expected_phrases=expected_phrases)
 
                 stt_time = time.time() - stt_start
                 print(f"[TIME] STT = {stt_time:.2f}s")
@@ -893,7 +929,7 @@ def main():
                     time.sleep(0.8)
 
                     audio.resume()
-                    wake.unlock()
+                    _rearm_wake_after_audio()
 
                     transition_runtime(RuntimeState.RETURN_TO_IDLE)
                     transition_runtime(RuntimeState.IDLE)
@@ -922,11 +958,20 @@ def main():
                     else:
                         vision.begin_enrollment(required_samples=5, timeout=45.0)
                         _identity_enrollment_state = "capturing"
-                        _identity_pending_name = None
-                        response = (
-                            "I am collecting five clear views of one face. "
-                            "Keep your face centered and still for a few seconds, then tell me your name."
-                        )
+                        # A name in this utterance is only a draft; enrollment
+                        # still requires captured face samples, spelling, and save.
+                        _identity_pending_name = registration_name
+                        if registration_name:
+                            response = (
+                                f"I heard your name as {registration_name}. "
+                                "I am collecting five clear face views first. "
+                                "After that, I will ask you to spell the name."
+                            )
+                        else:
+                            response = (
+                                "I am collecting five clear views of one face. "
+                                "Keep your face centered and still for a few seconds."
+                            )
                 elif removal_name:
                     matched_name = vision.database.resolve_name(removal_name)
                     if matched_name is None:
@@ -945,6 +990,8 @@ def main():
                                 f"Do you want me to delete {matched_name}? Say yes to confirm or no to cancel."
                             )
                 elif _identity_enrollment_state in ("capturing", "awaiting_name") and registration_name:
+                    if _identity_enrollment_state == "capturing" and _identity_pending_name is None:
+                        _identity_pending_name = registration_name
                     status = vision.enrollment_status()
                     samples = vision.enrollment_samples()
                     if status.get("status") == "ready" and samples:
@@ -954,7 +1001,7 @@ def main():
                             spelled_letters = " ".join(registration_name.upper())
                             response = (
                                 f"I heard {spelled_letters}, which is {registration_name}. "
-                                f"Should I save this face as {registration_name}? Say yes to confirm or no to cancel."
+                                f"Should I save this face as {registration_name}? Say confirm save, try again to spell it again, or cancel registration."
                             )
                         else:
                             _identity_enrollment_state = "spelling"
@@ -981,7 +1028,7 @@ def main():
                         spelled_letters = " ".join(spelled_name.upper())
                         response = (
                             f"I heard {spelled_letters}, which is {spelled_name}. "
-                            f"Should I save this face as {spelled_name}? Say yes to confirm or no to cancel."
+                            f"Should I save this face as {spelled_name}? Say confirm save, try again to spell it again, or cancel registration."
                         )
                     else:
                         response = (
@@ -998,7 +1045,7 @@ def main():
                         response = "I could not safely delete that face identity."
                     _identity_enrollment_state = "idle"
                     _identity_pending_name = None
-                elif _identity_enrollment_state == "confirm" and identity_command == "CONFIRM":
+                elif _identity_enrollment_state == "confirm" and identity_command == "CONFIRM_SAVE":
                     samples = vision.enrollment_samples()
                     try:
                         if not samples:
@@ -1014,16 +1061,20 @@ def main():
                     vision.clear_enrollment()
                     _identity_enrollment_state = "idle"
                     _identity_pending_name = None
-                elif _identity_enrollment_state in ("confirm", "delete_confirm") and identity_command == "REJECT":
-                    was_deleting = _identity_enrollment_state == "delete_confirm"
+                elif _identity_enrollment_state == "confirm" and identity_command == "TRY_AGAIN":
+                    # Keep the captured face samples; only ask for the name spelling again.
+                    _identity_enrollment_state = "spelling"
+                    _identity_pending_name = None
+                    response = "Okay. Please spell the name again using ordinary letter names, like T H A R U N."
+                elif _identity_enrollment_state == "delete_confirm" and identity_command == "REJECT":
                     vision.clear_enrollment()
                     _identity_enrollment_state = "idle"
                     _identity_pending_name = None
-                    response = "I cancelled deleting the face identity." if was_deleting else "I did not save the face identity."
+                    response = "I cancelled deleting the face identity."
                 elif _identity_enrollment_state == "spelling":
                     response = "Please spell the name using ordinary letter names, like T H A R U N, or say cancel."
                 elif _identity_enrollment_state == "confirm":
-                    response = "Please say yes to confirm saving the name for this face, or no to cancel."
+                    response = "Please say confirm save, try again to spell the name again, or cancel registration."
                 elif _identity_enrollment_state == "delete_confirm":
                     response = "Please say yes to confirm deleting this saved face identity, or no to cancel."
                 elif _identity_enrollment_state == "capturing":
@@ -1127,7 +1178,7 @@ def main():
                         duration = FORWARD_COMMAND_DURATION_SECONDS
                     print(
                         f"[COMMAND] Explicit {direction_name.upper()} recognized "
-                        f"(PWM 200); auto-stop in {duration:.0f}s"
+                        f"(PWM 200); auto-stop in {duration:.1f}s"
                     )
                     move_sequence = start_bounded_motion(direction, 200)
                     if move_sequence is None:
@@ -1181,7 +1232,7 @@ def main():
 
                 time.sleep(0.2)
 
-                wake.unlock()
+                _rearm_wake_after_audio()
                 total_time = time.time() - interaction_start
 
                 print("=" * 40)

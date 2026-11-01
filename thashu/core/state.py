@@ -19,7 +19,7 @@ class RuntimeStateMachine:
     """Owns Thashu's approved runtime states and valid transitions."""
 
     _TRANSITIONS = {
-        RuntimeState.IDLE: {RuntimeState.WAKE_DETECTED},
+        RuntimeState.IDLE: {RuntimeState.WAKE_DETECTED, RuntimeState.SPEAKING},
         RuntimeState.WAKE_DETECTED: {RuntimeState.LISTENING},
         RuntimeState.LISTENING: {
             RuntimeState.THINKING,

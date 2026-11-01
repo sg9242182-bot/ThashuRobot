@@ -155,6 +155,14 @@ _RECOGNITION_CANCEL_PHRASES = {
     "cancel",
 }
 _RECOGNITION_YES_PHRASES = {"yes", "yes confirm", "confirm", "save it"}
+_RECOGNITION_SAVE_PHRASES = {"confirm save", "confirm saving", "save this face"}
+_RECOGNITION_TRY_AGAIN_PHRASES = {
+    "try again",
+    "spell again",
+    "try spelling again",
+    "correct the spelling",
+    "change the spelling",
+}
 _RECOGNITION_NO_PHRASES = {"no", "no cancel", "do not save"}
 
 
@@ -163,14 +171,24 @@ def _normalize_phrase(user_input):
 
 
 def get_recognition_command(user_input):
-    """Return only exact, deterministic person-enrollment control phrases."""
+    """Return deterministic person-enrollment commands, including a name-led request."""
     normalized = _normalize_phrase(user_input)
-    if normalized in _RECOGNITION_ENROLL_PHRASES:
+    if (
+        normalized in _RECOGNITION_ENROLL_PHRASES
+        or (
+            normalized.startswith("remember me my name is ")
+            and get_registration_name(user_input) is not None
+        )
+    ):
         return "ENROLL"
     if normalized in _RECOGNITION_CANCEL_PHRASES:
         return "CANCEL"
+    if normalized in _RECOGNITION_SAVE_PHRASES:
+        return "CONFIRM_SAVE"
     if normalized in _RECOGNITION_YES_PHRASES:
         return "CONFIRM"
+    if normalized in _RECOGNITION_TRY_AGAIN_PHRASES:
+        return "TRY_AGAIN"
     if normalized in _RECOGNITION_NO_PHRASES:
         return "REJECT"
     return None
@@ -263,20 +281,46 @@ def get_remove_identity_name(user_input):
     spelled_name = get_spelled_registration_name(name)
     if spelled_name:
         return spelled_name
-    if len(name.split()) > 4:
+    if len(name.split()) > 8:
         return None
     return name.title()
 
 
 def get_registration_name(user_input):
-    """Extract a short user-provided name only from explicit self-identification."""
+    """Extract a candidate name from self-identification, excluding trailing greetings."""
     normalized = _normalize_phrase(user_input)
+    # Allow a name in the same utterance as the enrollment request. The name
+    # remains a draft until face capture, spoken spelling, and explicit save.
+    normalized = re.sub(r"^remember me\s+", "", normalized)
     match = re.fullmatch(r"(?:my name is|i am|i'm|call me) ([a-z][a-z .'-]{0,62})", normalized)
     if not match:
         return None
-    name = " ".join(match.group(1).split()).strip(" .'-")
-    if not name or len(name.split()) > 4:
+
+    name = match.group(1)
+    # Whisper often keeps the greeting in the same transcript as the name.
+    # Strip common closings before treating the remaining words as the candidate.
+    name = re.split(
+        r"\s+(?:nice to meet (?:you|u)|pleased to meet (?:you|u)|"
+        r"great to meet (?:you|u)|good to meet (?:you|u)|nice meeting (?:you|u))\b",
+        name,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+    name = " ".join(name.split()).strip(" .'-")
+    if not name:
         return None
+
+    words = name.split()
+    if len(words) > 4:
+        # Allow a natural-name guess followed by its letter-by-letter correction
+        # in one utterance, e.g. "my name is Dalun, T-H-A-R-U-N". The caller
+        # extracts the spelled suffix and must use it as the canonical name.
+        has_spelled_suffix = any(
+            get_spelled_registration_name(" ".join(words[start:]))
+            for start in range(1, len(words))
+        )
+        if not has_spelled_suffix:
+            return None
     return name.title()
 
 

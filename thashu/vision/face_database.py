@@ -201,13 +201,17 @@ class FaceDatabase:
             raise
         return True
 
-    def match(self, embedding, threshold=None, margin=None):
+    def match(self, embedding, threshold=None, margin=None, *, diagnostics=False):
         """Return (name, score) only when best score and separation both pass."""
         if not self.data:
+            if diagnostics:
+                print("[FACE MATCH TEST] rejected: identity database is empty")
             return None, -1.0
         try:
             query = self._normalize(embedding)
         except (TypeError, ValueError):
+            if diagnostics:
+                print("[FACE MATCH TEST] rejected: query embedding is invalid")
             return None, -1.0
 
         best_by_person = []
@@ -219,6 +223,8 @@ class FaceDatabase:
             if scores:
                 best_by_person.append((max(scores), name))
         if not best_by_person:
+            if diagnostics:
+                print("[FACE MATCH TEST] rejected: database has no usable embeddings")
             return None, -1.0
 
         best_by_person.sort(reverse=True)
@@ -226,6 +232,18 @@ class FaceDatabase:
         second_score = best_by_person[1][0] if len(best_by_person) > 1 else -1.0
         required_score = self.threshold if threshold is None else float(threshold)
         required_margin = self.margin if margin is None else float(margin)
-        if best_score >= required_score and best_score - second_score >= required_margin:
+        score_pass = best_score >= required_score
+        margin_score = best_score - second_score
+        margin_pass = margin_score >= required_margin
+        if diagnostics:
+            verdict = "candidate" if score_pass and margin_pass else "rejected"
+            print(
+                f"[FACE MATCH TEST] {verdict}: best={best_score:.3f} ({best_name}), "
+                f"second={second_score:.3f}, delta={margin_score:.3f}, "
+                f"required_score={required_score:.3f}, "
+                f"required_margin={required_margin:.3f}, "
+                f"identities={len(best_by_person)}"
+            )
+        if score_pass and margin_pass:
             return best_name, best_score
         return None, best_score

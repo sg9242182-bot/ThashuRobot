@@ -1,3 +1,4 @@
+import os
 import threading
 import time
 
@@ -350,6 +351,12 @@ class VisionCore:
     def _loop(self):
         recog_interval = 2.0
         enrollment_recog_interval = 0.4
+        debug_match = os.environ.get("THASHU_FACE_MATCH_DEBUG", "").strip() == "1"
+        if debug_match:
+            print(
+                "[FACE MATCH TEST] enabled; thresholds are diagnostic only "
+                "(no threshold changes)"
+            )
         last_recog = 0.0
 
         while self._running:
@@ -472,6 +479,8 @@ class VisionCore:
                     if track_id is None and len(tracked) == 1:
                         track_id = next(iter(tracked))
                     if track_id is None:
+                        if debug_match:
+                            print("[FACE MATCH TEST] skipped: face has no stable track ID")
                         continue
 
                     # Match the stabilized box to the closest current YuNet
@@ -490,6 +499,11 @@ class VisionCore:
                         if overlap > best_overlap:
                             best_overlap, landmark_item = overlap, item
                     if landmark_item is None or best_overlap < 0.30:
+                        if debug_match:
+                            print(
+                                "[FACE MATCH TEST] skipped: stabilized face has no "
+                                f"matching YuNet landmarks (overlap={best_overlap:.3f})"
+                            )
                         continue
 
                     ax1, ay1, ax2, ay2 = landmark_item["bbox"]
@@ -502,10 +516,19 @@ class VisionCore:
                     if not self._processing_enabled.is_set():
                         break
 
-                    recognized, _score = (
-                        self.database.match(embedding) if embedding is not None
-                        else (None, -1.0)
-                    )
+                    if embedding is None:
+                        recognized, _score = None, -1.0
+                        if debug_match:
+                            print(
+                                "[FACE MATCH TEST] rejected before database match: "
+                                "quality, landmarks, alignment, or embedding inference failed"
+                            )
+                    elif debug_match:
+                        recognized, _score = self.database.match(
+                            embedding, diagnostics=True
+                        )
+                    else:
+                        recognized, _score = self.database.match(embedding)
                     with self._lock:
                         enrollment = getattr(self, "_enrollment", None)
                         if enrollment and enrollment["status"] == "collecting":
@@ -543,6 +566,11 @@ class VisionCore:
                             recognized if recognized is not None and votes >= 3
                             else "Unknown"
                         )
+                        if debug_match and recognized is not None and votes < 3:
+                            print(
+                                "[FACE MATCH TEST] similarity gates passed; "
+                                f"temporal confirmation {votes}/3 for {recognized}"
+                            )
                         old_published_name = self.current_names.get(track_id, "Unknown")
                         self.current_names[track_id] = published_name
                         if published_name != old_published_name and published_name != "Unknown":
