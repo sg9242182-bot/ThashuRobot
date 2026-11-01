@@ -99,6 +99,10 @@ def transcribe(audio_48k: np.ndarray) -> str:
         segments, info = model.transcribe(
             audio_16k,
             language="en",
+            beam_size=5,
+            best_of=1,
+            temperature=0.0,  # Disable stochastic fallback sampling for repeatable decoding.
+            condition_on_previous_text=False,
             vad_filter=True,      # faster-whisper built-in VAD filter; reduces hallucination
             vad_parameters={
                 "min_silence_duration_ms": 300,
