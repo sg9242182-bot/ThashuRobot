@@ -21,7 +21,7 @@ from vision.follow_logic   import FollowLogic
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
 from hardware.servo_tracking import ServoTracker
-from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, is_recognition_query, get_person_memory_request, is_person_memory_query, get_person_memory_delete_command
+from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, is_recognition_query, get_person_memory_request, get_person_memory_save_confirmation, is_person_memory_query, get_person_memory_delete_command
 from core.model_paths import model_path, project_path
 from memory.people import PeopleMemory
 
@@ -53,6 +53,7 @@ FOLLOW_PULSE_SECONDS = 0.25
 FOLLOW_PULSE_INTERVAL_SECONDS = 0.75
 FOLLOW_SENSOR_MAX_AGE_SECONDS = 0.75
 FOLLOW_OBSTACLE_CLEARANCE_MM = 300
+PENDING_MEMORY_CONFIRM_SECONDS = 120.0
 
 # ── Shutdown Button ───────────────────────────────────────────────────────────
 BUTTON_PIN = 17
@@ -90,6 +91,7 @@ _follow_safety_notice_latched = False
 _identity_enrollment_state = "idle"
 _identity_pending_name = None
 _memory_delete_pending = None
+_memory_pending = None
 _last_idle_recognized_person = None
 _last_idle_recognized_at = 0.0
 _motion_timer = None
@@ -742,7 +744,7 @@ def process_safety_events():
 # ── Main loop ──────────────────────────────────────────────────────────────────
 def main():
     global _identity_enrollment_state, _identity_pending_name
-    global _memory_delete_pending
+    global _memory_delete_pending, _memory_pending
     global _last_idle_recognized_person, _last_idle_recognized_at
     print("[SYSTEM] Jarvis started")
 
@@ -924,6 +926,8 @@ def main():
                     ]
                 elif _identity_enrollment_state == "delete_confirm":
                     expected_phrases = ["yes", "no", "cancel"]
+                elif _memory_pending is not None:
+                    expected_phrases = ["confirm memory", "cancel memory"]
                 elif _memory_delete_pending is not None:
                     expected_phrases = ["confirm delete memories", "cancel memory deletion"]
 
@@ -961,6 +965,7 @@ def main():
 
                 identity_command = get_recognition_command(text)
                 memory_delete_command = get_person_memory_delete_command(text)
+                memory_save_confirmation = get_person_memory_save_confirmation(text)
                 registration_name, registration_was_spelled = _registration_details(text)
                 removal_name = get_remove_identity_name(text)
                 if identity_command == "CANCEL" and _identity_enrollment_state != "idle":
@@ -1108,6 +1113,46 @@ def main():
                             f"I am still collecting clear views, {count} of {required}. "
                             "Stay still and say your name again in a few seconds."
                         )
+                elif _memory_pending is not None:
+                    pending = _memory_pending
+                    confirmed_person = _recently_recognized_person()
+                    if time.monotonic() > pending["expires_at"]:
+                        _memory_pending = None
+                        response = "That memory confirmation expired, so I didn't save anything."
+                    elif memory_save_confirmation == "CANCEL":
+                        _memory_pending = None
+                        response = "I cancelled that memory. Nothing was saved."
+                    elif memory_save_confirmation == "CONFIRM" and confirmed_person == pending["person"]:
+                        try:
+                            saved = person_memory.remember(
+                                pending["person"],
+                                pending["kind"],
+                                pending["text"],
+                                confirmed_identity=True,
+                            )
+                            _memory_pending = None
+                            if saved:
+                                print(
+                                    f"[MEMORY] Explicit {pending['kind']} confirmed and saved "
+                                    f"for {pending['person']}"
+                                )
+                                response = f"I saved that {pending['kind']} for {pending['person']}."
+                            else:
+                                response = "I already have that saved."
+                        except (OSError, TypeError, ValueError, PermissionError) as exc:
+                            _memory_pending = None
+                            print(f"[MEMORY] Save rejected: {exc}")
+                            response = "I couldn't safely save that memory."
+                    elif memory_save_confirmation == "CONFIRM":
+                        _memory_pending = None
+                        response = (
+                            "I couldn't confirm the same recognized person, so I didn't save it."
+                        )
+                    else:
+                        response = (
+                            "I haven't saved it yet. Say confirm memory to save the read-back, "
+                            "or cancel memory to discard it."
+                        )
                 elif _memory_delete_pending is not None:
                     pending_person = _memory_delete_pending
                     confirmed_person = _recently_recognized_person()
@@ -1169,26 +1214,20 @@ def main():
                         )
                     else:
                         kind, memory_text = memory_request
-                        try:
-                            saved = person_memory.remember(
-                                confirmed_person,
-                                kind,
-                                memory_text,
-                                confirmed_identity=True,
-                            )
-                            if saved:
-                                print(
-                                    f"[MEMORY] Explicit {kind} saved for "
-                                    f"confirmed person {confirmed_person}"
-                                )
-                                response = (
-                                    f"I saved that {kind} for {confirmed_person}."
-                                )
-                            else:
-                                response = "I already have that saved."
-                        except (OSError, TypeError, ValueError, PermissionError) as exc:
-                            print(f"[MEMORY] Save rejected: {exc}")
-                            response = "I couldn't safely save that memory."
+                        _memory_pending = {
+                            "person": confirmed_person,
+                            "kind": kind,
+                            "text": memory_text,
+                            "expires_at": time.monotonic() + PENDING_MEMORY_CONFIRM_SECONDS,
+                        }
+                        response = (
+                            f"I heard this {kind}: {memory_text}. "
+                            "Say confirm memory to save it, or cancel memory to discard it."
+                        )
+                        print(
+                            f"[MEMORY] Pending explicit {kind} for {confirmed_person}; "
+                            "waiting for read-back confirmation"
+                        )
                 elif is_person_memory_query(text):
                     confirmed_person = _recently_recognized_person()
                     if confirmed_person is None:
