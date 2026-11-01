@@ -7,9 +7,13 @@ from fastapi.security import HTTPAuthorizationCredentials
 
 
 class FakeTransport:
-    def __init__(self, connected=True, messages=()):
+    def __init__(self, connected=True, messages=(), ack_result="OK"):
         self.connected = connected
         self.messages = list(messages)
+        self.ack_result = ack_result
+
+    def wait_for_ack(self, _sequence, _timeout=0.75):
+        return self.ack_result
 
     def is_connected(self):
         return self.connected
@@ -98,6 +102,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_move_dispatches_through_motor_service(self):
         response = await self.endpoint("/api/v1/robot/move")(main.MoveRequest(direction="forward", speed=120))
+        self.assertTrue(response.command_id)
         self.assertEqual(response.command, "forward")
         self.assertEqual(response.status, "dispatched")
         self.assertEqual(response.control_mode, "MANUAL")
@@ -113,6 +118,44 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         manager = await main.services.robot_manager()
         motor = manager.motor
         self.assertEqual(motor.commands, [("stop", None)])
+
+    async def test_acknowledged_command_result_can_be_looked_up(self):
+        services = main.services
+        services.register_command("command-1", "forward", "MANUAL")
+        await services.track_command_ack("command-1", 1)
+
+        lookup = self.endpoint("/api/v1/robot/commands/{command_id}")
+        result = await lookup("command-1")
+        self.assertEqual(result["command_id"], "command-1")
+        self.assertEqual(result["command"], "forward")
+        self.assertEqual(result["status"], "acknowledged")
+        self.assertIsNone(result["error_code"])
+        self.assertTrue(result["timestamp"])
+
+    async def test_safety_ack_is_published_as_command_result_event(self):
+        manager = await main.services.robot_manager()
+        manager.motor.gpio.ack_result = "ERROR|OBSTACLE"
+        subscriber = main.services.subscribe_command_results()
+        try:
+            main.services.register_command("command-2", "forward", "MANUAL")
+            await main.services.track_command_ack("command-2", 2)
+            event = subscriber.get_nowait()
+            self.assertEqual(event["type"], "command_result")
+            self.assertEqual(event["command_id"], "command-2")
+            self.assertEqual(event["status"], "safety_error")
+            self.assertEqual(event["error_code"], "OBSTACLE")
+            self.assertTrue(event["timestamp"])
+        finally:
+            main.services.unsubscribe_command_results(subscriber)
+
+    async def test_missing_ack_becomes_timeout(self):
+        manager = await main.services.robot_manager()
+        manager.motor.gpio.ack_result = None
+        main.services.register_command("command-3", "stop", "AUTO")
+        await main.services.track_command_ack("command-3", 3)
+        result = main.services.command_result("command-3")
+        self.assertEqual(result["status"], "timed_out")
+        self.assertEqual(result["error_code"], "ACK_TIMEOUT")
 
     def test_move_request_rejects_unknown_direction_and_out_of_range_speed(self):
         with self.assertRaises(Exception):
