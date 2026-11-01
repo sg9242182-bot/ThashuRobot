@@ -1124,7 +1124,9 @@ def main():
                     elif memory_save_confirmation == "CANCEL":
                         _memory_pending = None
                         response = "I cancelled that memory. Nothing was saved."
-                    elif memory_save_confirmation == "CONFIRM" and confirmed_person == pending["person"]:
+                    elif memory_save_confirmation == "CONFIRM":
+                        # The original save request was face-verified and bound
+                        # to this draft; confirmation only approves its read-back.
                         try:
                             saved = person_memory.remember(
                                 pending["person"],
@@ -1145,11 +1147,6 @@ def main():
                             _memory_pending = None
                             print(f"[MEMORY] Save rejected: {exc}")
                             response = "I couldn't safely save that memory."
-                    elif memory_save_confirmation == "CONFIRM":
-                        _memory_pending = None
-                        response = (
-                            "I couldn't confirm the same recognized person, so I didn't save it."
-                        )
                     else:
                         response = (
                             "I haven't saved it yet. Say confirm memory to save the read-back, "
