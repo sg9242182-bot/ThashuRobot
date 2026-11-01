@@ -102,7 +102,7 @@ def transcribe(audio_48k: np.ndarray, expected_phrases=None) -> str:
             choices = [str(phrase).strip() for phrase in expected_phrases if str(phrase).strip()]
             if choices:
                 initial_prompt = "The user is responding with one of these exact commands: " + "; ".join(choices) + "."
-                print("[STT] Confirmation context: " + ", ".join(choices))
+                print("[STT] Expected phrase context: " + ", ".join(choices))
         segments, info = model.transcribe(
             audio_16k,
             language="en",
