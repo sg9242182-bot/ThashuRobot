@@ -681,7 +681,7 @@ Tasks:
 
 Acceptance:
 
-\[ ] Temporary conversation expires appropriately.
+\[x] Temporary conversation expires appropriately (Pi quick test: 3-second expiry cleared the entry; six insertions retained only the newest five).
 
 \[ ] Important person facts persist.
 
@@ -700,6 +700,9 @@ Audit findings (2026-11-01):
 - `memory/short_term.py` now retains at most five recent conversation pairs and expires each pair after ten minutes, using a monotonic clock. Expiry is checked on both insertion and context retrieval. The behavior is implemented but has not yet been tested on the Raspberry Pi.
 - Permanent person/episodic memory contract is still pending. No persistent interaction history is written by `Brain`; Phase 7 acceptance remains open.
 
+
+
+User-reported Pi short-term memory checks (2026-11-01): A `ShortTermMemory(expiration_seconds=3)` entry appeared immediately and returned an empty context after a four-second wait. The default-size buffer retained exactly five of six entries, from Question 1 through Question 5. These validate expiry and count bounds; permanent-memory behavior and other Phase 7 acceptance remain open.
 \---
 
 Phase 8 — Place / Environment Memory
