@@ -60,18 +60,23 @@ that the robot completed the movement. Invalid directions or speeds receive
 HTTP 422. If the Pi cannot write the command, the endpoint returns HTTP 503
 with an error code and request ID. Requests are not queued for later delivery.
 
-The Pi manager starts in `AUTO`. A successfully dispatched move changes the
-tracked mode to `MANUAL`; a successfully dispatched stop changes it back to
-`AUTO`. The status response includes `control_mode`. The current vision code
-does not drive the motors automatically, so `AUTO` is a tracked control mode
-until an automatic motor controller is integrated. ESP32 hardware safety still
-has final authority to stop or reject unsafe motion.
+The current implementation starts the manager in `AUTO`, changes the
+tracked mode to `MANUAL` on a dispatched move, and changes it to `AUTO` on a
+dispatched stop. This is current code behavior, not the confirmed STOP contract.
+Tharun's contract says STOP must latch motion as stopped and must not switch an
+active Manual session into active Auto; an already-selected Auto mode stays
+selected but paused until an explicit resume/Auto action and fresh safety
+checks. The API does not yet represent a paused state or expose that resume
+action. Do not interpret the current `AUTO` response as active autonomous
+movement.
 
-The initial robot manager serializes manual API commands. Manual/automatic mode
-arbitration is still open and must be defined before adding mode switching or
-autonomous motor commands. The telemetry stream consumes the raw inbound queue exposed by `GPIOControl`;
-it is a single-consumer feed and should not run alongside another reader of
-that queue.
+The manager serializes API motor commands, but Tharun's confirmed STOP,
+sensor-precheck, and acknowledgement behavior is not fully implemented in the
+current Pi backend. See
+`docs/development/VISHAL_BACKEND_CONTRACT_GAPS.md` before changing command or
+mode behavior. The telemetry stream consumes the raw inbound queue exposed by
+`GPIOControl`; it is a single-consumer feed and should not run alongside
+another reader of that queue.
 
 Movement, stop, and WebSocket telemetry require an HTTP Bearer token configured
 in `THASHU_API_TOKEN`. Health and status remain unauthenticated. If the token is
