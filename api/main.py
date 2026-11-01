@@ -1,10 +1,13 @@
 """FastAPI entry point for robot status, commands, and ESP32 telemetry."""
 
 import asyncio
+import json
+import logging
 import os
 import secrets
 import sys
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Literal
 
@@ -98,6 +101,35 @@ services = ApiServices()
 bearer_scheme = HTTPBearer(auto_error=False)
 
 # Document common command failures in Swagger without changing runtime behavior.
+logger = logging.getLogger("thashu.api")
+
+
+def _log_command_outcome(
+    *,
+    request_id: str,
+    command: str,
+    outcome: str,
+    http_status: int,
+    error_code: str | None = None,
+    control_mode: str | None = None,
+):
+    """Write one sanitized JSON log record for a move or stop request."""
+    record = {
+        "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+        "component": "pi_api",
+        "event": "robot_command",
+        "request_id": request_id,
+        "command": command,
+        "outcome": outcome,
+        "http_status": http_status,
+    }
+    if error_code is not None:
+        record["error_code"] = error_code
+    if control_mode is not None:
+        record["control_mode"] = control_mode
+    logger.info("%s", json.dumps(record, separators=(",", ":"), sort_keys=True))
+
+
 ROBOT_COMMAND_ERROR_RESPONSES = {
     401: {
         "description": "The Bearer token is missing or incorrect.",
@@ -194,12 +226,40 @@ async def move(request: MoveRequest):
     try:
         sequence = await services.dispatch(request.direction, request.speed)
     except ValueError as exc:
+        _log_command_outcome(
+            request_id=request_id,
+            command=request.direction,
+            outcome="rejected",
+            http_status=422,
+            error_code="invalid_command",
+        )
         raise HTTPException(status_code=422, detail={"error": "invalid_command", "request_id": request_id}) from exc
     except Exception as exc:
+        _log_command_outcome(
+            request_id=request_id,
+            command=request.direction,
+            outcome="failed",
+            http_status=503,
+            error_code="robot_unavailable",
+        )
         raise HTTPException(status_code=503, detail={"error": "robot_unavailable", "request_id": request_id}) from exc
     if sequence is None:
+        _log_command_outcome(
+            request_id=request_id,
+            command=request.direction,
+            outcome="failed",
+            http_status=503,
+            error_code="robot_unavailable",
+        )
         raise HTTPException(status_code=503, detail={"error": "robot_unavailable", "request_id": request_id})
     manager = await services.robot_manager()
+    _log_command_outcome(
+        request_id=request_id,
+        command=request.direction,
+        outcome="dispatched",
+        http_status=200,
+        control_mode=manager.mode.value,
+    )
     return CommandResponse(
         request_id=request_id,
         command=request.direction,
@@ -221,10 +281,31 @@ async def stop():
     try:
         sequence = await services.dispatch("stop")
     except Exception as exc:
+        _log_command_outcome(
+            request_id=request_id,
+            command="stop",
+            outcome="failed",
+            http_status=503,
+            error_code="robot_unavailable",
+        )
         raise HTTPException(status_code=503, detail={"error": "robot_unavailable", "request_id": request_id}) from exc
     if sequence is None:
+        _log_command_outcome(
+            request_id=request_id,
+            command="stop",
+            outcome="failed",
+            http_status=503,
+            error_code="robot_unavailable",
+        )
         raise HTTPException(status_code=503, detail={"error": "robot_unavailable", "request_id": request_id})
     manager = await services.robot_manager()
+    _log_command_outcome(
+        request_id=request_id,
+        command="stop",
+        outcome="dispatched",
+        http_status=200,
+        control_mode=manager.mode.value,
+    )
     return CommandResponse(
         request_id=request_id,
         command="stop",
