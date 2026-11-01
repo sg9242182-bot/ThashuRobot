@@ -644,7 +644,7 @@ Implementation snapshot (2026-10-29; on phase-6):
 
 Phase 7 — Person \& Conversation Memory
 
-Status: IN PROGRESS — existing memory-file and runtime call-site audits recorded; memory contract and expiration behavior are next.
+Status: IN PROGRESS — runtime call sites are traced and short-term context now expires; permanent person/episodic memory contract is next.
 
 Existing files:
 
@@ -659,6 +659,7 @@ Existing files:
 \[x] `data/people.py` (empty placeholder inspected)
 
 \[x] Trace runtime memory read/write call sites and confirm whether person-memory utilities are connected.
+\[x] Add inactivity expiry to short-term conversation context (10 minutes; implementation recorded below).
 
 \[x] Related core/personality modules inspected: core/brain.py, core/decision.py, core/intent.py, core/quick_responses.py, core/response_manager.py, personality/personality_engine.py
 
@@ -696,7 +697,8 @@ Audit findings (2026-11-01):
 - memory/storage.py writes to a working-directory-relative data/memory_db/long_term.json; malformed/unreadable JSON silently loads as an empty dictionary, and writes are not atomic.
 - Runtime call-site trace: `Brain` adds and reads only `ShortTermMemory` for conversation context. It constructs `LongTermMemory` but does not call its read/write API. `PeopleMemory` has no runtime caller in the application entry point or vision pipeline; its `people_seen` data is not currently populated by normal app flow. The face database remains separate and is used only by the confirmed identity/recognition path.
 - data/people.py is empty. The face database is routed to machine-local storage through data_path("people_faces.json"); Phase 7 must preserve that confirmed-identity boundary.
-- No memory behavior has been changed. Phase 7 acceptance remains open.
+- `memory/short_term.py` now retains at most five recent conversation pairs and expires each pair after ten minutes, using a monotonic clock. Expiry is checked on both insertion and context retrieval. The behavior is implemented but has not yet been tested on the Raspberry Pi.
+- Permanent person/episodic memory contract is still pending. No persistent interaction history is written by `Brain`; Phase 7 acceptance remains open.
 
 \---
 
