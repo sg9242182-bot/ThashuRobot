@@ -12,7 +12,7 @@ class FaceDatabase:
     """Stores only confirmed names and normalized embeddings, never face photos."""
 
     VERSION = 1
-    MAX_EMBEDDINGS_PER_PERSON = 8
+    MAX_EMBEDDINGS_PER_PERSON = 12
     # Conservative initial gates; the Pi validation must tune/confirm them with
     # labeled same-person and different-person samples before Phase 6 completes.
     # Fail closed after a Pi-reported false positive (father matched as owner).
@@ -175,9 +175,6 @@ class FaceDatabase:
         vectors = [self._normalize(item) for item in embeddings]
         if len(vectors) < 5:
             raise ValueError("At least five quality-approved observations are required")
-        if name in self.data:
-            raise ValueError("That confirmed name already exists; refusing to merge identities")
-
         matrix = np.stack(vectors)
         similarities = matrix @ matrix.T
         pair_scores = similarities[np.triu_indices(len(vectors), k=1)]
@@ -207,11 +204,20 @@ class FaceDatabase:
                 f"embeddings ({summary}); retaining both; uncertain matches will be Unknown"
             )
 
-        self.data[name] = [vector.tolist() for vector in vectors[-self.MAX_EMBEDDINGS_PER_PERSON:]]
+        previous = self.data.get(name)
+        combined = [np.asarray(item, dtype=np.float32) for item in (previous or [])]
+        combined.extend(vectors)
+        self.data[name] = [
+            self._normalize(vector).tolist()
+            for vector in combined[-self.MAX_EMBEDDINGS_PER_PERSON:]
+        ]
         try:
             self.save()
         except OSError:
-            self.data.pop(name, None)
+            if previous is None:
+                self.data.pop(name, None)
+            else:
+                self.data[name] = previous
             raise
         return True
 
