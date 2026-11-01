@@ -901,7 +901,17 @@ def main():
 
                 stt_start = time.time()
 
-                text = transcribe(raw_audio)
+                expected_phrases = None
+                if _identity_enrollment_state == "confirm":
+                    expected_phrases = [
+                        "confirm save",
+                        "try again",
+                        "cancel registration",
+                    ]
+                elif _identity_enrollment_state == "delete_confirm":
+                    expected_phrases = ["yes", "no", "cancel"]
+
+                text = transcribe(raw_audio, expected_phrases=expected_phrases)
 
                 stt_time = time.time() - stt_start
                 print(f"[TIME] STT = {stt_time:.2f}s")
