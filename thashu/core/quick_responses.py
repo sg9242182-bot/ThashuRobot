@@ -167,7 +167,7 @@ class QuickResponses:
             "who owns you":        ["Tharun owns me.", "I belong to Tharun.", "Tharun."],
 
             # ── STATUS ─────────────────────────────────────────────────────────
-            "what are you doing":  ["Waiting for your command.", "Listening.", "Processing input."],
+            "what are you doing":  ["I'm listening and ready to help.", "I'm here waiting for your next command."],
             "whatcha doing":       ["Waiting for you.", "Listening.", "Standing by."],
             "what you doing":      ["Waiting for your command.", "Listening.", "Standing by."],
             "are you working":     ["Yes, everything is working.", "Systems are active.", "Fully operational."],

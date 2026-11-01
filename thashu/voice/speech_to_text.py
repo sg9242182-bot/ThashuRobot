@@ -1,18 +1,22 @@
 """
 speech_to_text.py — Thashu Voice Pipeline
-Transcribes int16 audio at 48 kHz using faster-whisper (Whisper tiny, int8).
+Transcribes int16 audio at 48 kHz using faster-whisper (Whisper tiny.en, int8).
 
 Key design decisions:
 - Lazy model load (first call, not import time) — avoids crashing the entire
   voice system if faster-whisper is unavailable.
 - Minimum audio length guard — prevents hallucination on very short clips.
 - Input dtype check — refuses to silently process pre-normalized float32.
-- compute_type="int8" + model="tiny" is correct for Pi 4; see notes on
-  hallucination risk in model selection comment.
+- English-only tiny.en is selected because this application transcribes English;
+  it preserves the tiny model size while favoring English transcription.
 """
+
+import os
 
 import numpy as np
 from scipy.signal import resample_poly
+
+from core.model_paths import model_path
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -25,11 +29,10 @@ RESAMPLE_DOWN = INPUT_RATE // TARGET_RATE   # = 3
 # Whisper pads short clips heavily and hallucinates on sub-500ms input.
 MIN_SAMPLES_48K = INPUT_RATE // 2   # 24 000 samples = 0.5 s
 
-# Model selection note:
-#   "tiny"  int8 — fastest, most likely to hallucinate on short/quiet input.
-#   "base"  int8 — ~2× slower but noticeably more accurate; still runs on Pi 4.
-# Change MODEL_SIZE to "base" if STT quality is poor.
-MODEL_SIZE    = "tiny"
+# English-only Whisper variants tend to perform better for English speech,
+# especially at tiny/base sizes. Move to "base.en" only if Pi testing shows
+# that tiny.en still misses common phrases and the added latency is acceptable.
+MODEL_SIZE    = "tiny.en"
 COMPUTE_TYPE  = "int8"
 
 
@@ -42,7 +45,13 @@ def _get_model():
     if _model is None:
         try:
             from faster_whisper import WhisperModel
-            _model = WhisperModel(MODEL_SIZE, compute_type=COMPUTE_TYPE)
+            whisper_model_dir = model_path("whisper")
+            os.makedirs(whisper_model_dir, exist_ok=True)
+            _model = WhisperModel(
+                MODEL_SIZE,
+                compute_type=COMPUTE_TYPE,
+                download_root=whisper_model_dir,
+            )
             print(f"[STT] Whisper {MODEL_SIZE!r} ({COMPUTE_TYPE}) loaded")
         except Exception as e:
             print(f"[STT] Failed to load Whisper model: {e}")
@@ -52,10 +61,11 @@ def _get_model():
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def transcribe(audio_48k: np.ndarray) -> str:
+def transcribe(audio_48k: np.ndarray, expected_phrases=None) -> str:
     """
     Transcribe int16 audio at 48 kHz. Returns the transcribed string,
-    or "" on error or too-short input.
+    or "" on error or too-short input. When expected_phrases is supplied,
+    it provides a short context prompt to Whisper; it does not hard-restrict output.
 
     Args:
         audio_48k: int16 numpy array at 48 kHz.
@@ -87,16 +97,26 @@ def transcribe(audio_48k: np.ndarray) -> str:
 
         # ── Transcribe ────────────────────────────────────────────────────────
         model = _get_model()
+        initial_prompt = None
+        if expected_phrases:
+            choices = [str(phrase).strip() for phrase in expected_phrases if str(phrase).strip()]
+            if choices:
+                initial_prompt = "The user is responding with one of these exact commands: " + "; ".join(choices) + "."
+                print("[STT] Confirmation context: " + ", ".join(choices))
         segments, info = model.transcribe(
             audio_16k,
             language="en",
+            beam_size=5,
+            best_of=1,
+            temperature=0.0,  # Disable stochastic fallback sampling for repeatable decoding.
+            condition_on_previous_text=False,
+            initial_prompt=initial_prompt,
             vad_filter=True,      # faster-whisper built-in VAD filter; reduces hallucination
             vad_parameters={
                 "min_silence_duration_ms": 300,
             },
         )
         text = " ".join(s.text.strip() for s in segments).strip()
-
         duration_s = len(audio_48k) / INPUT_RATE
         print(f"[STT] ({duration_s:.1f}s audio) Heard: {text!r}")
         return text

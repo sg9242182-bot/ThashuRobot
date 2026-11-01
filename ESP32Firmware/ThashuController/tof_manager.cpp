@@ -1,0 +1,150 @@
+#include "tof_manager.h"
+
+#include <Arduino.h>
+#include <Wire.h>
+
+namespace {
+constexpr uint8_t XSHUT_PINS[ToFManager::SENSOR_COUNT] = {4, 16, 17};
+constexpr uint8_t I2C_ADDRESSES[ToFManager::SENSOR_COUNT] = {0x30, 0x31, 0x32};
+constexpr uint8_t OUT_OF_RANGE_STATUS = 4;
+}
+
+bool ToFManager::begin() {
+    Wire.begin(SDA_PIN, SCL_PIN);
+
+    for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
+        pinMode(XSHUT_PINS[i], OUTPUT);
+        digitalWrite(XSHUT_PINS[i], LOW);
+        hasData[i] = false;
+        outOfRange[i] = false;
+        valid[i] = false;
+        obstacleDetected[i] = false;
+        distanceMm[i] = 0;
+        rangeStatus[i] = 255;
+        lastReadingTime[i] = 0;
+    }
+    delay(STARTUP_DELAY_MS);
+
+    for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
+        if (!initializeSensor(static_cast<SensorId>(i), XSHUT_PINS[i], I2C_ADDRESSES[i])) {
+            return false;
+        }
+    }
+
+    // Start all sensors in timed continuous mode. This starts measurements
+    // without making update() wait for each ranging operation to finish.
+    for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
+        sensors[i].startRangeContinuous(CONTINUOUS_PERIOD_MS);
+    }
+
+    return true;
+}
+
+bool ToFManager::initializeSensor(SensorId sensor, uint8_t xshutPin, uint8_t address) {
+    const uint8_t index = static_cast<uint8_t>(sensor);
+
+    digitalWrite(xshutPin, HIGH);
+    delay(STARTUP_DELAY_MS);
+
+    if (!sensors[index].begin(0x29, false, &Wire)) {
+        return false;
+    }
+
+    if (!sensors[index].setAddress(address)) {
+        return false;
+    }
+
+    delay(STARTUP_DELAY_MS);
+    return true;
+}
+
+void ToFManager::update() {
+    // Non-blocking: only read a sensor when its continuous measurement is ready.
+    for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
+        if (!sensors[i].isRangeComplete()) {
+            continue;
+        }
+
+        const uint16_t measuredDistance = sensors[i].readRangeResult();
+        const uint8_t status = sensors[i].readRangeStatus();
+
+        rangeStatus[i] = status;
+
+        // Status 4 is the library's explicit no-target/out-of-range result.
+        // readRangeResult() returns 0xFFFF for status 4 by design, so classify
+        // it before treating the sentinel as an API read failure.
+        if (status == OUT_OF_RANGE_STATUS) {
+            lastReadingTime[i] = millis();
+            hasData[i] = true;
+            outOfRange[i] = true;
+            valid[i] = false;
+            obstacleDetected[i] = false;
+            distanceMm[i] = 0;
+            continue;
+        }
+
+        // A sentinel without status 4 means the I2C/API read failed. Keep
+        // the last successful sample and its original timestamp: a transient
+        // bus error won't create a false NA, but the sample still expires at
+        // READING_MAX_AGE_MS and then correctly blocks movement.
+        if (measuredDistance == 0xFFFFU) {
+            continue;
+        }
+
+        lastReadingTime[i] = millis();
+        hasData[i] = true;
+        outOfRange[i] = false;
+        distanceMm[i] = measuredDistance;
+
+        const uint16_t obstacleThresholdMm =
+            static_cast<uint16_t>(OBSTACLE_DISTANCE_CM) * 10U;
+        const bool inObstacleZone = measuredDistance <= obstacleThresholdMm;
+
+        // Status 2 reports a weak return. In this robot's validated setup,
+        // readings above the 30 cm stop threshold are usable for clear-path
+        // checks. At or inside the threshold, status 2 remains fail-safe.
+        valid[i] = (status == 0) || (status == 2 && !inObstacleZone);
+        obstacleDetected[i] =
+            (status == 0 || status == 2) && inObstacleZone;
+    }
+}
+
+uint16_t ToFManager::getDistanceMm(SensorId sensor) const {
+    const uint8_t index = static_cast<uint8_t>(sensor);
+    return index < SENSOR_COUNT ? distanceMm[index] : 0;
+}
+
+float ToFManager::getDistanceCm(SensorId sensor) const {
+    return static_cast<float>(getDistanceMm(sensor)) / 10.0f;
+}
+
+bool ToFManager::hasReading(SensorId sensor) const {
+    const uint8_t index = static_cast<uint8_t>(sensor);
+    return index < SENSOR_COUNT && hasData[index];
+}
+
+bool ToFManager::isValid(SensorId sensor) const {
+    const uint8_t index = static_cast<uint8_t>(sensor);
+    return index < SENSOR_COUNT && valid[index];
+}
+
+bool ToFManager::isFresh(SensorId sensor) const {
+    const uint8_t index = static_cast<uint8_t>(sensor);
+    return index < SENSOR_COUNT && hasData[index] &&
+        (millis() - lastReadingTime[index] <= READING_MAX_AGE_MS);
+}
+
+bool ToFManager::isOutOfRange(SensorId sensor) const {
+    const uint8_t index = static_cast<uint8_t>(sensor);
+    return index < SENSOR_COUNT && outOfRange[index];
+}
+
+bool ToFManager::isObstacleDetected(SensorId sensor) const {
+    const uint8_t index = static_cast<uint8_t>(sensor);
+    return index < SENSOR_COUNT && obstacleDetected[index];
+}
+
+uint8_t ToFManager::getRangeStatus(SensorId sensor) const {
+    const uint8_t index = static_cast<uint8_t>(sensor);
+    return index < SENSOR_COUNT ? rangeStatus[index] : 255;
+}

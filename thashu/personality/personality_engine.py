@@ -122,19 +122,12 @@ class PersonalityEngine:
         return text  # direct, no changes
 
     def _funny_style(self, text: str) -> str:
-
-        # Light humor injection (not stupid)
-        if len(text.split()) > 5:
-            return text + " That was simple."
-        else:
-            return text + " Easy."
+        # Do not add extra speech after the answer.
+        return text
 
     def _cute_style(self, text: str) -> str:
-
-        # Soft tone (no emojis)
-        if not text.endswith("."):
-            text += "."
-        return text + " Okay."
+        # Keep the answer concise; tone must not add a filler sentence.
+        return text
 
     # =============================
     # DEBUG

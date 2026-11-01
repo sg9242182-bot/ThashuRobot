@@ -1,0 +1,121 @@
+#include "safety_manager.h"
+
+namespace {
+constexpr ToFManager::SensorId FRONT_IDS[3] = {
+    ToFManager::FRONT_LEFT, ToFManager::FRONT_CENTER, ToFManager::FRONT_RIGHT
+};
+}
+
+bool SafetyManager::begin(MotorManager& motorManager, ToFManager& frontTof,
+                          UltrasonicManager& rearUltrasonic, EyeManager& eyeManager,
+                          ServoManager& servoManager) {
+    motors = &motorManager;
+    tof = &frontTof;
+    rear = &rearUltrasonic;
+    eyes = &eyeManager;
+    servos = &servoManager;
+    motors->stop();
+    if (!requiredHardwareReady()) return false;
+    if (!tof->begin()) return false;
+    if (!rear->begin()) return false;
+    lastPiFrameMs = millis();
+    watchdogExpired = true;
+    initialized = true;
+    return true;
+}
+
+void SafetyManager::notePiFrame() {
+    lastPiFrameMs = millis();
+    watchdogExpired = false;
+}
+
+bool SafetyManager::frontClear() const {
+    if (!tof) return false;
+    for (uint8_t i = 0; i < 3; ++i) {
+        const ToFManager::SensorId sensor = FRONT_IDS[i];
+        if (!tof->isFresh(sensor) ||
+            (!tof->isValid(sensor) && !tof->isOutOfRange(sensor)) ||
+            tof->isObstacleDetected(sensor)) return false;
+    }
+    return true;
+}
+
+bool SafetyManager::rearClear() const {
+    return rear && rear->isFresh() &&
+           (rear->isValid() || rear->isOutOfRange()) &&
+           !rear->isObstacleDetected();
+}
+
+bool SafetyManager::allowMotion(Motion motion, uint8_t speed) const {
+    if (speed == 0 || motion == STOPPED) return true;
+    if (!initialized || watchdogExpired) return false;
+    if ((motion == FORWARD || motion == TURNING) && !frontClear()) return false;
+    if ((motion == REVERSE || motion == TURNING) && !rearClear()) return false;
+    return true;
+}
+
+void SafetyManager::update() {
+    if (!motors || !tof || !rear) return;
+
+    // Keep sensor sampling alive for telemetry and diagnostics even if another
+    // required device (such as the OLED or servos) is not healthy.
+    tof->update();
+    rear->update();
+
+    if (!initialized) {
+        motors->stop();
+        activeMotion = STOPPED;
+        return;
+    }
+    if (!requiredHardwareReady()) {
+        motors->stop();
+        activeMotion = STOPPED;
+        initialized = false;
+        return;
+    }
+    if (millis() - lastPiFrameMs >= PI_WATCHDOG_MS) watchdogExpired = true;
+    if (watchdogExpired) {
+        motors->stop();
+        activeMotion = STOPPED;
+        return;
+    }
+    if (activeMotion != STOPPED && !allowMotion(activeMotion, 1)) {
+        if (obstacleDetectedFor(activeMotion)) obstacleStopPending = true;
+        motors->stop();
+        activeMotion = STOPPED;
+    }
+}
+
+bool SafetyManager::obstacleDetectedFor(Motion motion) const {
+    if (!tof || !rear) return false;
+
+    if (motion == FORWARD || motion == TURNING) {
+        for (uint8_t i = 0; i < 3; ++i) {
+            const ToFManager::SensorId sensor = FRONT_IDS[i];
+            if (tof->isFresh(sensor) && tof->isObstacleDetected(sensor)) return true;
+        }
+    }
+    if ((motion == REVERSE || motion == TURNING) &&
+        rear->isFresh() && rear->isValid() && rear->isObstacleDetected()) {
+        return true;
+    }
+    return false;
+}
+
+bool SafetyManager::consumeObstacleStop() {
+    const bool pending = obstacleStopPending;
+    obstacleStopPending = false;
+    return pending;
+}
+
+bool SafetyManager::requiredHardwareReady() const {
+    return motors && motors->isReady() && eyes && eyes->isReady() &&
+           servos && servos->isReady();
+}
+
+
+void SafetyManager::setActiveMotion(Motion motion, uint8_t speed) {
+    activeMotion = speed == 0 ? STOPPED : motion;
+}
+
+bool SafetyManager::ready() const { return initialized && requiredHardwareReady(); }

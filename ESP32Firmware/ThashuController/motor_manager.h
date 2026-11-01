@@ -1,0 +1,37 @@
+#pragma once
+
+#include <Arduino.h>
+#include <stdint.h>
+
+// Owns TA6586 direction/PWM input pins and encoder pulse counts only.
+// Safety decisions and Pi communication belong to their dedicated managers.
+class MotorManager {
+public:
+    bool begin();
+    void setMotor(uint8_t motor, int16_t speed);
+    void setAll(int16_t speed);
+    void stop();
+    // Call continuously to match simultaneously driven motor speeds using encoder feedback.
+    void update();
+    uint32_t encoderCount(uint8_t encoderId) const;
+    bool isReady() const;
+
+private:
+    static constexpr uint8_t MOTOR_COUNT = 4;
+    static constexpr uint8_t MAX_SPEED = 255;
+    static volatile uint32_t encoderCounts[MOTOR_COUNT];
+    bool initialized = false;
+    int16_t requestedSpeed[MOTOR_COUNT] = {0, 0, 0, 0};
+    uint32_t previousEncoderCounts[MOTOR_COUNT] = {0, 0, 0, 0};
+    float measuredCountsPerSecond[MOTOR_COUNT] = {0, 0, 0, 0};
+    float integralError[MOTOR_COUNT] = {0, 0, 0, 0};
+    float previousError[MOTOR_COUNT] = {0, 0, 0, 0};
+    unsigned long lastControlMs = 0;
+    // Track which inputs have claimed LEDC so startup STOP avoids PWM allocation.
+    uint8_t pwmConfiguredMask[MOTOR_COUNT] = {0, 0, 0, 0};
+    void writeMotor(uint8_t motor, int16_t speed);
+    static void IRAM_ATTR encoder0ISR();
+    static void IRAM_ATTR encoder1ISR();
+    static void IRAM_ATTR encoder2ISR();
+    static void IRAM_ATTR encoder3ISR();
+};

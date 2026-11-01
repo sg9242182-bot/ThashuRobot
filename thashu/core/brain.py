@@ -49,7 +49,7 @@ class Brain:
 
         # ===== STEP 1: BLOCK WEAK INPUT =====
         if len(text.split()) < 2:
-            return "Say that clearly."
+            return "I don't understand, please say that again."
 
         # ===== STEP 2: INTENT =====
         intent_data = self.intent_engine.detect(user_input)
@@ -66,23 +66,22 @@ class Brain:
         # ===== STEP 3: PERSONALITY =====
         self.personality.update(user_input)
 
-        # ===== STEP 4: LONG MEMORY =====
-        if "my name is" in text:
-            name = user_input.split("is")[-1].strip()
-            self.long_memory.set("user_name", name)
-
-            response = f"Okay, I will remember your name is {name}."
+        # ===== STEP 4: CONFIRMED PERSON MEMORY =====
+        # A spoken name alone is not a confirmed person identity. Face enrollment
+        # in main.py owns the only path that stores a name with face embeddings.
+        if re.match(r"^(?:my name is|i am|i'm|call me)\b", text):
+            response = (
+                "I heard your name, but I have not saved it. "
+                "To remember you by face, say remember me and I will start registration."
+            )
             self.memory.add(user_input, response)
             return response
 
-        if "what is my name" in text:
-            name = self.long_memory.get("user_name")
-
-            if name:
-                response = f"Your name is {name}."
-            else:
-                response = "I don't know your name yet."
-
+        if re.fullmatch(r"(?:what is|what's) my name(?: again)?[?.! ]*", text):
+            response = (
+                "I can only confirm your name from a registered face. "
+                "Say do you remember me while facing the camera."
+            )
             self.memory.add(user_input, response)
             return response
 
@@ -151,24 +150,8 @@ class Brain:
 
             mode = "deep" if decision_result == "DEEP_MODE" else "normal"
 
-            prompt = f"""
-You are Thashu.
-
-Answer in 1-2 clear sentences.
-
-Do NOT:
-- say "I do not have the ability"
-- mention AI limitations
-- say "Sure" or "I'd be happy"
-- generate lists
-- go off topic
-
-User: {user_input}
-
-Answer:
-"""
-
-            ai_response = generate_response(prompt=prompt, mode=mode)
+            # The model has a single system prompt; pass only the spoken request.
+            ai_response = generate_response(prompt=user_input, mode=mode)
 
             # ===== SAFETY =====
             if not ai_response or len(ai_response.strip()) == 0:

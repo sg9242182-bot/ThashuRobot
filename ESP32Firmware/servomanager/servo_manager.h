@@ -3,6 +3,7 @@
 class ServoManager {
 public:
     bool begin();
+    bool isReady() const;
 
     void update();
 

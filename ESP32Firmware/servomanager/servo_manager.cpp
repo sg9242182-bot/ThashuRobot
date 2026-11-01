@@ -7,7 +7,8 @@
 // ============================================================
 
 static constexpr int PAN_PIN  = 5;
-static constexpr int TILT_PIN = 15;
+// GPIO12 is a provisional output assignment; verify it stays low during reset with the servo attached.
+static constexpr int TILT_PIN = 12;
 
 // ============================================================
 // SERVO LIMITS
@@ -420,6 +421,11 @@ void ServoManager::stop()
         tilt.currentAngle;
 
     mode = MotionMode::STOP;
+}
+
+bool ServoManager::isReady() const
+{
+    return panServo.attached() && tiltServo.attached();
 }
 
 bool ServoManager::isMoving() const

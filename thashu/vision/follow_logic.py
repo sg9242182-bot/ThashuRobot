@@ -1,79 +1,265 @@
 import time
- 
- 
+
+
 class FollowLogic:
-    """
-    Decides whether Thashu should follow a face
-    and which face to prioritize.
-    Includes direction debounce and no-face sustain
-    to prevent motor jitter and stuttering.
-    """
- 
+    """Pure target-selection and follow-mode state logic; never actuates hardware."""
+
+    OFF = "OFF"
+    WAITING_FOR_TARGET = "WAITING_FOR_TARGET"
+    SEARCHING_FOR_TARGET = "SEARCHING_FOR_TARGET"
+    SELECTING_TARGET = "SELECTING_TARGET"
+    TRACKING = "TRACKING"
+    NEEDS_RESELECTION = "NEEDS_RESELECTION"
+
+    # The Pi 4 run measured 0.35–0.58 s end-to-end perception age under load.
+    # Keep a bounded margin above that observed latency; chassis moves remain pulsed.
+    MAX_FRAME_AGE_SECONDS = 0.75
+    SEARCH_GRACE_SECONDS = 12.0
+    NO_TARGET_NOTICE_DELAY_SECONDS = 15.0
+
     def __init__(self, frame_w=640, frame_h=480):
-        self.frame_w  = frame_w
-        self.frame_h  = frame_h
-        self.center_x = frame_w // 2
-        self.center_y = frame_h // 2
- 
-        # Motor debounce
-        self._last_direction  = "NONE"
-        self._direction_since = 0
-        self._no_face_since   = 0
- 
-        self.DIRECTION_HOLD = 0.3   # direction must be stable 300ms before acting
-        self.NO_FACE_STOP   = 1.0   # stop motors after 1s sustained no face
- 
-    def select_target(self, faces: list) -> tuple:
-        """
-        Returns (cx, cy) of the best face to follow.
-        Priority: largest face (most likely closest).
-        Returns None if no faces.
-        """
-        if not faces:
-            return None
- 
-        best = max(faces, key=lambda f: (f[2] - f[0]) * (f[3] - f[1]))
-        x1, y1, x2, y2 = best
-        return (x1 + x2) // 2, (y1 + y2) // 2
- 
-    def should_move_motors(self, cx: int, cy: int, threshold=0.25) -> str:
-        """
-        Returns motor direction only after direction is
-        held stable for DIRECTION_HOLD seconds.
-        Prevents jitter from brief face movements.
-        """
-        error_x = (cx - self.center_x) / self.center_x
-        now = time.time()
- 
-        if error_x > threshold:
-            direction = "RIGHT"
-        elif error_x < -threshold:
-            direction = "LEFT"
-        else:
-            direction = "NONE"
- 
-        # Reset timer if direction changed
-        if direction != self._last_direction:
-            self._last_direction  = direction
-            self._direction_since = now
-            return "NONE"  # don't act yet — wait for stable hold
- 
-        # Act only after stable hold period
-        if now - self._direction_since >= self.DIRECTION_HOLD:
-            return direction
- 
-        return "NONE"
- 
-    def should_stop_motors(self, faces: list) -> bool:
-        """
-        Returns True only after sustained no-face period.
-        Prevents motors stopping on brief detection gaps.
-        """
-        now = time.time()
-        if not faces:
-            if self._no_face_since == 0:
-                self._no_face_since = now
-            return (now - self._no_face_since) > self.NO_FACE_STOP
-        else:
-            self._no_face_since = 0
+        self.frame_w = frame_w
+        self.frame_h = frame_h
+        self.enabled = False
+        self.state = self.OFF
+        self.target_id = None
+        self.pending_region = None
+        self._notice_latched = set()
+        self._stop_latched = False
+        self._waiting_since = None
+        self._target_lost_since = None
+
+    def start(self):
+        """Enable follow mode, but defer target choice until fresh perception arrives."""
+        self.enabled = True
+        self.state = self.WAITING_FOR_TARGET
+        self.target_id = None
+        self.pending_region = None
+        self._notice_latched.clear()
+        self._stop_latched = False
+        self._waiting_since = None
+        self._target_lost_since = None
+
+    def stop(self):
+        """Disable follow mode and discard the session target."""
+        was_enabled = self.enabled
+        self.enabled = False
+        self.state = self.OFF
+        self.target_id = None
+        self.pending_region = None
+        self._notice_latched.clear()
+        self._stop_latched = False
+        self._waiting_since = None
+        self._target_lost_since = None
+        return was_enabled
+
+    def request_region(self, region):
+        """Queue a left/center/right choice for the next fresh camera snapshot."""
+        region = str(region).upper()
+        if not self.enabled or region not in ("LEFT", "CENTER", "RIGHT"):
             return False
+        self.pending_region = region
+        self.state = self.SELECTING_TARGET
+        self._notice_latched.discard("selection_required")
+        self._notice_latched.discard("selection_not_unique")
+        return True
+
+    def _notice_once(self, key):
+        if key in self._notice_latched:
+            return None
+        self._notice_latched.add(key)
+        return key
+
+    def _request_stop_once(self, result):
+        if not self._stop_latched:
+            result["stop_motion"] = True
+            self._stop_latched = True
+
+    @staticmethod
+    def _region_for(face, frame_width):
+        x = face.get("center", (None, None))[0]
+        if x is None:
+            return None
+        if x < frame_width / 3:
+            return "LEFT"
+        if x > 2 * frame_width / 3:
+            return "RIGHT"
+        return "CENTER"
+
+    @staticmethod
+    def _valid_face(face):
+        return (
+            isinstance(face, dict)
+            and face.get("track_id") is not None
+            and not face.get("ambiguous", True)
+        )
+
+    def _fresh_people(self, snapshot, now):
+        observed_at = snapshot.get("observed_at")
+        if not isinstance(observed_at, (int, float)):
+            return None, None
+        age = now - observed_at
+        if age < 0 or age > self.MAX_FRAME_AGE_SECONDS:
+            return None, None
+        size = snapshot.get("frame_size") or (self.frame_w, self.frame_h)
+        width = int(size[0]) if size and size[0] else self.frame_w
+        people = snapshot.get("persons")
+        if people is None:  # Preserve compatibility with older snapshots/tests.
+            people = snapshot.get("faces")
+        return people or [], width
+
+    def _choose(self, faces, width, region=None):
+        candidates = [
+            face for face in faces
+            if self._valid_face(face)
+            and (region is None or self._region_for(face, width) == region)
+        ]
+        return candidates[0] if len(candidates) == 1 else None
+
+    def update(self, snapshot, runtime_idle=True, now=None):
+        """Return a target/stop/notice decision from one perception snapshot.
+
+        The caller owns servo and motor interfaces. A missing, ambiguous, or stale
+        target never gets replaced silently by another person.
+        """
+        now = time.monotonic() if now is None else now
+        result = {"state": self.state, "target": None, "stop_motion": False, "notice": None}
+        if not self.enabled:
+            return result
+        if not runtime_idle:
+            self.stop()
+            result.update(state=self.OFF, stop_motion=True, notice="paused_for_interaction")
+            return result
+
+        people, width = self._fresh_people(snapshot or {}, now)
+        if people is None:
+            if self.state == self.TRACKING:
+                self.state = self.SEARCHING_FOR_TARGET
+                self._target_lost_since = now
+                self._request_stop_once(result)
+                result.update(state=self.state)
+            if self.state == self.SEARCHING_FOR_TARGET:
+                if now - self._target_lost_since >= self.SEARCH_GRACE_SECONDS:
+                    self.target_id = None
+                    self._target_lost_since = None
+                    self.state = self.NEEDS_RESELECTION
+                    result.update(state=self.state, notice=self._notice_once("target_lost"))
+                else:
+                    result.update(state=self.state)
+            return result
+
+        if self.state == self.WAITING_FOR_TARGET:
+            if not people:
+                if self._waiting_since is None:
+                    self._waiting_since = now
+                if now - self._waiting_since >= self.NO_TARGET_NOTICE_DELAY_SECONDS:
+                    result["notice"] = self._notice_once("no_target")
+                return result
+            self._waiting_since = None
+            selected = self._choose(people, width)
+            if selected is not None:
+                self.target_id = selected["track_id"]
+                self.state = self.TRACKING
+                self._notice_latched.clear()
+                self._stop_latched = False
+                result.update(state=self.state, target=selected)
+                return result
+            self.state = self.SELECTING_TARGET
+            result.update(state=self.state, notice=self._notice_once("selection_required"))
+            return result
+
+        if self.state == self.SELECTING_TARGET:
+            if self.pending_region is None:
+                result.update(notice=self._notice_once("selection_required"))
+                return result
+            selected = self._choose(people, width, self.pending_region)
+            self.pending_region = None
+            if selected is None:
+                result.update(notice=self._notice_once("selection_not_unique"))
+                return result
+            self.target_id = selected["track_id"]
+            self.state = self.TRACKING
+            self._notice_latched.clear()
+            self._stop_latched = False
+            result.update(state=self.state, target=selected)
+            return result
+
+        if self.state == self.SEARCHING_FOR_TARGET:
+            matching = next(
+                (person for person in people if person.get("track_id") == self.target_id),
+                None,
+            )
+            if matching is not None and matching.get("ambiguous", False):
+                self.target_id = None
+                self._target_lost_since = None
+                self.state = self.NEEDS_RESELECTION
+                result.update(state=self.state, notice=self._notice_once("target_ambiguous"))
+                return result
+            if matching is not None:
+                self.state = self.TRACKING
+                self._target_lost_since = None
+                self._stop_latched = False
+                self._notice_latched.clear()
+                result.update(state=self.state, target=matching)
+                return result
+            if now - self._target_lost_since >= self.SEARCH_GRACE_SECONDS:
+                self.target_id = None
+                self._target_lost_since = None
+                self.state = self.NEEDS_RESELECTION
+                result.update(state=self.state, notice=self._notice_once("target_lost"))
+            else:
+                result.update(state=self.state)
+            return result
+
+        if self.state == self.NEEDS_RESELECTION:
+            return result
+
+        matching = next(
+            (person for person in people if person.get("track_id") == self.target_id),
+            None,
+        )
+        if matching is not None and matching.get("ambiguous", False):
+            self.target_id = None
+            self.pending_region = None
+            self.state = self.NEEDS_RESELECTION
+            result.update(
+                state=self.state,
+                notice=self._notice_once("target_ambiguous"),
+            )
+            self._request_stop_once(result)
+            return result
+
+        if self.state == self.TRACKING:
+            if matching is None:
+                # Search briefly for this exact short-lived track ID. Never lock
+                # onto a different person automatically when the target vanishes.
+                self.state = self.SEARCHING_FOR_TARGET
+                self._target_lost_since = now
+                result.update(state=self.state)
+                self._request_stop_once(result)
+                return result
+            self._stop_latched = False
+            result.update(state=self.state, target=matching)
+            return result
+
+
+        return result
+
+    # Compatibility helpers for older callers. Target choice is deliberately
+    # restricted to exactly one person; a largest-target heuristic is unsafe.
+    def select_target(self, people):
+        if len(people or []) != 1:
+            return None
+        person = people[0]
+        return person.get("center") if isinstance(person, dict) else (
+            (person[0] + person[2]) // 2,
+            (person[1] + person[3]) // 2,
+        )
+
+    def should_move_motors(self, cx, cy, threshold=0.25):
+        """Legacy advisory only; this method does not issue hardware commands."""
+        return "NONE"
+
+    def should_stop_motors(self, people):
+        """Legacy helper reports no-face; callers must issue STOP themselves."""
+        return not bool(people)
