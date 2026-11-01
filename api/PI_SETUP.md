@@ -16,7 +16,7 @@ If the Pi already has uncommitted work, stop before switching branches or pullin
 
 ## 2. Install the Python dependencies
 
-The API uses Python 3.10 or newer. From the repository root:
+The target Pi runs Raspberry Pi OS Bookworm (Debian, no desktop) with Python 3.11.2, confirmed by Tharun. The API supports Python 3.10 or newer, so this target meets the code's minimum. A desktop environment is not needed. From the repository root:
 
 ```bash
 sudo apt update
