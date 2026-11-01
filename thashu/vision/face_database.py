@@ -223,6 +223,74 @@ class FaceDatabase:
             raise
         return True
 
+    def match_details(self, embedding):
+        """Return the top identity, its score, and its gap over the runner-up."""
+        if not self.data:
+            return None, -1.0, 0.0
+        try:
+            query = self._normalize(embedding)
+        except (TypeError, ValueError):
+            return None, -1.0, 0.0
+
+        scores_by_person = []
+        for name, embeddings in self.data.items():
+            scores = [
+                float(np.dot(query, self._normalize(stored)))
+                for stored in embeddings
+            ]
+            if scores:
+                scores_by_person.append((max(scores), name))
+        if not scores_by_person:
+            return None, -1.0, 0.0
+        scores_by_person.sort(reverse=True)
+        best_score, best_name = scores_by_person[0]
+        second_score = scores_by_person[1][0] if len(scores_by_person) > 1 else -1.0
+        return best_name, best_score, best_score - second_score
+
+    def add_high_confidence_sample(self, name, embedding):
+        """Slowly adapt an existing identity only on a very strong, unique match.
+
+        This is deliberately stricter than normal recognition: a mistaken
+        accepted label must not teach itself into the persistent identity.
+        Only embeddings are stored; no face photos are retained.
+        """
+        if self.load_error is not None:
+            return False
+        name = self._clean_name(name)
+        if name not in self.data:
+            return False
+
+        vector = self._normalize(embedding)
+        best_name, score, margin_score = self.match_details(vector)
+        minimum_score = max(self.threshold + 0.08, 0.78)
+        minimum_margin = max(self.margin + 0.12, 0.20)
+        if (
+            best_name != name
+            or score < minimum_score
+            or margin_score < minimum_margin
+        ):
+            return False
+
+        existing = self.data[name]
+        # Keep the explicitly collected enrollment set intact; never evict a
+        # trusted sample just to make room for unattended adaptation.
+        if len(existing) >= self.MAX_EMBEDDINGS_PER_PERSON:
+            return False
+        if any(
+            float(np.dot(vector, self._normalize(stored))) >= 0.90
+            for stored in existing
+        ):
+            return False
+
+        previous = list(existing)
+        self.data[name] = previous + [vector.tolist()]
+        try:
+            self.save()
+        except OSError:
+            self.data[name] = previous
+            raise
+        return True
+
     def match(self, embedding, threshold=None, margin=None, *, diagnostics=False):
         """Return (name, score) only when best score and separation both pass."""
         if not self.data:
