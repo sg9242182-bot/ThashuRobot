@@ -385,6 +385,41 @@ def get_look_command(user_input: str):
     return _LOOK_COMMANDS.get(normalized)
 
 
+
+_MEMORY_SAVE_QUERY = {
+    "what do you remember about me",
+    "what have you saved about me",
+    "tell me what you remember about me",
+    "what personal memories do you have about me",
+}
+
+
+def get_person_memory_request(user_input: str):
+    """Parse only explicit permanent-memory save phrases.
+
+    'Remember that ...' saves a person fact.
+    'Remember this event ...' saves a user-designated event.
+    """
+    text = " ".join((user_input or "").strip().split())
+    patterns = (
+        ("event", r"remember this event(?:\s*:\s*|\s+)(.+)"),
+        ("fact", r"remember that(?:\s*:\s*|\s+)(.+)"),
+    )
+    for kind, pattern in patterns:
+        match = re.fullmatch(pattern, text, flags=re.IGNORECASE)
+        if match:
+            content = match.group(1).strip(" .!?")
+            if content:
+                return kind, content
+    return None
+
+
+def is_person_memory_query(user_input: str) -> bool:
+    """Recognize bounded recall requests without passing them to the LLM."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", (user_input or "").lower()).strip()
+    return normalized in _MEMORY_SAVE_QUERY
+
+
 def is_forward_command(user_input: str) -> bool:
     """Accept only explicit forward phrases with an optional recognized speed."""
     return get_forward_speed(user_input) is not None
