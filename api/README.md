@@ -75,8 +75,10 @@ sensor-precheck, and acknowledgement behavior is not fully implemented in the
 current Pi backend. See
 `docs/development/VISHAL_BACKEND_CONTRACT_GAPS.md` before changing command or
 mode behavior. The telemetry stream consumes the raw inbound queue exposed by
-`GPIOControl`; it is a single-consumer feed and should not run alongside
-another reader of that queue.
+`GPIOControl`; it is a single-consumer feed. Run one telemetry WebSocket
+consumer and do not add a second reader for that queue. The API must share the
+robot process's existing `RobotCommandManager` and serial connection; do not
+run a separate Uvicorn process beside `thashu/main.py` on the Pi.
 
 Movement, stop, and WebSocket telemetry require an HTTP Bearer token configured
 in `THASHU_API_TOKEN`. Health and status remain unauthenticated. If the token is
@@ -90,16 +92,23 @@ python -m uvicorn api.main:app --host 127.0.0.1 --port 8000
 ```
 
 Use Swagger's **Authorize** button with the token before trying the protected
-routes. Keep the server bound to localhost during development. Before exposing
-it to a mobile device on the network, store the token in the Pi service
-environment and use a trusted network; do not commit the token to the repo.
+routes. Keep the server bound to localhost during development. For mobile
+access, set `THASHU_API_HOST=0.0.0.0` in the robot process environment only
+after the Pi is reachable through the team's private network and its firewall
+is restricted. Use the Pi's private-network address in Flutter; do not expose
+port 8000 to the public internet or commit the token to the repo.
 
-Install and run from the repository root:
+Install the API dependencies from the repository root:
 
 ```powershell
 python -m pip install -r api/requirements.txt
-python -m uvicorn api.main:app --host 127.0.0.1 --port 8000
 ```
+
+On the Pi, the API starts inside the robot process and shares its controller.
+From the `thashu` directory, start the robot with `python main.py`. For a
+local API-only development session, Uvicorn may be run separately only while
+the robot process is stopped; never let both processes open the ESP32 serial
+port at once.
 
 Run API tests with:
 

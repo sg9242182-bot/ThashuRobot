@@ -41,21 +41,24 @@ Keep it out of GitHub, screenshots, and group chat. For a first local run, set i
 export THASHU_API_TOKEN='paste-the-new-token-here'
 ```
 
-## 4. Start the API locally
+## 4. Start the robot and API together
 
-Start with localhost access only:
+The API now runs inside the robot process and shares its single ESP32 serial connection. Do not start Uvicorn separately while the robot process is running.
+
+From the repository root on the Pi:
 
 ```bash
-python -m uvicorn api.main:app --host 127.0.0.1 --port 8000
+cd thashu
+python main.py
 ```
 
-In another terminal on the Pi, open `http://127.0.0.1:8000/docs`. The health route checks only that the API process is responding. Do not send movement requests as part of setup; Tharun handles robot verification.
+The API listens on `127.0.0.1:8000` by default. In another terminal on the Pi, open `http://127.0.0.1:8000/docs`. The health route checks only that the API process is responding. Do not send movement requests as part of setup; Tharun handles robot verification.
 
-Stop the server with `Ctrl+C`.
+Stop the robot and API together with `Ctrl+C`.
 
 ## 5. Prepare app access later
 
-`127.0.0.1` works only on the Pi itself. Do not expose port 8000 to the public internet. Before the Flutter app connects, Tharun and Vishal need to arrange a private, encrypted connection and restrict access with the Pi firewall. Then provide Niteshvar the Pi address on that private connection and a fresh test token through a secure channel. Rotate the test token after the test.
+`127.0.0.1` works only on the Pi itself. Do not expose port 8000 to the public internet. Before the Flutter app connects, Tharun and Vishal need to arrange a private, encrypted connection and restrict access with the Pi firewall. Then set `THASHU_API_HOST=0.0.0.0` in the robot process environment, and provide Niteshvar the Pi's private-network address and a fresh test token through a secure channel. Rotate the test token after the test.
 
 ## Automatic startup
 

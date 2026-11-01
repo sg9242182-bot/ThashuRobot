@@ -2,6 +2,8 @@ import time
 import threading
 import os
 import statistics
+import atexit
+import sys
 
 import numpy as np
 import RPi.GPIO as GPIO
@@ -20,9 +22,14 @@ from vision.vision_core   import VisionCore
 from vision.follow_logic   import FollowLogic
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
+from core.robot_manager   import ControlMode, RobotCommandManager
 from hardware.servo_tracking import ServoTracker
 from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, is_recognition_query
 from core.model_paths import model_path, project_path
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
 # ── Sounds ────────────────────────────────────────────────────────────────────
 SOUND_STARTUP   = project_path("sounds", "startup.wav")
@@ -63,7 +70,70 @@ event_bus = EventBus()
 
 brain  = Brain()
 motors = MotorController()
+_motion_lock = threading.RLock()
+
+
+def _prepare_manual_command():
+    """Pause automatic follow and send STOP before accepting manual movement."""
+    global _follow_start_pending, _follow_region_pending, _follow_motion_active
+    global _motion_timer, _motion_generation
+
+    _follow_start_pending = False
+    _follow_region_pending = None
+    follow_logic.stop()
+    servo_tracker.stop_search()
+
+    _motion_generation += 1
+    if _motion_timer is not None:
+        _motion_timer.cancel()
+        _motion_timer = None
+    _follow_motion_active = False
+    return motors.stop() is not None
+
+
+robot_manager = RobotCommandManager(
+    motor=motors,
+    command_lock=_motion_lock,
+    before_manual_command=_prepare_manual_command,
+)
 audio  = AudioManager(sample_rate=SAMPLE_RATE, blocksize=BLOCK_SIZE)
+
+_api_server = None
+_api_thread = None
+
+
+def _start_api_server():
+    """Run the mobile API beside the robot loop using its existing motor controller."""
+    global _api_server, _api_thread
+
+    try:
+        import uvicorn
+        from api.main import app, services
+
+        services.attach_robot_manager(robot_manager)
+        host = os.environ.get("THASHU_API_HOST", "127.0.0.1")
+        port = int(os.environ.get("THASHU_API_PORT", "8000"))
+        config = uvicorn.Config(app, host=host, port=port, log_level="info")
+        _api_server = uvicorn.Server(config)
+        _api_thread = threading.Thread(
+            target=_api_server.run,
+            name="thashu-api",
+            daemon=True,
+        )
+        _api_thread.start()
+        print(f"[API] Started on http://{host}:{port} using the shared ESP32 connection")
+    except Exception as exc:
+        print(f"[API] Could not start; robot voice control remains available: {exc}")
+
+
+def _stop_api_server():
+    if _api_server is not None:
+        _api_server.should_exit = True
+        if _api_thread is not None and _api_thread is not threading.current_thread():
+            _api_thread.join(timeout=5)
+
+
+atexit.register(_stop_api_server)
 wake = WakeWordEngine(
     model_path=model_path("openwakeword", "hey_jarvis_v0.1.onnx"),
     threshold=0.5,
@@ -91,7 +161,6 @@ _last_idle_recognized_person = None
 _last_idle_recognized_at = 0.0
 _motion_timer = None
 _motion_generation = 0
-_motion_lock = threading.Lock()
 event_bus.subscribe(
     "RUNTIME_STATE_CHANGED",
     vision.on_runtime_state_changed,
@@ -297,7 +366,7 @@ def _auto_stop_motion(generation):
         _motion_timer = None
         follow_pulse = _follow_motion_active
         _follow_motion_active = False
-        sequence = motors.stop()
+        sequence = robot_manager.dispatch("stop")
 
     if sequence is None:
         print("[COMMAND] Timed motor STOP could not be sent; ESP32 watchdog remains the fallback")
@@ -313,14 +382,19 @@ def queue_follow_start(region=None):
     _follow_region_pending = region
 
 
-def start_bounded_motion(direction, speed, duration_override=None):
+def start_bounded_motion(
+    direction,
+    speed,
+    duration_override=None,
+    control_mode=ControlMode.MANUAL,
+):
     global _motion_timer, _motion_generation, _follow_motion_active
 
     motor_commands = {
-        "FORWARD": motors.forward,
-        "BACKWARD": motors.backward,
-        "LEFT": motors.left,
-        "RIGHT": motors.right,
+        "FORWARD": "forward",
+        "BACKWARD": "backward",
+        "LEFT": "left",
+        "RIGHT": "right",
     }
     command = motor_commands.get(direction)
     if command is None:
@@ -334,7 +408,7 @@ def start_bounded_motion(direction, speed, duration_override=None):
         _motion_generation += 1
         generation = _motion_generation
         _follow_motion_active = False
-        sequence = command(speed)
+        sequence = robot_manager.dispatch(command, speed, control_mode=control_mode)
         if sequence is None:
             return None
 
@@ -369,7 +443,7 @@ def stop_motion():
         if _motion_timer is not None:
             _motion_timer.cancel()
             _motion_timer = None
-        return motors.stop()
+        return robot_manager.dispatch("stop")
 
 
 def confirm_motion_command(sequence, direction):
@@ -524,6 +598,7 @@ def _start_follow_pulse(direction):
         direction,
         FOLLOW_PWM,
         duration_override=FOLLOW_PULSE_SECONDS,
+        control_mode=ControlMode.AUTO,
     )
     if sequence is None:
         print(f"[FOLLOW] {direction} pulse could not be sent")
@@ -603,7 +678,7 @@ def _update_follow_chassis(target, snapshot):
         _start_follow_pulse(direction)
 
 
-def update_follow_from_vision(snapshot):
+def _update_follow_from_vision_locked(snapshot):
     global _follow_search_active
 
     if runtime.current != RuntimeState.IDLE or not follow_logic.enabled:
@@ -662,6 +737,11 @@ def update_follow_from_vision(snapshot):
         _update_follow_chassis(None, snapshot or {})
     if decision["notice"]:
         announce_follow_notice(decision["notice"])
+
+
+def update_follow_from_vision(snapshot):
+    with _motion_lock:
+        _update_follow_from_vision_locked(snapshot)
 
 
 def update_idle_face_tracking(snapshot):
@@ -731,6 +811,7 @@ def main():
     global _identity_enrollment_state, _identity_pending_name
     global _last_idle_recognized_person, _last_idle_recognized_at
     print("[SYSTEM] Jarvis started")
+    _start_api_server()
 
     # Start systems
     audio.start()

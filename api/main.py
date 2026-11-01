@@ -53,7 +53,15 @@ class ApiServices:
     def __init__(self, robot_manager_factory: Callable = _default_robot_manager_factory):
         self._robot_manager_factory = robot_manager_factory
         self._robot_manager = None
+        self._owns_robot_manager = True
         self._lock = asyncio.Lock()
+
+    def attach_robot_manager(self, manager):
+        """Use the robot process's existing manager and serial connection."""
+        if self._robot_manager is not None and self._robot_manager is not manager:
+            raise RuntimeError("API is already attached to a different robot manager")
+        self._robot_manager = manager
+        self._owns_robot_manager = False
 
     async def robot_manager(self):
         async with self._lock:
@@ -190,7 +198,7 @@ async def require_api_token(
 async def lifespan(_app: FastAPI):
     yield
     manager = services._robot_manager
-    if manager is not None:
+    if manager is not None and services._owns_robot_manager:
         await asyncio.to_thread(manager.motor.gpio.close)
 
 
