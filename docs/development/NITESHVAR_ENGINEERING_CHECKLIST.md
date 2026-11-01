@@ -34,14 +34,15 @@ The mobile app owns presentation, user interaction, client-side state, request/r
 Understand the approved system boundaries before writing application logic.
 
 ### Checklist
-- [ ] Read the root README and relevant architecture/development documentation.
-- [ ] Confirm the Flutter app's location in the repository and current Flutter/Dart versions.
+- [x] Read the root README and relevant architecture/development documentation.
+- [x] Confirm the Flutter app's location in the repository and current Flutter/Dart versions.
 - [ ] Identify the API base URL configuration approach for emulator, local network, and eventual robot deployment.
 - [ ] Review the approved REST endpoint list and request/response schemas.
 - [ ] Review the approved WebSocket connection, telemetry, error, and reconnect contract.
-- [ ] Record which API fields or behaviors are not yet specified; do not guess.
+- [x] Record which API fields or behaviors are not yet specified; do not guess.    Confirmed by Vishal: move and stop routes require a Bearer token; a successful reply means the Pi sent the command, not that the robot moved.
+  - Still unknown: Pi address and test token; approved details for status, emergency-stop, mode, reset, WebSocket messages, speed limits, errors, and timeouts.
 - [ ] Confirm the expected Manual/Auto mode behavior and emergency-stop semantics with the backend owner.
-- [ ] Confirm ownership: Niteshvar owns mobile UI/client; Vishal owns the Pi API; Tharun owns robot/hardware decisions and safety integration.
+- [x] Confirm ownership: Niteshvar owns mobile UI/client; Vishal owns the Pi API; Tharun owns robot/hardware decisions and safety integration.
 
 ### Exit criteria
 - [ ] The app can be implemented without inventing backend contracts.
