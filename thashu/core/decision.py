@@ -291,7 +291,7 @@ def get_registration_name(user_input):
     normalized = _normalize_phrase(user_input)
     # Allow a name in the same utterance as the enrollment request. The name
     # remains a draft until face capture, spoken spelling, and explicit save.
-    normalized = re.sub(r"^remember me\\s+", "", normalized)
+    normalized = re.sub(r"^remember me\s+", "", normalized)
     match = re.fullmatch(r"(?:my name is|i am|i'm|call me) ([a-z][a-z .'-]{0,62})", normalized)
     if not match:
         return None
