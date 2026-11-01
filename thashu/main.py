@@ -21,7 +21,7 @@ from vision.follow_logic   import FollowLogic
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
 from hardware.servo_tracking import ServoTracker
-from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, is_recognition_query, get_person_memory_request, is_person_memory_query
+from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, is_recognition_query, get_person_memory_request, is_person_memory_query, get_person_memory_delete_command
 from core.model_paths import model_path, project_path
 from memory.people import PeopleMemory
 
@@ -89,6 +89,7 @@ _follow_motion_active = False
 _follow_safety_notice_latched = False
 _identity_enrollment_state = "idle"
 _identity_pending_name = None
+_memory_delete_pending = None
 _last_idle_recognized_person = None
 _last_idle_recognized_at = 0.0
 _motion_timer = None
@@ -741,6 +742,7 @@ def process_safety_events():
 # ── Main loop ──────────────────────────────────────────────────────────────────
 def main():
     global _identity_enrollment_state, _identity_pending_name
+    global _memory_delete_pending
     global _last_idle_recognized_person, _last_idle_recognized_at
     print("[SYSTEM] Jarvis started")
 
@@ -922,6 +924,8 @@ def main():
                     ]
                 elif _identity_enrollment_state == "delete_confirm":
                     expected_phrases = ["yes", "no", "cancel"]
+                elif _memory_delete_pending is not None:
+                    expected_phrases = ["confirm delete memories", "cancel memory deletion"]
 
                 text = transcribe(raw_audio, expected_phrases=expected_phrases)
 
@@ -956,6 +960,7 @@ def main():
                 brain_start = time.time()
 
                 identity_command = get_recognition_command(text)
+                memory_delete_command = get_person_memory_delete_command(text)
                 registration_name, registration_was_spelled = _registration_details(text)
                 removal_name = get_remove_identity_name(text)
                 if identity_command == "CANCEL" and _identity_enrollment_state != "idle":
@@ -1102,6 +1107,58 @@ def main():
                         response = (
                             f"I am still collecting clear views, {count} of {required}. "
                             "Stay still and say your name again in a few seconds."
+                        )
+                elif _memory_delete_pending is not None:
+                    pending_person = _memory_delete_pending
+                    confirmed_person = _recently_recognized_person()
+                    if memory_delete_command == "CANCEL":
+                        _memory_delete_pending = None
+                        response = "I cancelled deleting your saved memories."
+                    elif memory_delete_command == "CONFIRM" and confirmed_person == pending_person:
+                        try:
+                            removed = person_memory.forget(
+                                pending_person, confirmed=True
+                            )
+                            _memory_delete_pending = None
+                            response = (
+                                f"I deleted {removed} saved memories for {pending_person}."
+                                if removed
+                                else f"There were no saved memories for {pending_person}."
+                            )
+                            print(
+                                f"[MEMORY] Confirmed deletion of {removed} records "
+                                f"for {pending_person}"
+                            )
+                        except (OSError, TypeError, ValueError, PermissionError) as exc:
+                            _memory_delete_pending = None
+                            print(f"[MEMORY] Deletion rejected: {exc}")
+                            response = "I couldn't safely delete those memories."
+                    elif memory_delete_command == "CONFIRM":
+                        _memory_delete_pending = None
+                        response = (
+                            "I could not confirm the same person, so I cancelled "
+                            "deleting those memories."
+                        )
+                    else:
+                        response = (
+                            "Please say confirm delete memories to erase them, "
+                            "or cancel memory deletion."
+                        )
+                elif memory_delete_command == "DELETE":
+                    confirmed_person = _recently_recognized_person()
+                    if confirmed_person is None:
+                        response = (
+                            "I can only delete personal memories when I recognize "
+                            "one confirmed person."
+                        )
+                    elif not person_memory.recall(confirmed_person, limit=5):
+                        response = f"I don't have saved memories for {confirmed_person}."
+                    else:
+                        _memory_delete_pending = confirmed_person
+                        response = (
+                            f"Should I delete all saved facts and events for "
+                            f"{confirmed_person}? Say confirm delete memories or "
+                            "cancel memory deletion."
                         )
                 elif (memory_request := get_person_memory_request(text)) is not None:
                     confirmed_person = _recently_recognized_person()
