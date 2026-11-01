@@ -184,8 +184,11 @@ class FaceDatabase:
         if pair_scores.size and float(np.median(pair_scores)) < 0.45:
             raise ValueError("Enrollment observations are inconsistent; no identity was saved")
 
-        # Refuse an enrollment that looks like an existing identity, instead of
-        # silently creating a duplicate label for a face already in the store.
+        # A high overlap can be a real lookalike (the Pi has confused two
+        # family members). Keep explicitly confirmed identities separate and let
+        # match() return Unknown whenever their live scores lack the required
+        # margin, instead of blocking the new person's enrollment.
+        overlaps = []
         for existing_name, stored_embeddings in self.data.items():
             score = max(
                 float(np.dot(vector, self._normalize(stored)))
@@ -193,7 +196,16 @@ class FaceDatabase:
                 for stored in stored_embeddings
             )
             if score >= self.threshold:
-                raise ValueError(f"Enrollment resembles the existing identity {existing_name}")
+                overlaps.append((existing_name, score))
+        if overlaps:
+            summary = ", ".join(
+                f"{existing_name}={score:.3f}"
+                for existing_name, score in overlaps
+            )
+            print(
+                f"[DB] Confirmed enrollment for {name} overlaps existing identity "
+                f"embeddings ({summary}); retaining both; uncertain matches will be Unknown"
+            )
 
         self.data[name] = [vector.tolist() for vector in vectors[-self.MAX_EMBEDDINGS_PER_PERSON:]]
         try:
