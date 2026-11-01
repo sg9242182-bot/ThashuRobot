@@ -914,9 +914,13 @@ Tasks:
 
 \[x] Require a separate voice confirmation before deleting a person's saved facts/events.
 
+\[x] Read back each permanent-memory draft and require an exact separate voice confirmation before saving.
+
 Acceptance:
 
 \[x] Temporary conversation expires appropriately (Pi quick test: a 3-second expiry cleared an entry; six insertions retained only the newest five).
+
+\[ ] Voice memory-save flow correctly handles punctuation, reads the transcript back, saves only after “confirm memory,” and discards on “cancel memory.”
 
 \[ ] Important person facts persist after restart.
 
@@ -932,7 +936,8 @@ Audit and implementation record (2026-11-01):
 
 - Initial call-site trace: `Brain` uses `ShortTermMemory` for conversation context and constructs `LongTermMemory` without calling its read/write API. `PeopleMemory` had no runtime caller. Face identity embeddings remain in the separate confirmed-face database.
 - `memory/short_term.py` retains at most five pairs and expires each pair after ten minutes using a monotonic clock. The user verified expiry with a three-second test and confirmed the five-pair cap on the Pi.
-- Permanent saves require exact commands: “remember that …” for a person fact and “remember this event …” for a user-designated event. Normal conversation remains short-term. Each saved item is limited to 240 characters; at most 50 facts and 50 events are retained per person.
+- Permanent saves require explicit “remember that …” for a person fact or “remember this event …” for a user-designated event. Normal conversation remains short-term. Each saved item is limited to 240 characters; at most 50 facts and 50 events are retained per person.
+- Follow-up to the Pi log where Whisper inserted a comma after “event”: the save parser now accepts comma/colon/semicolon separators. A candidate is read back and kept only as a pending draft until the user says the exact “confirm memory”; “cancel memory” discards it. The pending draft expires after 120 seconds and confirmation rechecks the same recently recognized person. This prevents a misheard transcript from being persisted without user review. Code is committed on phase-7; this confirmation path still requires Pi validation.
 - `main.py` permits save and recall only when exactly one known, unambiguous face was recognized within the 20-second wake-transition window. Unknown or ambiguous faces cannot access another person's memories.
 - “What do you remember about me?” returns at most the five newest records for that recognized person. “Forget all my memories” asks for a separate “confirm delete memories” or “cancel memory deletion” response and rechecks the same recognized person before deletion.
 - `memory/storage.py` uses machine-local storage under `~/.local/share/thashu/data/memory_db/long_term.json` by default, reads the former checkout-local store as a fallback without deleting it, and uses atomic replacement. Writes are refused if the store is unreadable.
