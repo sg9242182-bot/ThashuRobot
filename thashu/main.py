@@ -1,6 +1,7 @@
 import time
 import threading
 import os
+import statistics
 
 import numpy as np
 import RPi.GPIO as GPIO
@@ -9,14 +10,18 @@ from voice.audio_manager  import AudioManager
 from voice.wake_word      import WakeWordEngine
 from voice.vad            import VoiceActivityDetector
 from voice.speech_to_text import transcribe 
-from voice.text_to_speech import speak
+from voice.text_to_speech import speak, play_cached_response
 from voice.sound_player   import play
 from core.brain           import Brain
 from core.attention       import AttentionSystem
 from core.state           import RuntimeState, RuntimeStateMachine
 from core.event_bus       import EventBus
 from vision.vision_core   import VisionCore
+from vision.follow_logic   import FollowLogic
 from hardware.eyes        import Eyes
+from hardware.motors      import MotorController
+from hardware.servo_tracking import ServoTracker
+from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, is_recognition_query
 from core.model_paths import model_path, project_path
 
 # ── Sounds ────────────────────────────────────────────────────────────────────
@@ -30,6 +35,23 @@ SILENCE_TIMEOUT    = 0.8
 GRACE_PERIOD       = 4.0
 SAMPLE_RATE        = 48000
 BLOCK_SIZE         = 5460
+FORWARD_COMMAND_DURATION_SECONDS = 30.0
+LEFT_TURN_COMMAND_DURATION_SECONDS = 1.2
+RIGHT_TURN_COMMAND_DURATION_SECONDS = 1.2
+
+# Phase 5 camera-range calibration from the user's moving trials (fixed 65° tilt):
+# shoulder-width median: 150 cm=109.8 px, 160 cm=103.4 px, 200 cm=95.7 px.
+# The Pose detector's published person-box width is 1.7x shoulder width.
+FOLLOW_BOX_TO_SHOULDER_SCALE = 1.7
+FOLLOW_FORWARD_BELOW_SHOULDER_PX = 97.0
+FOLLOW_REVERSE_ABOVE_SHOULDER_PX = 107.0
+FOLLOW_RANGE_WINDOW = 7
+FOLLOW_RANGE_MIN_SAMPLES = 5
+FOLLOW_PWM = 150
+FOLLOW_PULSE_SECONDS = 0.25
+FOLLOW_PULSE_INTERVAL_SECONDS = 0.75
+FOLLOW_SENSOR_MAX_AGE_SECONDS = 0.75
+FOLLOW_OBSTACLE_CLEARANCE_MM = 300
 
 # ── Shutdown Button ───────────────────────────────────────────────────────────
 BUTTON_PIN = 17
@@ -40,6 +62,7 @@ runtime   = RuntimeStateMachine()
 event_bus = EventBus()
 
 brain  = Brain()
+motors = MotorController()
 audio  = AudioManager(sample_rate=SAMPLE_RATE, blocksize=BLOCK_SIZE)
 wake = WakeWordEngine(
     model_path=model_path("openwakeword", "hey_jarvis_v0.1.onnx"),
@@ -50,6 +73,25 @@ vad    = VoiceActivityDetector()
 attn   = AttentionSystem()
 vision = VisionCore()
 eyes   = Eyes()
+follow_logic = FollowLogic()
+servo_tracker = ServoTracker()
+_auto_face_track_id = None
+_follow_start_pending = False
+_follow_region_pending = None
+_follow_search_active = False
+_follow_width_samples = []
+_follow_sample_target_id = None
+_follow_last_observation = None
+_follow_next_step_at = 0.0
+_follow_motion_active = False
+_follow_safety_notice_latched = False
+_identity_enrollment_state = "idle"
+_identity_pending_name = None
+_last_idle_recognized_person = None
+_last_idle_recognized_at = 0.0
+_motion_timer = None
+_motion_generation = 0
+_motion_lock = threading.Lock()
 event_bus.subscribe(
     "RUNTIME_STATE_CHANGED",
     vision.on_runtime_state_changed,
@@ -153,7 +195,66 @@ def safe_play(path: str):
     audio.resume()
     time.sleep(0.15)
 
+
+def _rearm_wake_after_audio():
+    """Clear openWakeWord's rolling audio history before re-arming after playback."""
+    model = getattr(wake, "model", None)
+    reset = getattr(model, "reset", None)
+    if callable(reset):
+        try:
+            reset()
+            print("[WAKE] Detection history reset after audio playback")
+        except Exception as exc:
+            print(f"[WAKE] Could not reset detection history: {exc}")
+    wake.unlock()
+
+
+def _announce_enrollment_status(message):
+    """Speak an enrollment update through the normal supervised runtime states."""
+    transition_runtime(RuntimeState.SPEAKING)
+    wake.lock()
+    audio.pause()
+    try:
+        speak(message)
+        time.sleep(0.4)
+    except Exception as exc:
+        print(f"[VISION] Could not announce enrollment status: {exc}")
+    finally:
+        audio.resume()
+        _rearm_wake_after_audio()
+        transition_runtime(RuntimeState.RETURN_TO_IDLE)
+        transition_runtime(RuntimeState.IDLE)
+
+
+def _registration_details(text):
+    """Return (name, spelling_was_given) from a spoken self-introduction."""
+    name = get_registration_name(text)
+    if not name:
+        return None, False
+    words = name.split()
+    for start in range(len(words)):
+        spelled = get_spelled_registration_name(" ".join(words[start:]))
+        if spelled:
+            return spelled, True
+    return name, False
+
+
 def transition_runtime(target_state):
+    global _auto_face_track_id, _follow_start_pending, _follow_region_pending, _follow_search_active
+
+    if runtime.current == RuntimeState.IDLE and target_state != RuntimeState.IDLE:
+        if not follow_logic.enabled:
+            if _auto_face_track_id is not None:
+                print(f"[SERVO] Automatic face tracking paused at {target_state}")
+            _auto_face_track_id = None
+            servo_tracker.stop_search()
+
+    if runtime.current == RuntimeState.IDLE and target_state != RuntimeState.IDLE and follow_logic.enabled:
+        follow_logic.stop()
+        servo_tracker.stop_search()
+        sequence = stop_motion()
+        print(f"[FOLLOW] Stopped before runtime interaction (STOP sequence {sequence})")
+
     previous, current = runtime.transition_to(target_state)
 
     event_bus.publish(
@@ -166,10 +267,469 @@ def transition_runtime(target_state):
 
     print(f"[STATE] {previous.value} -> {current.value}")
 
+    if current == RuntimeState.IDLE and _follow_start_pending:
+        _auto_face_track_id = None
+        follow_logic.start()
+        # The camera is beginning its target search; mute servo noise from the
+        # initial tilt and sweep until a target is acquired or search stops.
+        _follow_search_active = True
+        tilt_sequence = servo_tracker.set_follow_tilt()
+        print(
+            "[FOLLOW] Camera tilt fixed at "
+            f"{int(servo_tracker.tilt)} degrees "
+            f"(servo sequence {tilt_sequence})"
+        )
+        if _follow_region_pending is not None:
+            follow_logic.request_region(_follow_region_pending)
+        _follow_start_pending = False
+        _follow_region_pending = None
+        print("[FOLLOW] Follow mode enabled; waiting for fresh upper-body perception")
+
     return current
+
+
+def _auto_stop_motion(generation):
+    global _motion_timer, _follow_motion_active
+
+    with _motion_lock:
+        if generation != _motion_generation:
+            return
+        _motion_timer = None
+        follow_pulse = _follow_motion_active
+        _follow_motion_active = False
+        sequence = motors.stop()
+
+    if sequence is None:
+        print("[COMMAND] Timed motor STOP could not be sent; ESP32 watchdog remains the fallback")
+    elif follow_pulse:
+        print(f"[FOLLOW] Bounded motor pulse ended; STOP sent (sequence {sequence})")
+    else:
+        print(f"[COMMAND] Movement timeout; STOP sent (sequence {sequence})")
+
+
+def queue_follow_start(region=None):
+    global _follow_start_pending, _follow_region_pending
+    _follow_start_pending = True
+    _follow_region_pending = region
+
+
+def start_bounded_motion(direction, speed, duration_override=None):
+    global _motion_timer, _motion_generation, _follow_motion_active
+
+    motor_commands = {
+        "FORWARD": motors.forward,
+        "BACKWARD": motors.backward,
+        "LEFT": motors.left,
+        "RIGHT": motors.right,
+    }
+    command = motor_commands.get(direction)
+    if command is None:
+        return None
+
+    with _motion_lock:
+        if _motion_timer is not None:
+            _motion_timer.cancel()
+            _motion_timer = None
+
+        _motion_generation += 1
+        generation = _motion_generation
+        _follow_motion_active = False
+        sequence = command(speed)
+        if sequence is None:
+            return None
+
+        if duration_override is not None:
+            duration = max(0.05, float(duration_override))
+        elif direction == "LEFT":
+            duration = LEFT_TURN_COMMAND_DURATION_SECONDS
+        elif direction == "RIGHT":
+            duration = RIGHT_TURN_COMMAND_DURATION_SECONDS
+        else:
+            duration = FORWARD_COMMAND_DURATION_SECONDS
+        _motion_timer = threading.Timer(
+            duration,
+            _auto_stop_motion,
+            args=(generation,),
+        )
+        _motion_timer.daemon = True
+        _motion_timer.start()
+        return sequence
+
+
+def start_bounded_forward(speed):
+    return start_bounded_motion("FORWARD", speed)
+
+
+def stop_motion():
+    global _motion_timer, _motion_generation, _follow_motion_active
+
+    with _motion_lock:
+        _motion_generation += 1
+        _follow_motion_active = False
+        if _motion_timer is not None:
+            _motion_timer.cancel()
+            _motion_timer = None
+        return motors.stop()
+
+
+def confirm_motion_command(sequence, direction):
+    acknowledgement = motors.gpio.wait_for_ack(sequence, timeout=0.75)
+    if acknowledgement == "OK":
+        return True, None
+
+    if acknowledgement is None:
+        print(f"[COMMAND] No ESP32 acknowledgement for {direction}; sending STOP")
+        failure = "ACK_TIMEOUT"
+    else:
+        print(f"[COMMAND] ESP32 rejected {direction}: {acknowledgement}")
+        failure = {
+            "ERROR|OBSTACLE": "OBSTACLE",
+            "ERROR|SENSOR_NOT_READY": "SENSOR_NOT_READY",
+            "ERROR|SAFETY_STOP": "SAFETY_STOP",
+        }.get(acknowledgement, "REJECTED")
+
+    # The controller has either rejected the command or failed to confirm it.
+    # Cancel the Pi timer and issue a dedicated STOP as a fail-safe.
+    stop_motion()
+    return False, failure
+
+
+def motion_failure_response(direction, failure):
+    if failure == "OBSTACLE":
+        # The ESP32 also emits BLOCKED|OBSTACLE; process_safety_events speaks it.
+        return ""
+    if failure == "SENSOR_NOT_READY":
+        if direction == "BACKWARD":
+            return "My rear sensor isn't ready, so I can't move backward."
+        if direction in ("LEFT", "RIGHT"):
+            return "A safety sensor isn't ready, so I can't turn."
+        return "A front safety sensor isn't ready, so I can't move forward."
+    if failure == "SAFETY_STOP":
+        # Older firmware can reject with a generic safety code and omit the
+        # separate BLOCKED event. Give the user an audible, accurate reason.
+        return "The safety system stopped the move, so I didn't move. Check for an obstacle or sensor issue."
+    if failure == "ACK_TIMEOUT":
+        return "I couldn't confirm that move, so I stopped."
+    return "The motor controller rejected that command."
+
+
+def announce_safety_message(message):
+    print(f"[SAFETY] {message}")
+    wake.lock()
+    audio.pause()
+    eyes.alert()
+    try:
+        if not play_cached_response(message):
+            print(
+                "[SAFETY] Obstacle WAV is missing; run "
+                "prepare_command_voice_cache({obstacle_stop, obstacle_blocked_v2}) once."
+            )
+        time.sleep(0.6)
+    except Exception as exc:
+        print(f"[SAFETY] Could not speak safety message: {exc}")
+    finally:
+        audio.resume()
+        _rearm_wake_after_audio()
+        eyes.idle()
+
+
+def announce_follow_notice(notice):
+    messages = {
+        "no_target": "I haven't found an upper body yet. I'm scanning with my camera and will keep searching.",
+        "selection_required": "I see several people. Say follow left, follow center, or follow right.",
+        "selection_not_unique": "I can't identify one person in that direction. Please choose left, center, or right again.",
+        "target_lost": "I lost the selected person. I stopped tracking them. Say follow me again when they are visible to select again.",
+        "target_ambiguous": "I can't tell which person you selected. Following is stopped; say follow me again to choose.",
+        "reselect_target": "I couldn't safely reacquire the same person. Say follow me again to select a target.",
+        "stale_frame": "The camera feed is stale, so I stopped following. Say follow me again after the camera is working.",
+        "link_lost": "I lost the motor and servo controller connection, so follow mode stopped. Say follow me again after it reconnects.",
+        "sensor_not_ready": "My safety sensors aren't ready, so I stopped following until they recover.",
+        "obstacle_blocked": "An obstacle blocks my route. I stopped following and will wait for a clear path.",
+    }
+    message = messages.get(notice)
+    if not message:
+        return
+    print(f"[FOLLOW] {message}")
+    wake.lock()
+    audio.pause()
+    eyes.alert()
+    try:
+        speak(message)
+        time.sleep(0.4)
+    except Exception as exc:
+        print(f"[FOLLOW] Could not speak status: {exc}")
+    finally:
+        audio.resume()
+        _rearm_wake_after_audio()
+        eyes.idle()
+
+
+def _follow_sensor_is_clear(value):
+    if value == "FAR":
+        return True
+    return isinstance(value, (int, float)) and value > FOLLOW_OBSTACLE_CLEARANCE_MM
+
+
+def _announce_follow_blocked(reason):
+    global _follow_safety_notice_latched
+    if _follow_safety_notice_latched == reason:
+        return
+    _follow_safety_notice_latched = reason
+    announce_follow_notice(reason)
+
+
+def _stop_follow_pulse(reason):
+    global _follow_next_step_at
+    if _follow_motion_active:
+        sequence = stop_motion()
+        print(f"[FOLLOW] {reason}; STOP sent (sequence {sequence})")
+    _follow_next_step_at = 0.0
+
+
+def _follow_range_width(target, snapshot):
+    box = target.get("bbox")
+    frame_width = (snapshot.get("frame_size") or (640, 480))[0]
+    if not box or len(box) != 4:
+        return None
+    x1, _y1, x2, _y2 = box
+    if x1 <= 1 or x2 >= frame_width - 1 or x2 <= x1:
+        return None
+    return (x2 - x1) / FOLLOW_BOX_TO_SHOULDER_SCALE
+
+
+def _follow_path_is_clear(direction):
+    sensors = motors.gpio.get_sensor_snapshot(
+        max_age=FOLLOW_SENSOR_MAX_AGE_SECONDS
+    )
+    if sensors is None:
+        return False, "sensor_not_ready"
+    if direction == "BACKWARD":
+        clear = _follow_sensor_is_clear(sensors.get("rear_mm"))
+    else:
+        clear = all(
+            _follow_sensor_is_clear(sensors.get(key))
+            for key in ("tof_left_mm", "tof_center_mm", "tof_right_mm")
+        )
+    return clear, None if clear else "obstacle_blocked"
+
+
+def _start_follow_pulse(direction):
+    global _follow_motion_active, _follow_next_step_at
+    if not motors.gpio.is_connected():
+        _stop_follow_pulse("ESP32 link unavailable")
+        announce_follow_notice("link_lost")
+        return
+
+    sequence = start_bounded_motion(
+        direction,
+        FOLLOW_PWM,
+        duration_override=FOLLOW_PULSE_SECONDS,
+    )
+    if sequence is None:
+        print(f"[FOLLOW] {direction} pulse could not be sent")
+        _stop_follow_pulse("Motor command send failed")
+        return
+
+    _follow_motion_active = True
+    acknowledgement = motors.gpio.wait_for_ack(sequence, timeout=0.2)
+    if acknowledgement != "OK":
+        print(f"[FOLLOW] {direction} pulse not confirmed: {acknowledgement or 'ACK_TIMEOUT'}")
+        _stop_follow_pulse("Motor command was not confirmed")
+        _follow_next_step_at = time.monotonic() + 2.0
+        if acknowledgement in ("ERROR|OBSTACLE", "ERROR|SAFETY_STOP"):
+            _announce_follow_blocked("obstacle_blocked")
+        elif acknowledgement == "ERROR|SENSOR_NOT_READY":
+            _announce_follow_blocked("sensor_not_ready")
+        return
+
+    _follow_next_step_at = time.monotonic() + FOLLOW_PULSE_INTERVAL_SECONDS
+    print(f"[FOLLOW] {direction} pulse accepted at PWM {FOLLOW_PWM} for {FOLLOW_PULSE_SECONDS:.2f}s")
+
+
+def _update_follow_chassis(target, snapshot):
+    global _follow_width_samples, _follow_sample_target_id
+    global _follow_last_observation, _follow_safety_notice_latched
+
+    if target is None:
+        _follow_width_samples = []
+        _follow_sample_target_id = None
+        _follow_last_observation = None
+        _stop_follow_pulse("Target unavailable")
+        return
+
+    track_id = target.get("track_id")
+    if target.get("ambiguous", False):
+        _follow_width_samples = []
+        _stop_follow_pulse("Target association ambiguous")
+        return
+    if track_id != _follow_sample_target_id:
+        _follow_width_samples = []
+        _follow_sample_target_id = track_id
+        _follow_last_observation = None
+        _stop_follow_pulse("Target changed")
+
+    observed_at = snapshot.get("observed_at")
+    width = _follow_range_width(target, snapshot)
+    if not isinstance(observed_at, (int, float)) or width is None:
+        _follow_width_samples = []
+        _stop_follow_pulse("Range estimate invalid or clipped")
+        return
+    if observed_at != _follow_last_observation:
+        _follow_width_samples.append(width)
+        _follow_width_samples = _follow_width_samples[-FOLLOW_RANGE_WINDOW:]
+        _follow_last_observation = observed_at
+
+    if len(_follow_width_samples) < FOLLOW_RANGE_MIN_SAMPLES:
+        return
+    shoulder_width = statistics.median(_follow_width_samples)
+
+    if shoulder_width < FOLLOW_FORWARD_BELOW_SHOULDER_PX:
+        direction = "FORWARD"
+    elif shoulder_width > FOLLOW_REVERSE_ABOVE_SHOULDER_PX:
+        direction = "BACKWARD"
+    else:
+        _stop_follow_pulse("Inside calibrated distance band")
+        _follow_safety_notice_latched = False
+        return
+
+    path_clear, failure = _follow_path_is_clear(direction)
+    if not path_clear:
+        _stop_follow_pulse("Safety path is not clear")
+        _announce_follow_blocked(failure)
+        return
+
+    _follow_safety_notice_latched = False
+    if time.monotonic() >= _follow_next_step_at and not _follow_motion_active:
+        _start_follow_pulse(direction)
+
+
+def update_follow_from_vision(snapshot):
+    global _follow_search_active
+
+    if runtime.current != RuntimeState.IDLE or not follow_logic.enabled:
+        _follow_search_active = False
+        _update_follow_chassis(None, snapshot or {})
+        return
+    _follow_search_active = False
+    decision = follow_logic.update(snapshot, runtime_idle=True)
+    if decision["stop_motion"]:
+        sequence = stop_motion()
+        observed_at = (snapshot or {}).get("observed_at")
+        frame_age = (
+            time.monotonic() - observed_at
+            if isinstance(observed_at, (int, float))
+            else None
+        )
+        tracks = [
+            (person.get("track_id"), bool(person.get("ambiguous", False)))
+            for person in ((snapshot or {}).get("persons") or [])
+            if isinstance(person, dict)
+        ]
+        reason = decision.get("notice") or "locked target missing, stale, or ambiguous"
+        age_text = f"{frame_age:.2f}s" if frame_age is not None else "unavailable"
+        print(
+            f"[FOLLOW] Safety STOP sent (sequence {sequence}); reason={reason}, "
+            f"state={decision['state']}, locked_track={follow_logic.target_id}, "
+            f"visible_tracks={tracks}, frame_age={age_text}"
+        )
+    target = decision["target"]
+    if target is not None:
+        servo_tracker.stop_search()
+        if not motors.gpio.is_connected():
+            follow_logic.stop()
+            _follow_search_active = False
+            sequence = stop_motion()
+            print(f"[FOLLOW] Controller link lost; follow stopped (STOP sequence {sequence})")
+            announce_follow_notice("link_lost")
+            return
+        frame_w, _frame_h = snapshot.get("frame_size", (640, 480))
+        x, _y = target["center"]
+        servo_tracker.update_pan_only(x, frame_w)
+        _update_follow_chassis(target, snapshot)
+    elif decision["state"] in (FollowLogic.WAITING_FOR_TARGET, FollowLogic.SEARCHING_FOR_TARGET):
+        observed_at = snapshot.get("observed_at")
+        frame_age = time.monotonic() - observed_at if isinstance(observed_at, (int, float)) else None
+        if frame_age is not None and 0.0 <= frame_age <= FollowLogic.MAX_FRAME_AGE_SECONDS:
+            servo_tracker.search_step()
+            _follow_search_active = True
+        else:
+            servo_tracker.stop_search()
+            _follow_search_active = False
+        _update_follow_chassis(None, snapshot or {})
+    else:
+        servo_tracker.stop_search()
+        _follow_search_active = False
+        _update_follow_chassis(None, snapshot or {})
+    if decision["notice"]:
+        announce_follow_notice(decision["notice"])
+
+
+def update_idle_face_tracking(snapshot):
+    """Track one visible face with the camera servos while idle, independent of identity."""
+    global _auto_face_track_id
+
+    if runtime.current != RuntimeState.IDLE or follow_logic.enabled:
+        return
+
+    observed_at = (snapshot or {}).get("observed_at")
+    if not isinstance(observed_at, (int, float)):
+        _auto_face_track_id = None
+        servo_tracker.stop_search()
+        return
+    age = time.monotonic() - observed_at
+    if age < 0 or age > 0.35:
+        _auto_face_track_id = None
+        servo_tracker.stop_search()
+        return
+
+    faces = (snapshot or {}).get("faces") or []
+    candidates = [
+        face for face in faces
+        if isinstance(face, dict)
+        and face.get("track_id") is not None
+        and not face.get("ambiguous", True)
+    ]
+    target = next(
+        (face for face in candidates if face.get("track_id") == _auto_face_track_id),
+        None,
+    )
+    if target is None and len(candidates) == 1:
+        target = candidates[0]
+        _auto_face_track_id = target["track_id"]
+        print(
+            f"[SERVO] Automatic face tracking started "
+            f"(track={_auto_face_track_id}, name={target.get('name', 'Unknown')})"
+        )
+    elif target is None:
+        if _auto_face_track_id is not None:
+            print("[SERVO] Automatic face tracking stopped; no unique face target")
+        _auto_face_track_id = None
+        servo_tracker.stop_search()
+        return
+
+    frame_w, frame_h = (snapshot or {}).get("frame_size", (640, 480))
+    x, y = target["center"]
+    servo_tracker.update(x, y, frame_w, frame_h)
+
+
+def process_safety_events():
+    global _follow_safety_notice_latched
+    for event in motors.gpio.drain_events():
+        if event == "EVENT|0|STOP|OBSTACLE":
+            _follow_safety_notice_latched = "obstacle_blocked"
+            # This is an asynchronous ESP32 safety event; announce it in IDLE too,
+            # without waiting for a wake word or an active conversation.
+            announce_safety_message("I stopped because an obstacle was detected.")
+        elif event == "EVENT|0|BLOCKED|OBSTACLE":
+            _follow_safety_notice_latched = "obstacle_blocked"
+            announce_safety_message("I can't move because an obstacle was detected.")
+        # EVENT and FAULT lines are logged immediately by GPIOControl's reader thread.
+
 
 # ── Main loop ──────────────────────────────────────────────────────────────────
 def main():
+    global _identity_enrollment_state, _identity_pending_name
+    global _last_idle_recognized_person, _last_idle_recognized_at
     print("[SYSTEM] Jarvis started")
 
     # Start systems
@@ -197,7 +757,7 @@ def main():
 
     time.sleep(0.2)
 
-    wake.unlock()
+    _rearm_wake_after_audio()
 
     print("[SYSTEM] ── Ready. Say 'Hey Thashu'")
 
@@ -208,6 +768,48 @@ def main():
 
 
     while True:
+        process_safety_events()
+
+        if runtime.current == RuntimeState.IDLE and _identity_enrollment_state == "capturing":
+            capture = vision.enrollment_status()
+            if capture.get("status") == "ready":
+                if _identity_pending_name:
+                    _identity_enrollment_state = "spelling"
+                    print(
+                        "[VISION] Required face images captured "
+                        f"({capture.get('sample_count', 0)}/{capture.get('required_samples', 5)}); "
+                        f"waiting for spelling of draft name {_identity_pending_name}"
+                    )
+                    _announce_enrollment_status(
+                        f"I have finished taking your face pictures. "
+                        f"I heard your name as {_identity_pending_name}. "
+                        "Please spell it using ordinary letter names."
+                    )
+                else:
+                    _identity_enrollment_state = "awaiting_name"
+                    print(
+                        "[VISION] Required face images captured "
+                        f"({capture.get('sample_count', 0)}/{capture.get('required_samples', 5)}); "
+                        "waiting for the spoken name"
+                    )
+                    _announce_enrollment_status(
+                        "I have finished taking the face pictures. "
+                        "Tell me your name, then spell it using ordinary letter names."
+                    )
+                continue
+            if capture.get("status") in ("ambiguous", "timed_out"):
+                _identity_enrollment_state = "idle"
+                vision.clear_enrollment()
+                message = (
+                    "I saw more than one face, so I cancelled face registration. "
+                    "Please try again with only one face in view."
+                    if capture.get("status") == "ambiguous"
+                    else "I could not capture enough clear face pictures in time. Please try again."
+                )
+                print(f"[VISION] Enrollment ended: {capture.get('status')}")
+                _announce_enrollment_status(message)
+                continue
+
         chunk = audio.read()
 
         if chunk is None:
@@ -215,13 +817,39 @@ def main():
 
         # ── Pass vision state to attention system ─────────────────────────
         vis = vision.get_state()
+        update_follow_from_vision(vis)
+        update_idle_face_tracking(vis)
+
+        # Preserve the latest unique, fresh known face across the wake-word
+        # transition, which pauses VisionCore and clears its live snapshot.
+        faces = vis.get("faces") or []
+        known_faces = [
+            face for face in faces
+            if isinstance(face, dict)
+            and face.get("name") not in (None, "", "Unknown")
+            and not face.get("ambiguous", True)
+        ]
+        observed_at = vis.get("observed_at")
+        frame_fresh = (
+            isinstance(observed_at, (int, float))
+            and 0.0 <= time.monotonic() - observed_at <= 0.75
+        )
+        if len(faces) == 1 and len(known_faces) == 1 and frame_fresh:
+            _last_idle_recognized_person = known_faces[0]["name"]
+            _last_idle_recognized_at = time.monotonic()
+        elif len(faces) != 1 or not known_faces or not frame_fresh:
+            _last_idle_recognized_person = None
+            _last_idle_recognized_at = 0.0
 
         is_speech_now = vad.is_speech(chunk)
         attn.update(vis["faces"], is_speech_now)
 
         # ── IDLE: watch for wake word ─────────────────────────────────────
         if runtime.current == RuntimeState.IDLE:
-            if wake.process(chunk):
+            # Ignore wake input only while the camera is actively sweeping
+            # to acquire a follow target. Idle face tracking and target tracking
+            # continue to listen for the wake word.
+            if not _follow_search_active and wake.process(chunk):
                 transition_runtime(RuntimeState.WAKE_DETECTED)
 
                 print("[SYSTEM] ═══════════════════════════")
@@ -233,7 +861,7 @@ def main():
 
                 safe_play(SOUND_YES)
 
-                wake.unlock()
+                _rearm_wake_after_audio()
                 transition_runtime(RuntimeState.LISTENING)
                 # ── Collect command ──────────────────────────────────────
                 
@@ -255,7 +883,7 @@ def main():
 
                     time.sleep(0.8)
 
-                    wake.unlock()
+                    _rearm_wake_after_audio()
 
                     transition_runtime(RuntimeState.RETURN_TO_IDLE)
                     transition_runtime(RuntimeState.IDLE)
@@ -273,7 +901,17 @@ def main():
 
                 stt_start = time.time()
 
-                text = transcribe(raw_audio)
+                expected_phrases = None
+                if _identity_enrollment_state == "confirm":
+                    expected_phrases = [
+                        "confirm save",
+                        "try again",
+                        "cancel registration",
+                    ]
+                elif _identity_enrollment_state == "delete_confirm":
+                    expected_phrases = ["yes", "no", "cancel"]
+
+                text = transcribe(raw_audio, expected_phrases=expected_phrases)
 
                 stt_time = time.time() - stt_start
                 print(f"[TIME] STT = {stt_time:.2f}s")
@@ -291,7 +929,7 @@ def main():
                     time.sleep(0.8)
 
                     audio.resume()
-                    wake.unlock()
+                    _rearm_wake_after_audio()
 
                     transition_runtime(RuntimeState.RETURN_TO_IDLE)
                     transition_runtime(RuntimeState.IDLE)
@@ -305,7 +943,260 @@ def main():
 
                 brain_start = time.time()
 
-                response = brain.process(text)
+                identity_command = get_recognition_command(text)
+                registration_name, registration_was_spelled = _registration_details(text)
+                removal_name = get_remove_identity_name(text)
+                if identity_command == "CANCEL" and _identity_enrollment_state != "idle":
+                    was_deleting = _identity_enrollment_state == "delete_confirm"
+                    vision.clear_enrollment()
+                    _identity_enrollment_state = "idle"
+                    _identity_pending_name = None
+                    response = "I cancelled that identity change." if was_deleting else "I cancelled face registration."
+                elif identity_command == "ENROLL":
+                    if not getattr(vision.detector, "recognition_ready", False):
+                        response = "Face registration is unavailable because the landmark model is not installed."
+                    else:
+                        vision.begin_enrollment(required_samples=5, timeout=45.0)
+                        _identity_enrollment_state = "capturing"
+                        # A name in this utterance is only a draft; enrollment
+                        # still requires captured face samples, spelling, and save.
+                        _identity_pending_name = registration_name
+                        if registration_name:
+                            response = (
+                                f"I heard your name as {registration_name}. "
+                                "I am collecting five clear face views first. "
+                                "After that, I will ask you to spell the name."
+                            )
+                        else:
+                            response = (
+                                "I am collecting five clear views of one face. "
+                                "Keep your face centered and still for a few seconds."
+                            )
+                elif removal_name:
+                    matched_name = vision.database.resolve_name(removal_name)
+                    if matched_name is None:
+                        response = (
+                            f"I couldn't find one clear saved name matching {removal_name}. "
+                            "Try saying forget followed by the name spelled as ordinary letters, like T H A R U N."
+                        )
+                    else:
+                        _identity_pending_name = matched_name
+                        _identity_enrollment_state = "delete_confirm"
+                        if matched_name.casefold() == removal_name.casefold():
+                            response = f"Should I delete the saved face identity for {matched_name}? Say yes to confirm or no to cancel."
+                        else:
+                            response = (
+                                f"I didn't find {removal_name}, but I found {matched_name}. "
+                                f"Do you want me to delete {matched_name}? Say yes to confirm or no to cancel."
+                            )
+                elif _identity_enrollment_state in ("capturing", "awaiting_name") and registration_name:
+                    if _identity_enrollment_state == "capturing" and _identity_pending_name is None:
+                        _identity_pending_name = registration_name
+                    status = vision.enrollment_status()
+                    samples = vision.enrollment_samples()
+                    if status.get("status") == "ready" and samples:
+                        _identity_pending_name = registration_name
+                        if registration_was_spelled:
+                            _identity_enrollment_state = "confirm"
+                            spelled_letters = " ".join(registration_name.upper())
+                            response = (
+                                f"I heard {spelled_letters}, which is {registration_name}. "
+                                f"Should I save this face as {registration_name}? Say confirm save, try again to spell it again, or cancel registration."
+                            )
+                        else:
+                            _identity_enrollment_state = "spelling"
+                            response = (
+                                f"I heard the name {_identity_pending_name}. "
+                                "Please spell the name using ordinary letter names, for example T H A R U N."
+                            )
+                    elif status.get("status") in ("ambiguous", "timed_out"):
+                        vision.clear_enrollment()
+                        _identity_enrollment_state = "idle"
+                        response = "I could not get a stable single face. Please try again with only one face in view."
+                    else:
+                        count = status.get("sample_count", 0)
+                        required = status.get("required_samples", 5)
+                        response = (
+                            f"I have {count} of {required} clear face views so far. "
+                            "I will tell you when they are ready. Please stay still and try again in a few seconds."
+                        )
+                elif _identity_enrollment_state == "spelling":
+                    spelled_name = get_spelled_registration_name(text)
+                    if spelled_name:
+                        _identity_pending_name = spelled_name
+                        _identity_enrollment_state = "confirm"
+                        spelled_letters = " ".join(spelled_name.upper())
+                        response = (
+                            f"I heard {spelled_letters}, which is {spelled_name}. "
+                            f"Should I save this face as {spelled_name}? Say confirm save, try again to spell it again, or cancel registration."
+                        )
+                    else:
+                        response = (
+                            "I didn't catch the spelling. Please say each letter separately, "
+                            "for example T H A R U N."
+                        )
+                elif _identity_enrollment_state == "delete_confirm" and identity_command == "CONFIRM":
+                    try:
+                        vision.database.remove_person(_identity_pending_name, confirmed=True)
+                        response = f"I deleted the saved face identity for {_identity_pending_name}."
+                        print(f"[VISION] Confirmed face identity removed: {_identity_pending_name}")
+                    except (ValueError, OSError, PermissionError) as exc:
+                        print(f"[VISION] Identity deletion rejected: {exc}")
+                        response = "I could not safely delete that face identity."
+                    _identity_enrollment_state = "idle"
+                    _identity_pending_name = None
+                elif _identity_enrollment_state == "confirm" and identity_command == "CONFIRM_SAVE":
+                    samples = vision.enrollment_samples()
+                    try:
+                        if not samples:
+                            raise ValueError("Enrollment samples expired")
+                        vision.database.add_person_samples(
+                            _identity_pending_name, samples, confirmed=True
+                        )
+                        response = f"I will remember {_identity_pending_name}."
+                        print(f"[VISION] Confirmed face identity enrolled: {_identity_pending_name}")
+                    except (ValueError, OSError, PermissionError) as exc:
+                        print(f"[VISION] Enrollment rejected: {exc}")
+                        response = "I could not safely save that face identity. Please try registration again."
+                    vision.clear_enrollment()
+                    _identity_enrollment_state = "idle"
+                    _identity_pending_name = None
+                elif _identity_enrollment_state == "confirm" and identity_command == "TRY_AGAIN":
+                    # Keep the captured face samples; only ask for the name spelling again.
+                    _identity_enrollment_state = "spelling"
+                    _identity_pending_name = None
+                    response = "Okay. Please spell the name again using ordinary letter names, like T H A R U N."
+                elif _identity_enrollment_state == "delete_confirm" and identity_command == "REJECT":
+                    vision.clear_enrollment()
+                    _identity_enrollment_state = "idle"
+                    _identity_pending_name = None
+                    response = "I cancelled deleting the face identity."
+                elif _identity_enrollment_state == "spelling":
+                    response = "Please spell the name using ordinary letter names, like T H A R U N, or say cancel."
+                elif _identity_enrollment_state == "confirm":
+                    response = "Please say confirm save, try again to spell the name again, or cancel registration."
+                elif _identity_enrollment_state == "delete_confirm":
+                    response = "Please say yes to confirm deleting this saved face identity, or no to cancel."
+                elif _identity_enrollment_state == "capturing":
+                    status = vision.enrollment_status()
+                    if status.get("status") in ("ambiguous", "timed_out"):
+                        vision.clear_enrollment()
+                        _identity_enrollment_state = "idle"
+                        response = "I could not get a stable single face. Please try again with only one face in view."
+                    else:
+                        status = vision.enrollment_status()
+                        count = status.get("sample_count", 0)
+                        required = status.get("required_samples", 5)
+                        response = (
+                            f"I am still collecting clear views, {count} of {required}. "
+                            "Stay still and say your name again in a few seconds."
+                        )
+                elif is_recognition_query(text):
+                    recently_recognized = (
+                        _last_idle_recognized_person is not None
+                        and time.monotonic() - _last_idle_recognized_at <= 20.0
+                    )
+                    if recently_recognized:
+                        response = f"Yes, I recognize you as {_last_idle_recognized_person}."
+                    elif len(vision.database.data) == 1:
+                        saved_name = next(iter(vision.database.data))
+                        response = (
+                            f"I remember a saved face identity as {saved_name}, "
+                            "but I can't confirm who is in front of me right now."
+                        )
+                    else:
+                        response = "I don't recognize a confirmed face right now."
+                elif (follow_command := get_follow_command(text)) == "STOP":
+                    follow_logic.stop()
+                    servo_tracker.stop_search()
+                    stop_sequence = stop_motion()
+                    print(f"[FOLLOW] Explicit follow cancel; STOP sequence {stop_sequence}")
+                    response = "I stopped following."
+                elif follow_command == "START":
+                    queue_follow_start()
+                    response = "Follow mode is on."
+                elif follow_command in ("LEFT", "CENTER", "RIGHT"):
+                    queue_follow_start(follow_command)
+                    response = f"I'll select the unique person on your {follow_command.lower()} after the camera resumes."
+                elif (look_direction := get_look_command(text)) is not None:
+                    look_sequence = servo_tracker.look(look_direction)
+                    if look_sequence is None:
+                        response = "I couldn't reach the servo controller."
+                    else:
+                        look_ack = servo_tracker.gpio.wait_for_ack(look_sequence, timeout=0.75)
+                        if look_ack == "OK":
+                            print(f"[COMMAND] SERVO LOOK {look_direction} accepted (sequence {look_sequence})")
+                            response = {
+                                "UP": "Looking up.",
+                                "DOWN": "Looking down.",
+                                "LEFT": "Looking left.",
+                                "RIGHT": "Looking right.",
+                                "CENTER": "Looking straight ahead.",
+                            }[look_direction]
+                        else:
+                            print(f"[COMMAND] SERVO LOOK {look_direction} failed: {look_ack or 'ACK_TIMEOUT'}")
+                            response = "I couldn't reach the servo controller."
+                elif is_stop_command(text):
+                    follow_logic.stop()
+                    servo_tracker.stop_search()
+                    print("[COMMAND] Explicit STOP recognized; sending directly to ESP32")
+                    stop_sequence = stop_motion()
+                    if stop_sequence is None:
+                        print("[COMMAND] STOP could not be sent; ESP32 link is unavailable")
+                        response = "I couldn't reach the motor controller, so I can't confirm the stop."
+                    else:
+                        print(f"[COMMAND] STOP sent to ESP32 (sequence {stop_sequence})")
+                        response = "Stopping."
+                elif (forward_speed := get_forward_speed(text)) is not None:
+                    speed_name, pwm = forward_speed
+                    print(
+                        f"[COMMAND] Explicit FORWARD recognized at {speed_name} speed "
+                        f"(PWM {pwm}); auto-stop in {FORWARD_COMMAND_DURATION_SECONDS:.0f}s"
+                    )
+                    move_sequence = start_bounded_motion("FORWARD", pwm)
+                    if move_sequence is None:
+                        print("[COMMAND] FORWARD could not be sent; ESP32 link is unavailable")
+                        response = "I couldn't reach the motor controller, so I can't move."
+                    else:
+                        accepted, failure = confirm_motion_command(move_sequence, "FORWARD")
+                        if accepted:
+                            print(f"[COMMAND] FORWARD accepted by ESP32 (sequence {move_sequence})")
+                            response = {
+                                "slow": "Forward slowly.",
+                                "medium": "Moving forward.",
+                                "fast": "Forward quickly.",
+                            }[speed_name]
+                        else:
+                            response = motion_failure_response("FORWARD", failure)
+                elif (direction := get_direction_command(text)) is not None:
+                    direction_name = direction.lower().replace("_", " ")
+                    if direction == "LEFT":
+                        duration = LEFT_TURN_COMMAND_DURATION_SECONDS
+                    elif direction == "RIGHT":
+                        duration = RIGHT_TURN_COMMAND_DURATION_SECONDS
+                    else:
+                        duration = FORWARD_COMMAND_DURATION_SECONDS
+                    print(
+                        f"[COMMAND] Explicit {direction_name.upper()} recognized "
+                        f"(PWM 200); auto-stop in {duration:.1f}s"
+                    )
+                    move_sequence = start_bounded_motion(direction, 200)
+                    if move_sequence is None:
+                        print(f"[COMMAND] {direction_name.upper()} could not be sent; ESP32 link is unavailable")
+                        response = "I couldn't reach the motor controller."
+                    else:
+                        accepted, failure = confirm_motion_command(move_sequence, direction)
+                        if accepted:
+                            print(f"[COMMAND] {direction_name.upper()} accepted by ESP32 (sequence {move_sequence})")
+                            response = {
+                                "BACKWARD": "Moving backward.",
+                                "LEFT": "Turning left.",
+                                "RIGHT": "Turning right.",
+                            }[direction]
+                        else:
+                            response = motion_failure_response(direction, failure)
+                else:
+                    response = brain.process(text)
 
                 brain_time = time.time() - brain_start
                 print(f"[TIME] BRAIN = {brain_time:.2f}s")
@@ -319,7 +1210,18 @@ def main():
 
                     tts_start = time.time()
 
-                    speak(response)
+                    if response == "Follow mode is on.":
+                        if not play_cached_response(response):
+                            print(
+                                "[FOLLOW] Activation WAV is missing; run "
+                                "prepare_command_voice_cache({follow_started}) once."
+                            )
+                    else:
+                        speak(response)
+
+                    # A safety stop can arrive while this confirmation is playing.
+                    # Handle it before reopening the microphone or returning to IDLE.
+                    process_safety_events()
 
                     tts_time = time.time() - tts_start
                     print(f"[TIME] TTS = {tts_time:.2f}s")
@@ -330,7 +1232,7 @@ def main():
 
                 time.sleep(0.2)
 
-                wake.unlock()
+                _rearm_wake_after_audio()
                 total_time = time.time() - interaction_start
 
                 print("=" * 40)

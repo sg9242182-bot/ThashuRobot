@@ -71,6 +71,7 @@ class EyeManager {
     bool          _renderDirty;
     bool          _ready = false;
     unsigned long _lastHealthCheckMs = 0;
+    unsigned long _nextAutoBlinkMs = 0;
 
     EyeParams computeExpressionParams(Expression expr);
     EyeParams getInterpolatedParams(unsigned long now);

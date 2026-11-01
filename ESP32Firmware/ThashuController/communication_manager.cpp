@@ -17,6 +17,7 @@ void CommunicationManager::begin(MotorManager& motorManager, SafetyManager& safe
                                   EyeManager& eyeManager, ServoManager& servoManager, ToFManager& tofManager, UltrasonicManager& rearUltrasonic) {
     motors = &motorManager; safety = &safetyManager; eyes = &eyeManager; servos = &servoManager; tof = &tofManager; rear = &rearUltrasonic;
     Serial.println("EVENT|0|READY");
+    Serial.println("INFO|MOTOR_MAP|M0=Motor1(front-left)|M1=Motor2(rear-left)|M2=Motor3(front-right)|M3=Motor4(rear-right)");
 }
 
 void CommunicationManager::reportFault(const char* subsystem, const char* detail) {
@@ -60,18 +61,24 @@ void CommunicationManager::handle(char* line) {
             (forward ? SafetyManager::FORWARD : SafetyManager::REVERSE);
         safety->notePiFrame();
         if (!safety->allowMotion(motion, (uint8_t)speed)) {
+            const bool obstacleDetected = safety->obstacleDetectedFor(motion);
             motors->stop(); safety->setActiveMotion(SafetyManager::STOPPED, 0);
-            acknowledge(sequence, "ERROR|SAFETY_STOP"); return;
+            acknowledge(sequence, obstacleDetected ? "ERROR|OBSTACLE" : "ERROR|SENSOR_NOT_READY");
+            if (obstacleDetected) Serial.println("EVENT|0|BLOCKED|OBSTACLE");
+            return;
         }
         if (speed == 0) motors->stop();
         else if (forward) motors->setAll(speed);
         else if (reverse) motors->setAll(-speed);
+        // Physical layout: M0/M1 are the left side; M2/M3 are the right side.
+        // RIGHT uses the direction the user confirmed: left side reverse,
+        // right side forward. LEFT is the inverse.
         else if (left) {
-            motors->setMotor(0,-speed); motors->setMotor(1,speed);
-            motors->setMotor(2,-speed); motors->setMotor(3,speed);
+            motors->setMotor(0,speed); motors->setMotor(1,speed);
+            motors->setMotor(2,-speed); motors->setMotor(3,-speed);
         } else {
-            motors->setMotor(0,speed); motors->setMotor(1,-speed);
-            motors->setMotor(2,speed); motors->setMotor(3,-speed);
+            motors->setMotor(0,-speed); motors->setMotor(1,-speed);
+            motors->setMotor(2,speed); motors->setMotor(3,speed);
         }
         safety->setActiveMotion(motion, (uint8_t)speed);
         acknowledge(sequence, "OK"); return;
@@ -85,6 +92,17 @@ void CommunicationManager::handle(char* line) {
         else if (!strcmp(field[3],"SLEEP")) eyes->setExpression(EXPR_SLEEPY);
         else { acknowledge(sequence, "ERROR|INVALID_ARGUMENT"); return; }
         safety->notePiFrame();
+        acknowledge(sequence, "OK"); return;
+    }
+    if (!strcmp(field[2], "SERVO") && count == 7 && !strcmp(field[3],"MOVE")) {
+        long pan, tilt, duration;
+        if (!parseLong(field[4], pan) || !parseLong(field[5], tilt) ||
+            !parseLong(field[6], duration) || pan < 0 || pan > 180 ||
+            tilt < 0 || tilt > 180 || duration < 50 || duration > 2000) {
+            acknowledge(sequence, "ERROR|OUT_OF_RANGE"); return;
+        }
+        safety->notePiFrame();
+        servos->moveTo((float)pan, (float)tilt, (unsigned long)duration);
         acknowledge(sequence, "OK"); return;
     }
     if (!strcmp(field[2], "SERVO") && count == 6 && !strcmp(field[3],"PAN_TILT")) {
@@ -135,12 +153,17 @@ void CommunicationManager::sendTelemetry() {
         else Serial.print("NA");
     }
     Serial.print("|US_REAR|");
-    if (rear->isFresh() && rear->isValid()) Serial.print((long)(rear->getDistanceCm() * 10.0f));
+    if (!rear->isFresh()) Serial.print("NA");
+    else if (rear->isValid()) Serial.print((long)(rear->getDistanceCm() * 10.0f));
+    else if (rear->isOutOfRange()) Serial.print("FAR");
     else Serial.print("NA");
     Serial.println();
 }
 
 void CommunicationManager::update() {
     readCommands();
+    if (safety && safety->consumeObstacleStop()) {
+        Serial.println("EVENT|0|STOP|OBSTACLE");
+    }
     sendTelemetry();
 }

@@ -1,3 +1,5 @@
+import glob
+import os
 import queue
 import serial
 import serial.tools.list_ports
@@ -28,6 +30,7 @@ class GPIOControl:
     RECONNECT_INTERVAL = 1.0
     DEFAULT_BAUD = 115200
     SERIAL_TIMEOUT = 0.2
+    RX_SILENCE_TIMEOUT = 2.0
 
     def __new__(cls, port=None, baud=DEFAULT_BAUD):
         if cls._instance is None:
@@ -39,6 +42,7 @@ class GPIOControl:
 
     def _init(self, port, baud):
         self._serial = None
+        self._configured_port = port
         self._port = port
         self._baud = baud
         self._write_lock = threading.Lock()
@@ -47,7 +51,12 @@ class GPIOControl:
         self._next_sequence = 1
 
         self._incoming = queue.Queue()
+        self._events = queue.Queue()
+        self._ack_condition = threading.Condition()
+        self._acknowledgements = {}
         self._last_heartbeat = 0.0
+        self._last_rx_monotonic = 0.0
+        self._sensor_snapshot = None
         self._last_connect_attempt = 0.0
         self._stop_event = threading.Event()
 
@@ -71,24 +80,41 @@ class GPIOControl:
     # ------------------------------------------------------------------
 
     def _resolve_port(self):
-        """Return the configured port, or the first likely USB serial device."""
-        if self._port:
-            return self._port
+        """Resolve a configured port or rediscover the ESP32 after USB re-enumeration."""
+        if self._configured_port:
+            return self._configured_port
 
         candidates = []
         for info in serial.tools.list_ports.comports():
             device = info.device or ""
+            if not (device.startswith("/dev/ttyACM") or device.startswith("/dev/ttyUSB")):
+                continue
+
             description = (info.description or "").lower()
             manufacturer = (info.manufacturer or "").lower()
-            if device.startswith("/dev/ttyACM") or device.startswith("/dev/ttyUSB"):
-                candidates.append((device, description, manufacturer))
+            candidates.append((device, description, manufacturer))
 
-        # Prefer an ESP32-like USB description when available, otherwise use
-        # the first USB serial device. The final identity check is EVENT|READY.
+        # Keep the current device while it still exists, then prefer an ESP32
+        # description. USB port numbers can change after a disconnect.
+        current_realpath = os.path.realpath(self._port) if self._port else None
+        for device, _, _ in candidates:
+            if current_realpath and os.path.realpath(device) == current_realpath:
+                return self._stable_device_path(device)
         for device, description, manufacturer in candidates:
             if "esp32" in description or "espressif" in description or "esp32" in manufacturer:
-                return device
-        return candidates[0][0] if candidates else None
+                return self._stable_device_path(device)
+        if candidates:
+            return self._stable_device_path(candidates[0][0])
+        return None
+
+    @staticmethod
+    def _stable_device_path(device):
+        """Prefer a persistent /dev/serial/by-id symlink over a changing ttyUSB number."""
+        resolved_device = os.path.realpath(device)
+        for candidate in glob.glob("/dev/serial/by-id/*"):
+            if os.path.realpath(candidate) == resolved_device:
+                return candidate
+        return device
 
     def _connect(self):
         port = self._resolve_port()
@@ -106,6 +132,7 @@ class GPIOControl:
                 self._serial = serial_conn
                 self._port = port
                 self._last_heartbeat = 0.0
+                self._last_rx_monotonic = time.monotonic()
             print(f"[GPIO] ESP32 connected on {port} @ {self._baud}")
             return True
         except (serial.SerialException, OSError) as exc:
@@ -114,8 +141,12 @@ class GPIOControl:
             print(f"[GPIO] ESP32 connection unavailable: {exc}")
             return False
 
-    def _disconnect(self, reason="unknown"):
+    def _disconnect(self, reason="unknown", expected_serial=None):
         with self._state_lock:
+            # A delayed failure from an old reader/writer must not close a
+            # connection that has already been restored.
+            if expected_serial is not None and self._serial is not expected_serial:
+                return False
             serial_conn = self._serial
             self._serial = None
 
@@ -125,6 +156,7 @@ class GPIOControl:
             except Exception:
                 pass
             print(f"[GPIO] ESP32 disconnected: {reason}")
+        return serial_conn is not None
 
     # ------------------------------------------------------------------
     # Protocol
@@ -166,7 +198,7 @@ class GPIOControl:
                 serial_conn.write(frame)
                 return sequence
             except (serial.SerialException, OSError) as exc:
-                self._disconnect(f"write failed: {exc}")
+                self._disconnect(f"write failed: {exc}", expected_serial=serial_conn)
                 return None
 
     def heartbeat(self):
@@ -188,6 +220,26 @@ class GPIOControl:
                 messages.append(self._incoming.get_nowait())
             except queue.Empty:
                 return messages
+
+    def drain_events(self):
+        """Return queued ESP32 EVENT/FAULT lines for high-level handling."""
+        events = []
+        while True:
+            try:
+                events.append(self._events.get_nowait())
+            except queue.Empty:
+                return events
+
+    def wait_for_ack(self, sequence, timeout=0.75):
+        """Wait for one command ACK; return its payload (for example, OK or ERROR|OBSTACLE)."""
+        deadline = time.monotonic() + timeout
+        with self._ack_condition:
+            while sequence not in self._acknowledgements:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                self._ack_condition.wait(remaining)
+            return self._acknowledgements.pop(sequence)
 
     # ------------------------------------------------------------------
     # Background transport
@@ -219,15 +271,100 @@ class GPIOControl:
             try:
                 raw = serial_conn.readline()
                 if not raw:
+                    with self._state_lock:
+                        is_current = self._serial is serial_conn
+                        last_rx = self._last_rx_monotonic
+                    if is_current and time.monotonic() - last_rx >= self.RX_SILENCE_TIMEOUT:
+                        self._disconnect(
+                            f"no ESP32 serial data for {self.RX_SILENCE_TIMEOUT:.0f}s",
+                            expected_serial=serial_conn,
+                        )
                     continue
+
+                with self._state_lock:
+                    if self._serial is not serial_conn:
+                        continue
+                    self._last_rx_monotonic = time.monotonic()
+
                 line = raw.decode("ascii", errors="replace").strip()
                 if line:
                     self._incoming.put(line)
+                    if line.startswith("TEL|"):
+                        self._update_sensor_snapshot(line)
+                    if line.startswith("ACK|"):
+                        fields = line.split("|", 2)
+                        try:
+                            sequence = int(fields[1])
+                            result = fields[2] if len(fields) == 3 else ""
+                        except (ValueError, IndexError):
+                            sequence = None
+                            result = ""
+
+                        if sequence is not None and result != "ALIVE":
+                            with self._ack_condition:
+                                self._acknowledgements[sequence] = result
+                                while len(self._acknowledgements) > 128:
+                                    self._acknowledgements.pop(next(iter(self._acknowledgements)))
+                                self._ack_condition.notify_all()
+                        if result.startswith("ERROR"):
+                            print(f"[ESP32] {line}")
+                    if line.startswith(("EVENT|", "FAULT|")):
+                        print(f"[ESP32] {line}")
+                        self._events.put(line)
             except (serial.SerialException, OSError) as exc:
-                self._disconnect(f"read failed: {exc}")
+                self._disconnect(f"read failed: {exc}", expected_serial=serial_conn)
             except Exception as exc:
                 # A malformed inbound frame must not kill the reader thread.
                 print(f"[GPIO] ESP32 receive error: {exc}")
+
+    def _update_sensor_snapshot(self, line):
+        """Parse one ESP32 sensor frame and publish a timestamped snapshot."""
+        fields = line.split("|")
+        if len(fields) != 11 or fields[:3] != ["TEL", "0", "SENSORS"]:
+            return
+
+        raw = dict(zip(fields[3::2], fields[4::2]))
+        labels = ("TOF_L", "TOF_C", "TOF_R", "US_REAR")
+        if any(label not in raw for label in labels):
+            return
+
+        def parse_value(value):
+            if value == "FAR":
+                return "FAR"
+            if value == "NA":
+                return None
+            try:
+                distance = int(value)
+            except (TypeError, ValueError):
+                return False
+            return distance if distance >= 0 else False
+
+        parsed = [parse_value(raw[label]) for label in labels]
+        if any(value is False for value in parsed):
+            return
+
+        snapshot = {
+            "tof_left_mm": parsed[0],
+            "tof_center_mm": parsed[1],
+            "tof_right_mm": parsed[2],
+            "rear_mm": parsed[3],
+            "received_at": time.monotonic(),
+        }
+        with self._state_lock:
+            self._sensor_snapshot = snapshot
+
+    def get_sensor_snapshot(self, max_age=0.2):
+        """Return a copy of fresh sensor telemetry, or None if missing/stale.
+
+        Numeric values are millimetres; out-of-range channels are "FAR";
+        unavailable channels are None. The timestamp uses time.monotonic().
+        """
+        now = time.monotonic()
+        with self._state_lock:
+            snapshot = self._sensor_snapshot
+            if snapshot is None or now - snapshot["received_at"] > max_age:
+                return None
+            return dict(snapshot)
 
     # ------------------------------------------------------------------
     # Lifecycle / status

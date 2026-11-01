@@ -19,3 +19,14 @@ def project_path(*parts):
 def model_path(*parts):
     """Return an absolute path in the persistent, machine-local model directory."""
     return str(MODELS_DIR.joinpath(*parts))
+
+
+DEFAULT_DATA_DIR = Path.home() / ".local" / "share" / "thashu" / "data"
+DATA_DIR = Path(
+    os.environ.get("THASHU_DATA_DIR", str(DEFAULT_DATA_DIR))
+).expanduser().resolve()
+
+
+def data_path(*parts):
+    """Return a path in persistent machine-local data, outside the Git checkout."""
+    return str(DATA_DIR.joinpath(*parts))

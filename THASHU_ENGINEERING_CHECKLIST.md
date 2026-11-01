@@ -356,31 +356,33 @@ Acceptance:
 
 Phase 3 — Voice → Command → Hardware
 
-Status: IN PROGRESS — voice-to-decision path traced; STOP is not yet dispatched to the ESP32 motor interface.
+Status: COMPLETE — all movement, STOP, safety, and Pi–ESP32 link-loss/recovery acceptance checks are user-reported as passed.
 
 Tasks:
 
 \[x] Trace Whisper → intent → decision path.
 
-\[ ] Connect STOP to actual hardware stop.
+\[x] Connect explicit STOP phrases to the existing ESP32 STOP command.
 
-\[ ] Define high-priority STOP handling.
+\[x] Handle STOP before Brain/LLM response generation; the ESP32 receives its dedicated STOP frame.
 
-\[ ] Prevent LLM from directly bypassing command/safety layer.
+\[x] Keep the LLM out of the actuator command path; voice STOP dispatch is deterministic.
 
-\[ ] Validate movement commands.
+\[x] Validate movement commands — forward, backward, left, right, and slow/medium/fast operation verified by the user.
 
-\[ ] Validate unsafe command rejection.
+\[x] Validate unsafe command rejection — obstacle stops and safety rejection behavior verified by the user.\n\n\[x] Validate Pi–ESP32 no-link and recovery behavior.
+
+Implementation note (2026-10-23): `thashu/core/decision.py` now recognizes a bounded set of explicit STOP phrases instead of matching any incidental use of “stop”. `thashu/main.py` dispatches those phrases through `MotorController.stop()` before Brain/LLM handling, and reports whether the serial frame could be sent. `thashu/hardware/motors.py` returns the transport sequence result. No movement commands were changed. User-reported Pi test (2026-10-25): voice STOP recognition and command dispatch passed with the robot stationary. Strictly matched forward commands now use Pi-side PWM presets: slow 150, medium 200, and fast 255; plain “forward” defaults to medium. Commands schedule a Pi-side STOP after 30 seconds, and explicit STOP cancels the timer and sends STOP immediately. ESP32 obstacle protection can stop motion sooner. PWM 100 was unreliable in the user's motor tests, so the slow preset starts above it. These are PWM levels, not calibrated wheel speeds; verify all four motors start reliably at slow and retain the desired speed separation on the chassis. ESP32 encoder PID and front/rear safety checks remain authoritative. The ESP32 emits `EVENT|0|STOP|OBSTACLE` when an obstacle stops active motion and `EVENT|0|BLOCKED|OBSTACLE` when an obstacle prevents motion from starting. Pi GPIOControl queues these events; main.py speaks the matching stopped/blocked report. User-reported Raspberry Pi/robot validation (2026-10-25): movement commands for forward, backward, left, and right worked, including the Whisper turn-phrase aliases; slow/medium/fast presets and the 30-second automatic stop were confirmed. An obstacle stopped active movement and Thashu announced the reason; voice STOP during motion stopped the motors and vision did not restart them. Unsafe movement was rejected under the tested safety conditions with an audible explanation. The user confirms all four Phase 3 acceptance criteria passed. The Pi serial reconnect behavior earlier showed repeated two-second receive-silence reconnects. User-reported Pi–ESP32 link-loss/recovery test (2026-10-25): link loss was detected, motors stopped safely, and commands worked after reconnection.
 
 Acceptance:
 
-\[ ] Voice STOP physically stops motors.
+\[x] Voice STOP physically stops motors.
 
-\[ ] STOP cannot be overridden by vision following.
+\[x] STOP cannot be overridden by vision following.
 
-\[ ] Movement commands reach ESP32 correctly.
+\[x] Movement commands reach ESP32 correctly.
 
-\[ ] Safety restrictions are enforced.
+\[x] Safety restrictions are enforced.\n\n\[x] Pi–ESP32 link loss is reported, motors stop safely, and commands work again after reconnection.
 
 \---
 
@@ -436,51 +438,206 @@ Implementation and validation note (2026-10-17): Updated `thashu/vision/vision_c
 
 \---
 
-Phase 5 — Person Recognition
+Phase 5 — Commanded Person Follow & Upper-Body Tracking
 
-Status: NOT STARTED
+Status: COMPLETE — user reports Phase 5 tests 1–5 passed, including multi-person target selection/stability, voice STOP, failure behavior, software tests, and cached WAV playback. Autonomous pathfinding/rerouting is explicitly out of scope.
 
-Existing files:
+Initial architecture audit (2026-10-25; before the implementation below):
+- `VisionCore` is perception-only and pauses inference outside IDLE, preserving Phase 4. It currently publishes face boxes/names/presence, but not track IDs or observation timestamps.
+- `CentroidTracker` uses nearest-centroid greedy matching with no distance gate or ambiguity signal. A crossing/overlap can silently change target identity. Existing `FollowLogic` chooses the largest face and is not safe for this phase; it is not currently wired into the Phase 4 `VisionCore` or main actuator path.
+- `ServoTracker` exists but is not instantiated by `main.py`. Its Pi angle limits (30–150°) differ from ESP32 `ServoManager` limits (45–135°); control must be clamped consistently before physical servo testing.
+- Voice movement handling in `main.py` is deterministic and exact-phrase based; no follow-mode command/state exists. `RuntimeStateMachine` already pauses vision outside IDLE, so follow must stop chassis motion on transition and require fresh target/sensor validation before resuming.
+- `GPIOControl` receives timestamped sensor telemetry for follow decisions. ESP32 `SafetyManager` remains authoritative: forward requires all three front ToF readings clear; reverse requires rear ultrasonic clear. If the direct path is blocked, stop and report; no alternate-route/pathfinding behavior is in scope.
+- Motor commands persist until STOP. The current Pi heartbeat is independent of command generation, so follow needs bounded command leases/automatic stops; ordinary heartbeat alone is not a movement lease.
+- The ToFs are fixed front sensors, and no verified mapping from a selected camera target to an individual ToF beam or calibrated follow-distance hysteresis is recorded. Therefore chassis follow must remain disabled until target-range mapping, limits, and short-step behavior pass physical calibration. Servo-only tracking can be validated independently.
 
-\[ ] `vision/face\_recognition.py`
 
-\[ ] `vision/face\_database.py`
+Purpose:
+Provide two distinct behaviors using the existing vision and actuator architecture. While IDLE, passive face tracking may pan/tilt the camera toward one stable, unambiguous detected face whether recognized or unknown; it never starts chassis motion or enables follow mode, and it stops when the wake word moves the runtime out of IDLE. Person/upper-body follow mode starts only after an explicit voice command such as “follow me.”
 
-\[ ] `vision/auto\_capture.py`
+Ownership and constraints:
+- `VisionCore` remains perception-only. It publishes upper-body/person detections with stable short-lived track identifiers, bounding boxes, positions, and freshness; face detections may supplement identity cues, but the selected target must remain trackable by the upper body when the face turns or is partly occluded. VisionCore does not call motors or servos.
+- Follow-mode state and decisions belong in the existing runtime/supervisor and follow logic after an architecture audit. Reuse `vision/follow_logic.py`, `hardware/servo_tracking.py`, `hardware/motors.py`, and existing ESP32 safety. Add no module unless the audit shows the existing files cannot preserve these ownership boundaries.
+- Pi motor requests go only through `MotorController`; servo requests go through the existing servo interface and ESP32 protocol. ESP32 obstacle interlocks, watchdog, and STOP remain authoritative.
+- Follow mode is OFF at boot and after restart. It is enabled only by an explicit deterministic voice command; LLM output cannot enable or steer it. “Stop following” and explicit “stop” cancel the mode and stop motors immediately.
+- Passive face tracking is separate from follow mode: while IDLE, a single stable, unambiguous face can drive camera servos whether its identity is known or unknown. Multiple/ambiguous faces do not cause arbitrary selection. This passive servo behavior never starts chassis movement and stops as soon as the wake word is detected and the runtime leaves IDLE.
+- Upper-body/person servo and chassis following are active only while follow mode is explicitly enabled. Following pauses and motors stop whenever the runtime leaves IDLE; re-entry requires fresh target and safety validation.
 
-\[ ] `memory/people.py`
+Target selection and multiple people:
+- With no upper body/person visible, do not move; report that no target is available.
+- With exactly one upper-body/person track visible at “follow me,” select that track for this session. A face can provide optional identity cues but is not the sole tracking box.
+- With multiple people, do not choose the largest/nearest person or move by default. Ask the user to select a unique visible target (left/center/right). If the selection maps to zero or multiple person tracks, ask again or cancel safely.
+- Lock the selected short-lived upper-body/person tracker identity. Never silently transfer following to another person when tracks cross, overlap, disappear, or identity becomes uncertain.
+- On target loss or ambiguous reacquisition, stop chassis motion immediately, hold the servo safely, and require the same target to be reacquired with high confidence or ask the user to select again. Do not chase/search with the chassis while target identity is uncertain.
+- Name-based selection is deferred until Person Recognition (now Phase 6) provides verified identities. Do not infer that the voice speaker is a face without a validated association method.
 
-\[ ] `data/people.py`
+Movement, servo, and safety behavior:
+- In explicit upper-body follow mode, hold camera tilt at a fixed calibrated upward angle and move only pan to keep the selected person visible. Normal idle face tracking may continue to use pan and tilt. Calibrate direction, center/dead zones, hard angle limits, rate limits, smoothing, and loss-of-target behavior; never oscillate or drive into mechanical stops.
+- Chassis movement requires a reliable target-distance estimate and calibrated follow-distance hysteresis. Calibrate camera-only range from the selected upper-body box's apparent height at known physical distances while resolution and tilt are fixed; use a measured lookup/interpolation and a conservative deadband rather than assuming every person's torso has the same size. Box clipping, target loss, pose change that invalidates the calibration, or stale frames must stop motion. Low-mounted front ToFs and rear ultrasonic are obstacle/route sensors only; do not treat them as target-range measurements. If camera range cannot be established or validated, keep chassis follow disabled.
+- Define bounded follow speed/acceleration and command refresh/lease behavior. Loss of target, stale camera frames, stale sensor data, ESP32 link loss, invalid safety readings, STOP, or controller errors must stop chassis motion; no stale command may persist.
+- Front ToF and rear ultrasonic checks remain in force. When an obstacle blocks the direct route, ESP32 must stop motion immediately and the Pi must announce the stop once. Follow mode must wait while the path remains blocked and may resume only along the same direct path after fresh sensors report clear and the same target remains fresh/stable. Do not turn, reverse, map, invoke SLAM, or attempt autonomous pathfinding/rerouting to get around the obstacle. If readings are stale/ambiguous or the target is uncertain, remain stopped. Never bypass ESP32 interlocks, STOP, or manual-control precedence.
+- Manual movement commands must have a defined precedence: stop follow before taking manual control; STOP always wins. Follow mode must never override voice STOP or a safety stop.
+- Do not store face images, embeddings, or identity associations for follow mode unless a separate user-approved memory requirement explicitly authorizes it.
 
-Tasks:
+Existing files inspected/reused:
+- \[x] `thashu/main.py` and `core/state.py` / supervisor integration
+- \[x] `thashu/vision/vision_core.py`, `vision/tracker.py`, `vision/follow_logic.py`
+- \[x] `thashu/hardware/servo_tracking.py`, `hardware/motors.py`, `hardware/gpio_control.py`
+- \[x] ESP32 servo, motor, communication, and safety managers
+- \[x] Existing voice parsing, event, and test patterns
 
-\[ ] Trace existing face-recognition pipeline.
+Required failure and interaction cases:
+- startup/restart while follow was active; follow must remain OFF after reboot
+- no face, one face, multiple faces, invalid/ambiguous location selection
+- target crossing another face, temporary occlusion, target leaving frame, stale camera frame, and target reappearing
+- STOP during servo tracking and during chassis movement
+- explicit manual command while following
+- wake/listen/think/speak transitions while following; motion stops and does not resume without fresh validation
+- obstacle stop and WAV announcement, waiting while blocked, and safe same-path resumption after sensors clear (no reroute),
+- camera, vision worker, servo, motor controller, or audio-command failure
+- repeated detections/events must not cause command/audio spam or rapid direction oscillation
 
-\[ ] Determine why `FaceDatabase.add\_person()` is currently unused.
-
-\[ ] Determine whether `AutoCapture` should be reconnected.
-
-\[ ] Define unknown-person behavior.
-
-\[ ] Define confirmed-name registration.
-
-\[ ] Define recognition confidence/verification requirements.
-
-\[ ] Prevent automatic identity invention.
+Verification plan:
+- Unit tests for follow-mode state transitions, exact voice command parsing, target-selection ambiguity, stable target lock, and fail-safe transitions.
+- Mocked integration tests proving VisionCore emits perception only, no actuation occurs while mode is OFF, all actions use existing hardware controllers, STOP preempts following, and stale/lost target stops movement.
+- Pi camera tests with one and multiple people, including crossing/occlusion and explicit target selection.
+- Servo bench tests for direction, limits, center/dead zone, smoothing, and sustained tracking.
+- Wheels-raised chassis tests for bounded speed, follow-distance hysteresis, target loss, voice STOP, obstacle stop/WAV playback and wait-until-clear behavior (no reroute),
+- Controlled floor tests only after bench and safety tests pass; verify no target switching and no obstacle/sensor bypass.
+- Record actual Pi/ESP32 versions, tested sensor states, observed logs, and user-reported physical results before checking acceptance.
 
 Acceptance:
+\[x] Follow-mode activation confirmation plays a pre-rendered cached WAV without invoking Piper; cached playback is verified on the Pi.
+\[x] Follow mode is OFF on boot; passive face-only servo tracking never moves the chassis or enables follow mode.
+\[x] While IDLE, a unique stable face is passively servo-tracked whether known or unknown; tracking stops on wake-word detection and does not resume until IDLE vision has fresh detections.
+\[x] Explicit “follow me” starts the mode; “stop following” and STOP stop it immediately.
+\[x] One visible upper-body/person track can be selected and tracked while moving; multiple people never trigger arbitrary target choice or movement.
+\[x] Target identity remains stable through tested movement; uncertain loss/crossing stops movement and requires safe reacquisition or reselection.
+\[x] Servo tracking passes direction, limits, stability, and target-loss tests.
+\[x] Chassis following stays within validated distance/speed bounds; if distance estimation is not validated, chassis following remains disabled.
+\[x] Vision remains perception-only; hardware commands use existing controller interfaces and ESP32 safety.
+\[x] Voice interaction, manual commands, STOP, stale sensors, camera faults, and serial loss all preempt or safely stop following. An obstacle causes an immediate stop and one cached WAV announcement; follow waits until the direct path is clear and the same target/sensors are fresh. Autonomous rerouting/pathfinding/SLAM is intentionally out of scope.
+\[x] Automated tests, Pi integration tests, and controlled physical acceptance pass; no checklist box is checked from code inspection alone.
 
-\[ ] Known person is recognized reliably.
 
-\[ ] Unknown person remains unknown until identity is confirmed.
+Implementation snapshot (2026-10-26): Added thashu/vision/person_detection.py because Phase 5 required a separate upper-body detector; reused VisionCore, CentroidTracker, FollowLogic, and ServoTracker. VisionCore now publishes stable face and upper-body tracks separately. The upper-body path has not been tested on the Pi; chassis-follow movement remains disabled pending sensor/target calibration.
+- `thashu/core/decision.py`: added exact “follow me”, “stop following”, and unique left/center/right selection phrases. These dispatch deterministically before Brain/LLM.
+- `thashu/vision/follow_logic.py`: added OFF-by-default follow session state, fresh-frame checks, unique target selection, no silent target transfer, and one-shot stop/notice decisions. Any target loss, ambiguity, or stale frame requires an explicit reselection; no face images or embeddings are stored.
+- `thashu/vision/tracker.py`: added bounded centroid association plus overlap/crossing ambiguity flags.
+- `thashu/vision/vision_core.py` and `thashu/vision/camera.py`: publish short-lived face track IDs, ambiguity, frame dimensions, and capture timestamps; clear failed/stale camera frames. VisionCore remains perception-only and IDLE-gated.
+- `thashu/hardware/servo_tracking.py`: align Pi pan/tilt bounds with ESP32 ServoManager limits.
+- `thashu/main.py`: integrate explicit follow commands, servo tracking only while follow mode is enabled and runtime is IDLE, stop follow before any voice interaction, and stop/report on controller-link loss. Multiple faces prompt for a unique left/center/right choice.
+- `thashu/tests/test_follow_mode.py`: added exact-command, target-selection, ambiguity, target-loss, stale-frame, and tracker tests.
+- `thashu/tests/test_vision_lifecycle.py`: verifies published short-lived track IDs and capture freshness while preserving the no-actuator VisionCore contract.
+- Verification on a temporary mirror of the branch source: Python compile checks passed; 11 follow-mode tests passed; 5 vision lifecycle tests passed. Raspberry Pi camera/servo tests have not been run.
+- Chassis motion is intentionally absent from this implementation tranche. No verified mapping connects the selected face to a fixed ToF beam or a safe follow-distance band. The existing ESP32 interlocks also require all front ToFs and rear sonar clear for turns. This was a historical pre-calibration gate and is superseded by the 2026-10-29 bounded-follow implementation and the user's measured camera calibration. The user explicitly excludes autonomous rerouting and SLAM; follow must stop and wait for the direct path to clear.
 
-\[ ] Confirmed name + face creates persistent identity.
+Pose Lite benchmark and integration update (2026-10-27): The user tested MediaPipe 0.10.15 on the Raspberry Pi 4 (aarch64, Python 3.11) in an isolated venv with the 5.8 MB Pose Landmarker Lite task model. The one-person image-mode benchmark ran at about 6 FPS. Moving-distance trials reported pose/shoulder visibility on 181/182 frames at 150 cm, 182/183 at 160 cm, and 183/183 at 200 cm. Median shoulder widths were 109.8, 103.4, and 95.7 px, with overlapping 10th–90th percentile ranges (94.6–113.0, 64.4–106.8, 93.0–99.7 px); this is insufficient for a safe chassis-distance controller. On 2026-10-27, `thashu/vision/person_detection.py` was changed to use MediaPipe Pose Lite while preserving the existing box interface; `requirements.txt` pins the tested MediaPipe/OpenCV/NumPy/Protobuf/FlatBuffers runtime, and `MODEL_SETUP.md` documents the persistent model path. The new integration configures up to four poses, which was not part of the one-person benchmark. The integrated app, four-person selection, servo tracking with the new detector, dependency installation in the main environment, and chassis control remain unverified. No Phase 5 acceptance box is checked by this benchmark.
 
-\[ ] False identity assignment is prevented.
+
+User-reported verification update (2026-10-29; supersedes earlier pending-test notes above):
+- The user reports that directed follow checks 1–4 passed and voice STOP works. The numbered checks were not individually identified in the report, so this aggregate confirmation is recorded without checking unrelated detailed acceptance boxes.
+- The user separately confirms the cached obstacle-announcement WAV playback test passed.
+- Phase 5 remains IN PROGRESS. The detailed unchecked acceptance criteria above still require explicit evidence, especially multi-person/ambiguous target selection and crossing/occlusion identity stability, failure handling for stale camera/sensor data and camera/servo/motor/audio/ESP32-link faults, and the complete automated/Pi/controlled physical acceptance suite. Do not mark Phase 5 complete until those remaining items are verified.
+
+
+User-reported verification update (2026-10-29; supersedes the prior update):
+- [x] Test 1 (follow stays off until explicitly requested) passed.
+- [x] Test 2 (multi-person selection, crossing/occlusion, and target identity safety) passed; user confirmed the robot prompts for left/center/right, accepts the chosen direction after the wake word, and passed the selection/target-stability test.
+- [x] Test 3 (safety interruptions, including voice STOP and obstacle stop/announcement/wait behavior) passed.
+- [x] Test 4 (failure behavior) passed.
+- [x] Test 5 (software test suite) passed on the user's Pi.
+- The user separately confirmed cached obstacle WAV playback passed. Autonomous obstacle rerouting and SLAM remain out of scope by user decision.
+- All Phase 5 acceptance criteria are now marked passed based on the user-reported tests.
+
+Follow activation WAV update (2026-10-29): The follow-start acknowledgment is now the concise exact reply “Follow mode is on.” `thashu/main.py` uses cache-only playback for that acknowledgment and does not fall back to Piper if the WAV is missing. `thashu/voice/text_to_speech.py` maps the exact reply to the `follow_started` cache key. On the Pi, generate the clip once with:
+```bash
+cd ~/ThashuRobot/thashu
+source ~/.venvs/thashu/bin/activate
+python - <<'PY'
+from voice.text_to_speech import prepare_command_voice_cache
+prepare_command_voice_cache({"follow_started"})
+PY
+```
+Verify the activation produces “Follow mode is on.” and the terminal prints `[VOICE] Cached WAV played: follow_started`. The code change is on phase-5; Pi generation/playback is still unverified. This is an additional open acceptance item alongside test 2.
+
+
+Two-person follow trial log review (2026-10-29): The pasted Pi log confirms `[VOICE] Cached WAV played: follow_started`, so the follow-activation WAV criterion is verified. During the two-person trial, upper-body detections fluctuated between counts 1 and 2. After follow resumed, the first fresh snapshot showed one track (ID 0); the count then rose to 2, and two bounded forward pulses were accepted before the locked track was reported missing and a Safety STOP was sent. Later, both tracks were marked ambiguous, follow entered `NEEDS_RESELECTION`, and Thashu announced that it could not identify the selected person. No target transfer is evident in this log, and it does show a safe stop on missing/ambiguous target. However, it does not prove correct handling when two people are stably visible before follow starts: no initial selection prompt was logged, and the detector count flickered. Test 2 remains open. Retest with two people continuously visible before saying “follow me”; verify it requests explicit selection and sends no motor command until selection, then cross/occlude the selected target and verify it stops without switching.
+
 
 \---
 
-Phase 6 — Person \& Conversation Memory
+Phase 6 — Person Recognition
+
+Status: COMPLETE — Phase 6 acceptance tests reported passed by the user on the Raspberry Pi.
+
+Existing files inspected:
+
+\[x] `vision/face_recognition.py`
+
+\[x] `vision/face_database.py`
+
+\[x] `vision/auto_capture.py`
+
+\[x] `memory/people.py`
+
+\[x] `data/people.py`
+
+Audit findings and design decisions:
+- The current recognizer embeds an unaligned Haar face crop. The detector publishes boxes only, while the InsightFace ArcFace model expects landmark-based face alignment. This preprocessing mismatch makes a hard-coded similarity cutoff unreliable. Official reference implementations align faces using five landmarks before embedding: https://github.com/deepinsight/insightface/blob/master/python-package/insightface/model_zoo/arcface_onnx.py and https://github.com/deepinsight/insightface/blob/master/python-package/insightface/utils/face_align.py
+- The database currently uses a single similarity threshold, has no top-two match margin or multi-frame identity consensus, accepts arbitrary names through add_person(), and writes JSON non-atomically to a repo-relative path. Corrupt JSON silently resets to an empty database.
+- No runtime enrollment flow calls FaceDatabase.add_person(). AutoCapture is unused and stores raw face photos, so it will not be reconnected as-is.
+- PeopleMemory records basic counts/last-seen and has no verified enrollment or confirmed-identity association in the runtime. Existing data/people files are empty.
+- Legacy raw face images are tracked under thashu/vision/data/faces. They are not proof of confirmed identity and will not be imported or deleted by this phase. New identity records will store embeddings and confirmed labels in user-local persistent storage outside Git; no raw face photos are needed.
+- Enrollment must be explicit and consent-based: a user requests remembering a person, one stable face is selected, multiple quality-approved observations are collected in volatile memory, the candidate name is read back, and only an explicit confirmation persists the identity. Unknown people remain Unknown in ordinary operation. Ambiguous faces, weak matches, cancellation, or failed confirmation do not create identities. Speech alone is not linked to a face.
+- Recognition will require quality checks, aligned embeddings, a calibrated best-match threshold plus best-vs-second-best margin, and temporal confirmation across fresh observations. If those checks do not confidently identify one enrolled person, return Unknown.
+- Keep model licensing constraints documented in MODEL_SETUP.md; do not claim commercial-use rights for InsightFace weights.
+
+Tasks:
+
+\[x] Trace existing face-recognition pipeline.
+
+\[x] Determine why `FaceDatabase.add_person()` is currently unused.
+
+\[x] Determine whether `AutoCapture` should be reconnected.
+
+\[x] Define unknown-person behavior.
+
+\[x] Define confirmed-name registration.
+
+\[x] Calibrate recognition confidence/verification requirements with labeled positive and negative samples. (User-reported test passed.)
+
+\[x] Prevent automatic identity invention by design: unknown observations never enroll themselves or gain a semantic name.
+
+\[x] Implement aligned embeddings, robust persistent database, explicit confirmation flow, and runtime identity display.
+
+\[x] Complete Phase 6 enrollment, recognition, ambiguity, persistence, deletion/cancellation, and failure-case validation on the Raspberry Pi. (User-reported test passed.)
+
+Acceptance:
+
+\[x] Known person is recognized reliably across repeated sessions and representative lighting/pose changes. (User-reported tests across distances/poses and after reboot.)
+
+\[x] Unknown person remains unknown until identity is explicitly confirmed.
+
+\[x] Confirmed name + face creates persistent identity outside the repository. (User-reported Pi verification: persistence after restart passed.)
+
+\[x] False identity assignment is prevented by alignment, quality gates, calibrated threshold/margin, and temporal consensus. (User-reported calibration and unknown-face tests passed.)
+
+\[x] No raw face photos or unconfirmed identities are persisted; enrolled identities can be explicitly removed. (User-reported Pi verification: enrollment safeguards and identity deletion passed.)
+
+
+
+Implementation snapshot (2026-10-29; on phase-6):
+- Updated `thashu/vision/face_detection.py` to prefer the machine-local OpenCV Zoo YuNet model for boxes plus five landmarks, with Haar retained as a detection-only fallback. The fallback cannot assign a known identity.
+- Updated `thashu/vision/face_recognition.py` to align YuNet's five landmarks to ArcFace's canonical 112×112 template before ONNX inference. Missing landmarks or failed quality checks return no embedding.
+- Updated `thashu/vision/vision_core.py` to use the new detector, use the external local identity store, collect enrollment samples only from one stable unambiguous face, and require three consistent recognition observations before publishing a known name.
+- Updated `thashu/vision/face_database.py` with normalized vectors, separate best/second-best score margin, minimum five-sample explicit enrollment, duplicate-identity rejection, atomic writes, restrictive file permissions, corrupt-store fail-closed behavior, and explicit-confirmation deletion. No raw image is stored by this implementation.
+- Updated `thashu/core/model_paths.py` and `thashu/MODEL_SETUP.md` for persistent user-local data and the YuNet model at `~/.local/share/thashu/models/face/face_detection_yunet_2023mar.onnx`.
+- Updated `thashu/core/decision.py` and `thashu/main.py` with deterministic “remember me” registration: collect samples after returning to IDLE, accept an explicit name phrase, read back the name/face association, and persist only after “yes”; “no”/cancel discards it. “forget/remove/delete NAME” requires confirmation. Do not associate a face based only on audio.
+- Existing tracked legacy face photos were not modified or imported. The project still needs a deliberate cleanup/migration decision for those historical artifacts; they must not be treated as enrolled identities.
+- No test suite or Pi hardware tests were run in this tranche. The recognition threshold/margin defaults are provisional and must be calibrated with labeled same-person and different-person trials before acceptance. Install/download YuNet on the Pi using `MODEL_SETUP.md`.
+
+Phase 7 — Person \& Conversation Memory
 
 Status: NOT STARTED
 
@@ -528,7 +685,7 @@ Acceptance:
 
 \---
 
-Phase 7 — Place / Environment Memory
+Phase 8 — Place / Environment Memory
 
 Status: NOT STARTED
 
@@ -570,7 +727,7 @@ Acceptance:
 
 \---
 
-Phase 8 — Unified Person + Place + Episodic Memory
+Phase 9 — Unified Person + Place + Episodic Memory
 
 Status: NOT STARTED
 
@@ -596,7 +753,7 @@ Acceptance:
 
 \---
 
-Phase 9 — Reliability \& Recovery
+Phase 10 — Reliability \& Recovery
 
 Status: NOT STARTED
 
@@ -632,7 +789,7 @@ Acceptance:
 
 \---
 
-Phase 10 — Performance Optimization
+Phase 11 — Performance Optimization
 
 Status: NOT STARTED
 
@@ -664,7 +821,7 @@ Acceptance:
 
 \---
 
-Phase 11 — Mobile Control
+Phase 12 — Mobile Control
 
 Status: NOT STARTED
 
@@ -694,7 +851,7 @@ Acceptance:
 
 \---
 
-Phase 12 — Full Robot / Expo Validation
+Phase 13 — Full Robot / Expo Validation
 
 Status: NOT STARTED
 
@@ -784,35 +941,36 @@ File	Status	Phase	Notes
 
 `hardware/gpio\_control.py`	REVIEW	1	Existing hardware interface
 
-`hardware/motors.py`	REVIEW	1/3	Motor control
+`hardware/motors.py`	REVIEW	1/3/5	Motor control
 
 `hardware/eyes.py`	REVIEW	1	Existing eye interface
 
-`hardware/servo\_tracking.py`	REVIEW	1/4	Servo/follow control
+`hardware/servo\_tracking.py`	REVIEW	1/4/5	Servo/follow control
 
-`vision/vision\_core.py`	REVIEW	4	Vision lifecycle
+`vision/vision\_core.py`	REVIEW	4/5	Perception lifecycle and follow-mode input
+`vision/follow\_logic.py`	REVIEW	5	Existing target selection/debounce logic
 
-`vision/face\_database.py`	REVIEW	5	Face storage
+`vision/face\_database.py`	REVIEW	6	Face storage
 
-`vision/face\_recognition.py`	REVIEW	5	Recognition
+`vision/face\_recognition.py`	REVIEW	6	Recognition
 
-`vision/auto\_capture.py`	REVIEW	5	Existing registration path
+`vision/auto\_capture.py`	REVIEW	6	Existing registration path
 
-`memory/people.py`	REVIEW	5/6	Person memory
+`memory/people.py`	REVIEW	6/7	Person memory
 
-`memory/short\_term.py`	REVIEW	6	Short-term memory
+`memory/short\_term.py`	REVIEW	7	Short-term memory
 
-`memory/long\_term.py`	REVIEW	6	Long-term memory
+`memory/long\_term.py`	REVIEW	7	Long-term memory
 
-`memory/storage.py`	REVIEW	6	Storage
+`memory/storage.py`	REVIEW	7	Storage
 
-`data/people.py`	REVIEW	5/6	Person data
+`data/people.py`	REVIEW	6/7	Person data
 
 `voice/audio\_manager.py`	REVIEW	2/4	Existing pause/resume pattern
 
 `voice/speech\_to\_text.py`	REVIEW	2/3	Whisper
 
-`voice/text\_to\_speech.py`	REVIEW	2/9	Piper
+`voice/text\_to\_speech.py`	REVIEW	2/10	Piper
 
 `voice/wake\_word.py`	REVIEW	2	Wake-word subsystem
 
@@ -830,7 +988,7 @@ Phase 1	2026-10-23	Complete — integrated controller and direct Pi USB-serial t
 
 Phase 2	2026-10-23	Complete — runtime supervisor/state machine verified; user confirms hardware safety remains active across states.
 
-Phase 3	—	—
+Phase 3	2026-10-25	Complete — movement, STOP, safety, and Pi–ESP32 link-loss/recovery checks verified by the user.
 
 Phase 4	2026-10-23	Vision lifecycle software and Raspberry Pi acceptance passed (user-reported; logged 2026-10-23).
 
@@ -849,6 +1007,8 @@ Phase 10	—	—
 Phase 11	—	—
 
 Phase 12	—	—
+
+Phase 13	—	—
 
 
 Initial integrated-runtime note (2026-10-05): This entry described the first sketch draft, where protocol and safety logic were still in the sketch. It is superseded by the dedicated manager ownership correction recorded below; use that correction as the current architecture status.
@@ -893,6 +1053,170 @@ Phase 4 updates reconciled onto phase1 (2026-10-23): Ported the already Pi-valid
 Phase 2 branch reconciliation (2026-10-23): Compared phase2 with phase1. The Phase 2 runtime integration is already present on phase1: RuntimeStateMachine transitions, EventBus publication, voice-state integration, vision pause/resume, and the wake-word speech hangover are all present. The phase2 branch is 240 commits behind phase1 and contributes no missing Phase 2 runtime files. Kept the newer Phase 4 perception-only VisionCore, which supersedes the older Phase 2 copy that directly drove motors/servos. Phase 2 remains COMPLETE; no Phase 2 source files needed copying or replacement.
 
 
-Follow-mode obstacle avoidance requirement (planned; not an implementation/acceptance claim)
+Movement voice update (2026-10-25): `thashu/main.py` now uses short fixed replies for slow/medium/fast forward, reverse, and left/right turns. `thashu/core/decision.py` recognizes explicit normalized reverse and turn phrases, and the existing `MotorController` methods dispatch them through the 30-second forward/reverse timer; left/right turn commands are limited to one-second jogs because turn duration and side clearance are not calibrated; ESP32 sensor interlocks and stop behavior remain authoritative. `thashu/voice/text_to_speech.py` can pre-generate nine Piper WAV replies into `~/.local/share/thashu/voice_responses` (or `THASHU_VOICE_CACHE_DIR`), outside the repository, and play cached clips instead of synthesizing those fixed replies at runtime. Generate the clips on the Pi with `python -m voice.text_to_speech` from `~/ThashuRobot/thashu` after activating the project's venv. Implementation is committed on `phase-3`; Python and physical movement/safety acceptance have not been run. Do not check Phase 3 acceptance boxes until the Pi confirms each direction, auto-stop, and obstacle reporting.
 
-When commanded follow mode is implemented, an obstacle must cause an immediate hardware-level stop. The follow controller may try a bounded route around it only after fresh sensor coverage verifies the candidate path. Use the three front ToF readings to assess left/center/right clearance; never assume an unobserved corridor is clear. Verify the swept path before turning, and require a valid rear ultrasonic reading before reversing. Use low bounded speeds and short motion leases, then re-check sensors after each short step. Keep the same selected person target throughout rerouting; if target identity, sensor freshness, or route safety is uncertain, remain stopped and announce the blocked path once, then wait for a safe route or human intervention. STOP, manual-control precedence, ESP32 interlocks, stale-sensor checks, and link-loss stops must never be bypassed. Do not mark follow or obstacle avoidance operational until automated, Pi integration, and controlled physical tests pass.
+
+Motor command sequence-return fix (2026-10-25): `thashu/hardware/motors.py` now returns GPIOControl's serial sequence from `backward()`, `left()`, and `right()`, matching `forward()`. Previously those commands were sent but returned `None`, causing main.py to report a disconnected ESP32 and skip its bounded auto-stop timer. Pi software fix only; no ESP32 firmware change. Directional hardware acceptance remains pending.
+
+
+Motion ACK/safety diagnosis (2026-10-25): Updated `thashu/hardware/gpio_control.py` to associate command ACKs by sequence and log ESP32 errors. `thashu/main.py` now says movement began only after an `ACK|sequence|OK`; on missing/error ACK it cancels the Pi motion timer, sends STOP, and reports the reason. Both `ESP32Firmware/ThashuController/communication_manager.cpp` and `ESP32Firmware/communicationmanager/communication_manager.cpp` now distinguish a detected obstacle (`ERROR|OBSTACLE`) from invalid/stale safety sensor data (`ERROR|SENSOR_NOT_READY`); an actual blocked obstacle also retains the BLOCKED event for spoken reporting. This preserves fail-safe reverse behavior when rear ultrasonic data is unavailable. Pi tests, integrated ESP32 build/upload, and hardware validation remain pending; movement and safety acceptance boxes remain unchecked.
+
+Pi serial reconnect hardening (2026-10-25): Updated the existing `thashu/hardware/gpio_control.py` transport to rediscover USB serial devices after disconnects, prefer a persistent `/dev/serial/by-id` path, compare device realpaths so the currently selected symlink remains correctly identified, and reconnect if ESP32 telemetry is silent for two seconds. Reader/writer failures are tied to the connection instance that failed so a delayed old-port error cannot tear down a newer connection. This is Pi-side only; no ESP32 firmware change is required. Must physically validate by running one serial client on the Pi and checking reconnect/log behavior after an ESP32/USB serial interruption. No tests or hardware validation run; Phase 3 and reliability acceptance remain open.
+
+Idle obstacle announcement (2026-10-25): Updated `thashu/main.py` so asynchronous ESP32 obstacle STOP/BLOCKED events are spoken immediately from the normal main loop, including while runtime state is IDLE and the wake-word detector is waiting. The replies are now “I stopped because an obstacle was detected.” and “I can't move because an obstacle was detected.” Added exact Piper WAV cache keys in `thashu/voice/text_to_speech.py`; run `python -m voice.text_to_speech` once on the Pi to generate/update those WAVs in user-local storage. Announcements pause audio capture and lock wake-word processing during playback, then resume both. Code-path change only; physical obstacle event/audio behavior remains to be validated, and no Phase 3 acceptance item is marked complete.
+
+Generic ESP32 safety rejection voice (2026-10-25): The Pi log showed `ACK|...|ERROR|SAFETY_STOP`, which the current `motion_failure_response()` intentionally converted to an empty string while expecting a separate BLOCKED event. Updated `thashu/main.py` to speak an accurate generic safety-stop explanation when older firmware sends that ACK without an event. Added the exact response to the Piper command WAV cache in `thashu/voice/text_to_speech.py`. The current phase-3 firmware sources send the more specific `ERROR|OBSTACLE` / `ERROR|SENSOR_NOT_READY` plus `EVENT|0|BLOCKED|OBSTACLE`; receiving `ERROR|SAFETY_STOP` indicates the ESP32 may be running older or different firmware. Generate the new local WAV with `python -m voice.text_to_speech` after pulling. Pi-side code only; physical audio and firmware-version verification remain pending. No tests run.
+
+Whisper turn-command aliases (2026-10-25): Added exact-match aliases `on left`, `done left`, `on right`, and `done right` to the existing direction command parser in `thashu/core/decision.py`, based on the user's observed Whisper transcripts for “turn left/right.” These pass through the same bounded one-second turn command and ESP32 safety checks as existing explicit turn phrases. Pi-side parser update only; no tests or physical validation run. Phase 3 acceptance remains open.
+
+
+
+Phase 5 search and eye animation update (2026-10-26): Updated the existing `thashu/vision/follow_logic.py` to delay the initial no-face prompt for 15 seconds, search for up to 12 seconds after loss/staleness, stop chassis motion immediately, and reacquire only the same short-lived track ID; it never silently adopts a different person. Updated `thashu/hardware/servo_tracking.py` and `thashu/main.py` so explicit follow mode sweeps the camera pan (50–125 degrees) and tilt (75–105 degrees) while searching on fresh frames, then stops the sweep and tracks a unique face. Multiple faces still require a unique left/center/right selection. Updated the active controller's `ESP32Firmware/ThashuController/eye_manager.h/.cpp` to blink automatically every four seconds; Pi `Eyes` remains a semantic expression client, while ESP32 owns OLED animation. The face detector detects visible faces, not full standing bodies; usable face size, camera placement, lighting, and servo search coverage require Pi hardware validation. Servo search and autonomous blink are implementation-only; ESP32 reflash is required for blink, and no Phase 5 hardware or acceptance item is marked complete.
+
+
+Rear ultrasonic out-of-range reporting update (2026-10-26): Updated both existing UltrasonicManager copies (`ESP32Firmware/ThashuController/ultrasonic_manager.h/.cpp` and `ESP32Firmware/sensors/ultrasonic_manager/ultrasonic_manager.h/.cpp`), both SafetyManager copies, and both CommunicationManager copies. A completed HC-SR04 attempt with no ECHO rising edge or a measured return beyond 400 cm is now a fresh `FAR` result; telemetry reports `US_REAR|FAR`, and SafetyManager treats fresh FAR as clear for reverse/turn authorization. A malformed pulse (e.g. ECHO rises but never falls) remains `NA`/not-ready and blocks motion; valid numeric readings retain the 300 mm obstacle interlock. HC-SR04 cannot distinguish an open space with no echo from a disconnected/unpowered ECHO line, so FAR assumes the sensor and wiring are present; this must be validated on the robot. ESP32 build/upload and physical range/safety tests remain outstanding; no acceptance item is marked complete.
+
+
+ToF transient-read reliability correction (phase-5, 2026-10-26): The Adafruit VL53L0X API reports `isRangeComplete()` as true on an underlying I2C/API error, and `readRangeResult()` can return `0xFFFF` for that failed read. Updated both existing ToFManager copies so a failed sentinel read does not erase the last successful sensor sample or refresh its timestamp. One transient bus/read failure therefore does not immediately produce `NA`; the last good reading still expires at the existing 150 ms safety freshness limit, after which movement remains blocked. Status 4 remains a fresh FAR result. No safety threshold or obstacle rule was relaxed. Build and repeated physical validation are still required.
+
+
+Rear HC-SR04 no-target pulse fix (phase-5, 2026-10-26): Increased the echo timeout from 25 ms to 40 ms in both existing UltrasonicManager copies. HC-SR04 documentation specifies that when no target is detected, ECHO may remain high for 38 ms; the old 25 ms timeout cut this pulse short and marked the rear sensor malformed/NA instead of FAR. The longer timeout allows the falling edge to be measured (>400 cm) and reported as FAR; truly stuck-high ECHO beyond 40 ms remains NA and blocks reverse/turning. The 60 ms minimum trigger interval is retained. This policy assumes HC-SR04-compatible timing; hardware test required after firmware upload.
+
+
+Common Piper reply cache expansion (2026-10-26): Extended the existing local WAV cache in `thashu/voice/text_to_speech.py` with frequently used sensor-not-ready, acknowledgement failure, controller-unavailable, not-understood, and follow-mode responses. The existing cache uses exact phrase lookup and plays matching WAVs directly, avoiding Piper synthesis during the interaction. Generate missing files once on the Pi with `python -m voice.text_to_speech` from `~/ThashuRobot/thashu` with the Thashu virtual environment active; files remain under the configured user-local voice cache. No Python or audio hardware validation performed.
+
+
+Voice-controlled head direction and visible blink update (phase-5, 2026-10-26): Added exact spoken commands “look up,” “look down,” “look left,” “look right,” and “look straight” through the existing Pi decision and ServoTracker path. Each directional command moves the corresponding pan/tilt angle by a bounded 15 degrees, clamped to existing servo limits, and waits for the ESP32 acknowledgement; manual look commands are separate from chassis motor commands. Added short Piper cache entries for the acknowledgements. In the integrated ThashuController EyeManager, automatic blink now starts 2.5 seconds after initialization and repeats every 3.5 seconds; full eyelid closure is held for 150 ms inside a 360 ms close/hold/open animation, with `DBG|EYES|AUTO_BLINK` on serial for confirmation. These are implementation changes only: pull the Phase 5 branch, regenerate missing Piper cache files with `python -m voice.text_to_speech`, flash the integrated ESP32 sketch, and test all commands and visible blinking on hardware before marking acceptance complete.
+
+
+Quick-response Piper cache expansion (phase-5, 2026-10-26): Extended `thashu/voice/text_to_speech.py` to enumerate every possible reply variant from the existing `QuickResponses.data` in `thashu/core/quick_responses.py`, assign each unique text a stable SHA-256-based cache filename, and include them in the existing one-time Piper WAV generation command. `speak()` maps the exact selected reply to its cached WAV, including replies chosen randomly from a phrase's variants. Command replies already present in the fixed cache are excluded from duplicate quick-response WAV generation. Pull Phase 5 and run `python -m voice.text_to_speech` once on the Pi; generation may take a while because it renders many distinct reply clips. WAVs remain in the user-local voice cache outside Git. No Pi generation or playback validation has been performed.
+
+
+Rear ultrasonic FAR margin follow-up (phase-5, 2026-10-26): User reports the rear ultrasonic still displays `NA` at out-of-range distances. The integrated controller and source-folder UltrasonicManager copies now wait 50 ms (previously 40 ms) for the HC-SR04 echo pulse, allowing extra timing margin for modules that return the nominal ~38 ms no-target pulse with variation. A completed pulse beyond 400 cm remains fresh `FAR`; no pulse is also `FAR`; a pulse that remains high beyond the 50 ms timeout remains `NA`/not-ready. This is a timing-margin implementation change, not a confirmed root-cause fix; pull and flash the integrated controller, then check telemetry in open space. If it still reports `NA`, capture ECHO waveform/voltage and telemetry to distinguish module behavior from wiring or firmware version. No build or hardware verification has been performed.
+
+
+Left-turn duration adjustment (phase-5, 2026-10-26): Increased the Pi-side bounded LEFT jog from 1.0 to 2.0 seconds after the user reported the robot turned only slightly. RIGHT remains at 1.0 second. The left-turn command log and Pi auto-stop timer use the same 2.0-second setting; ESP32 obstacle interlocks and stop behavior are unchanged. Physical turn angle and safety behavior need a controlled hardware check; no test was run here.
+
+
+Right-turn duration matched to left (phase-5, 2026-10-26): Per user follow-up, increased RIGHT jog from 1.0 to 2.0 seconds as well. Both left and right now run for two seconds, with their existing bounded Pi STOP timers and ESP32 safety interlocks.
+
+
+Phase 5 user-reported validation update (2026-10-26): The user confirms both previously listed test groups passed: (1) voice servo directions, two-second left/right turns, visible auto-blinks, and rear ultrasonic FAR reporting; (2) Pi follow-mode tests for face selection/tracking, target loss/reacquisition, servo behavior, and STOP/voice-interaction preemption. Checked the explicit follow start/stop, single/multiple-face selection, and servo tracking acceptance items above. Chassis following and obstacle rerouting remain open; the broader crossing/occlusion, failure-injection, and full automated/physical acceptance criteria have not been claimed complete by this confirmation.
+
+
+Phase 5 sensor-telemetry prerequisite (2026-10-26): Extended the existing `thashu/hardware/gpio_control.py` to parse ESP32 `TEL|0|SENSORS` frames and expose `get_sensor_snapshot(max_age=0.2)`. The returned copy includes monotonic receive time and left/center/right ToF plus rear ultrasonic values in millimetres; `FAR` and `NA` remain distinct, and missing/stale telemetry returns `None`. This is read-only infrastructure for future route evaluation and does not issue motor commands or enable chassis follow. Verify parsed fresh/stale telemetry on the Pi before relying on it; target-to-ToF mapping and safe-follow-distance calibration remain hardware prerequisites.
+
+
+
+
+Upper-body tracking implementation (2026-10-26): Added thashu/vision/person_detection.py, which uses OpenCV's packaged haarcascade_upperbody.xml; the detector degrades to no person tracks if that cascade is unavailable, preserving face and voice startup. VisionCore stabilizes upper-body detections across three frames and publishes persons with independent short-lived tracker IDs, while retaining separate face detections and recognition. Existing FollowLogic now selects persons from fresh snapshots (with a compatibility fallback for old face-only snapshots), and explicit follow aims the servo at the selected upper-body box. This Haar cascade is an initial frontal upper-body detector; profile views, occlusion, and motion robustness still require Pi camera validation. No tests were run.
+
+Chassis-follow gate (2026-10-26): Follow mode still does not issue forward/turn motor commands. The existing implementation only steers the camera servo and sends STOP on target loss. Do not enable chassis movement until camera apparent upper-body size is calibrated against measured distances with fixed resolution/tilt, the chosen follow-distance deadband and robot clearance are established, and bounded motor leases plus fail-safe obstacle handling are implemented and tested. The front ToFs and rear ultrasonic are mounted near floor level and are for obstacle/route checks, not person-range measurement. Their readings do not prove that an entire side route or swept turning path is clear. Upper-body and chassis-follow acceptance remain unchecked.
+
+Camera-range follow clarification (2026-10-26): The front ToFs/rear ultrasonic are mounted at foot level, so they must not be used as the person's torso distance measurement. For explicit upper-body follow, keep camera tilt fixed and use pan-only tracking; estimate relative range from calibrated upper-body pixel height at measured distances with camera resolution and tilt held constant. The phase-5 code currently fixes the follow tilt command to 65 degrees (25 degrees upward from the 90-degree neutral command) and pans toward the upper-body center. The user confirmed 65 degrees is preferred for follow range; verify camera framing and servo clearance on the robot. Person-size/pose variation, partial clipping, and profile views can invalidate image-scale distance; stop on target loss or invalid scale. Low-mounted sensors remain for near-ground obstacle detection/route checks. Chassis motor following remains disabled until camera calibration, distance deadband, bounded motor leases, and physical obstacle tests pass.
+
+Follow-target clarification from user (2026-10-26): Follow mode should track a moving person by their visible upper body, not merely keep the face centered. Existing follow implementation was face-box based; face-only Pi tests do not validate upper-body tracking. Upper-body perception uses existing VisionCore/tracker ownership (no actuator calls from VisionCore); face recognition may supplement identity only. After user reported intermittent detections, `thashu/vision/person_detection.py` was tuned for greater sensitivity (scaleFactor 1.05, minNeighbors 3, minSize 48×64); three-frame confirmation and short miss persistence remain to filter flicker. This may increase false candidates, so verify stable tracking on the Pi in varied distance, lighting, pose, and background conditions before acceptance. Do not enable chassis following until upper-body tracking, camera-size distance calibration, bounded motion, and sensor-verified obstacle behavior pass their required tests.
+
+Passive face-tracking clarification from user (2026-10-26): Independently of follow mode, while the runtime is IDLE the Pi servo controller may center one stable, unambiguous face whether recognized or unknown. It must stop issuing tracking updates immediately when the wake word is detected and must not restart until the runtime returns to IDLE with fresh camera frames. Face presence never enables chassis movement. Implementation is in `thashu/main.py`; multiple/ambiguous faces are not arbitrarily selected. Hardware validation remains pending.
+
+
+Bounded chassis-follow implementation (2026-10-29):
+Updated `thashu/main.py` to use the user's moving Pose Lite shoulder-width medians (150 cm=109.8 px, 160 cm=103.4 px, 200 cm=95.7 px) with a 7-frame median window. The Pose detector's torso box width is converted back to shoulder width using its current 1.7 scale. Below 97 px requests a 250 ms forward pulse; above 107 px requests a 250 ms reverse pulse; between those thresholds the motors stop. Pulses are PWM 150 and spaced 750 ms apart to allow fresh camera measurements. Movement requires a fresh target, unclipped box, connected ESP32, fresh telemetry, all three front ToFs clear for forward, or rear ultrasonic clear for reverse; the ESP32 remains authoritative and must ACK each pulse. The user's Pi log showed that the original 0.35 s frame-age limit rejected visible track 0 at 0.35–0.58 s; this was corrected to 0.75 s in `thashu/vision/follow_logic.py`. The user subsequently reported follow movement and obstacle stopping worked. WAV-only obstacle playback has not yet been verified on the Pi. No autonomous obstacle reroute/pathfinding/SLAM is intended per the user's decision. Phase 5 remains open for WAV playback and remaining safety/failure acceptance.
+
+
+Follow freshness correction (2026-10-29): The user's Pi log showed the selected upper-body remained visible and unambiguous (track 0), while observation ages repeatedly ranged from 0.35 to 0.58 seconds. The previous `FollowLogic.MAX_FRAME_AGE_SECONDS = 0.35` caused these snapshots to enter `SEARCHING_FOR_TARGET` and trigger STOP. Increased the threshold to 0.75 seconds in `thashu/vision/follow_logic.py` (commit `212c5f5`); bounded 250 ms motor pulses, sensor freshness checks, and ESP32 safety interlocks are unchanged. The user later reported that follow movement and obstacle stopping worked; WAV-only obstacle playback and remaining failure/acceptance checks are still pending. Autonomous rerouting is explicitly out of scope.
+
+
+
+Obstacle announcement WAV-only playback (2026-10-29): Updated `thashu/main.py` so asynchronous obstacle STOP/BLOCKED announcements call the existing cache-only WAV playback path instead of `speak()`; runtime obstacle announcements do not invoke Piper. Updated `thashu/voice/text_to_speech.py` with `play_cached_response()` and optional named generation in the existing cache-preparation function. On the Pi, pre-render just the two required clips once with:
+```python
+from voice.text_to_speech import prepare_command_voice_cache
+prepare_command_voice_cache({"obstacle_stop", "obstacle_blocked_v2"})
+```
+This uses Piper only during offline WAV generation; runtime plays `obstacle_stop.wav` or `obstacle_blocked_v2.wav` from the user-local voice cache. If a clip is missing, the code logs a warning and does not fall back to live Piper; ESP32 motor STOP/safety remains independent. User reports follow movement and obstacle stopping worked in the latest test; the WAV-only audio path still needs Pi playback validation. No automated tests run. Phase 5 acceptance remains open.
+
+
+
+
+User scope and hardware test update (2026-10-29): The user explicitly declines automatic obstacle pathfinding/rerouting and SLAM for follow mode. Required behavior is stop on the blocked direct path, announce once, and wait; no turn-around or alternate-route attempt. The user reports the latest follow movement and obstacle-stop test worked correctly after the freshness correction. This report does not validate the new WAV-only playback, all failure cases, or full Phase 5 acceptance. Acceptance remains unchecked pending WAV playback and remaining required tests.
+
+
+
+
+Phase 6 identity-name and query follow-up (2026-10-29): Updated `thashu/core/decision.py` earlier in this branch with exact recognition-query detection and letter-by-letter name parsing. Updated `thashu/main.py` so face enrollment reads the spoken name, asks the user to spell it one letter at a time, reads the spelling back, and saves only after a separate yes confirmation. Direct “Do you remember me?” / “Who am I?” queries now answer from a recent fresh, unique recognized face; when no face is currently confirmable but exactly one identity is saved, the reply distinguishes stored memory from current visual confirmation. Updated `thashu/vision/face_database.py` with exact case-insensitive and conservative fuzzy name resolution for explicit forget/delete requests; a fuzzy match is proposed aloud and deletion still requires yes confirmation. No tests or Pi validation have been run for this follow-up. Existing wrongly spelled identities are not silently renamed: explicitly forget the proposed saved label, confirm deletion, then re-enroll and spell the correct name.
+
+
+
+Phase 6 voice-only name correction refinement (2026-10-29): The user cannot access a terminal during expo demonstrations. Updated `thashu/core/decision.py` to accept NATO phonetic alphabet words (for example, “Tiger Hotel Alpha Romeo Uniform November”) as spoken name spelling, while retaining letter-name parsing. Updated `thashu/main.py` prompts to request phonetic words instead of isolated letters. Thashu still reads back the reconstructed name and requires a separate voice confirmation before saving. This replaces the prior suggestion of text-entry correction; no terminal is required. No tests or Pi validation have been run.
+
+
+
+Phase 6 user preference correction (2026-10-29): The user prefers ordinary letter-by-letter speech (for example, “T H A R U N”), not NATO words and not terminal text entry. Updated the enrollment prompt to request ordinary letter names. Explicit deletion accepts `forget T H A R U N`; the existing parser also converts spoken letter names before resolving the stored label. It offers any fuzzy saved-name match and requires a separate spoken yes before deletion. The prior NATO-word prompt and terminal-entry suggestion are superseded. No tests or Pi validation have been run.
+
+
+
+Phase 6 enrollment capture latency follow-up (2026-10-29): The user reports identity enrollment remains at “collecting clear views” for a long time. Updated `thashu/vision/vision_core.py` to perform face-embedding capture every 0.4 seconds while enrollment is active (normal recognition cadence remains 2 seconds), log each accepted sample and announce when five are ready. Updated `thashu/main.py` to state the required five-view capture, report current sample progress when the user speaks the name too early, and keep the spoken letter prompt consistent. The implementation requires one stable, unambiguous face with valid YuNet landmarks; if samples do not progress, the Pi log should show whether capture started and the current count. No tests or Pi validation have been run.
+
+
+
+Phase 6 enrollment completion feedback and detector performance fix (2026-10-29): In response to repeated “still collecting clear views” reports, updated `thashu/vision/vision_core.py` to remove an accidental duplicate YuNet face/landmark inference on every camera frame. Enrollment recognition remains accelerated while active and logs each accepted sample. Updated `thashu/main.py` so the Pi main loop announces when all five required face images have been captured, then asks for the name; timeout or multiple-face failure is also announced. The capture prompt reports the accepted count, and a combined natural-name plus letter-spelling utterance can use the spelled suffix (e.g. “my name is Tharun T H A R U N”). No tests or Pi validation have been run; observe the `[VISION] Enrollment face samples n/5` and `[VISION] Required face images captured (5/5)` logs after pulling.
+
+
+Enrollment completion announcement follows the normal runtime supervisor transitions (IDLE → SPEAKING → RETURN_TO_IDLE → IDLE), keeping vision paused during voice playback as required by the existing lifecycle design. This code path has not yet been run on the Raspberry Pi.
+
+
+
+Phase 6 turn direction and manual servo command update (2026-10-30): Updated `ESP32Firmware/ThashuController/communication_manager.cpp` to swap the left/right differential motor mixes because the user's chassis yaw did not match the Pi command labels. The existing per-motor forward polarity map is unchanged; forward/backward motor direction behavior is not intentionally altered. Added a bounded timed `SERVO|MOVE|pan|tilt|duration` command handled by the ESP32's existing ServoManager. Updated `thashu/hardware/servo_tracking.py` so manual look commands move 30 degrees (previously 15) over 220 ms, and “look straight” targets exactly pan=90, tilt=90. Servo tracking/follow gains are unchanged. The integrated ESP32 sketch must be reflashed and Pi code pulled. Turn direction, four wheel directions, servo travel/speed, and 90/90 center still require physical validation; no tests or hardware checks have been run.
+
+
+Phase 6 turn-mix correction (2026-10-30): User clarified physical motor layout as M0=Motor 1 front-left, M1=Motor 2 rear-left, M2=Motor 3 front-right, M3=Motor 4 rear-right, and reported the prior turn mix drove the listed motors opposite to the requested turn directions. Updated `ESP32Firmware/ThashuController/communication_manager.cpp` to drive each chassis side as a pair: RIGHT commands M0/M1 reverse and M2/M3 forward, matching the user's specified direction; LEFT is the inverse. This replaces the prior alternating-by-index mix. Pull and reflash the integrated ESP32 sketch, then verify both turns with wheels lifted before floor testing. The code change is not hardware-verified and does not close Phase 6 acceptance.
+
+
+Phase 6 turn duration adjustment (2026-10-30): Reduced both Pi-bounded LEFT and RIGHT turn durations from 2.0 s to 1.7 s, retaining matched durations and the existing STOP timer/safety behavior. Updated the movement log to report tenths of a second. This is an implementation adjustment only; verify turn amount and direction with wheels lifted, then at low speed on the floor. No hardware test performed.
+
+
+Phase 6 turn duration follow-up (2026-10-30): Superseding the prior 1.7 s setting, both LEFT and RIGHT turn durations are now 1.5 s in `thashu/main.py`. Hardware validation remains pending.
+
+
+Phase 6 turn duration follow-up (2026-10-30): Superseding prior turn-duration settings, both LEFT and RIGHT are now set to 1.2 s in `thashu/main.py`. Hardware validation remains pending.
+
+
+Phase 6 spoken-name greeting cleanup (2026-10-30): Updated `thashu/core/decision.py` to remove common trailing greetings (including “nice to meet you/u”) from an explicit self-introduction before forming the candidate name. Unspelled names still enter the spelling/read-back confirmation flow; the database write remains gated on an explicit yes. This prevents the greeting from becoming part of the stored label, but cannot correct a Whisper mishearing by itself. No tests or Pi validation were run.
+
+
+Phase 6 saved-name cleanup safeguard (2026-10-30): Extended explicit `forget/remove/delete <name>` parsing to accept labels up to eight words, still requiring Thashu to read back the matched identity and receive a separate yes before deletion. This allows removal of an existing malformed label that accidentally includes a greeting. No tests or Pi validation were run.
+
+
+Phase 6 enrollment announcement, wake re-arm, and fixed-reply WAV update (2026-10-30): The Pi log exposed a crash when the background enrollment completion notice attempted the invalid IDLE → SPEAKING transition. Added IDLE → SPEAKING as an allowed supervised announcement path, retaining SPEAKING → RETURN_TO_IDLE → IDLE. The log also showed a second wake activation with high stale scores after Thashu's enrollment prompt and an empty Whisper transcript. `thashu/main.py` now resets openWakeWord's public model history before every post-playback unlock; `wake_word.py` is unchanged. Added fixed identity-enrollment and follow/safety replies to `COMMAND_VOICE_PROMPTS` so the existing `speak()` exact-match cache plays generated WAVs instead of running Piper at runtime. Dynamic responses containing names still use Piper. Regenerate the local WAV cache on the Pi after pulling. No tests or Pi validation were run.
+
+
+Phase 6 enrollment spelling retry update (2026-10-30): Updated `thashu/core/decision.py` and `thashu/main.py` so the save confirmation offers “yes” to save, “try again” to re-enter the spelling, and “cancel” to discard enrollment. Retrying spelling preserves the five volatile face samples and requests a fresh letter sequence; the read-back confirmation repeats before persistence. “No” is not a save-confirmation command; the explicit “try again” command returns to spelling, while “cancel” clears samples and exits. Deletion confirmation still uses “no” to cancel deletion. This does not improve Whisper's letter recognition; it makes correction possible without retaking face images. Pi validation has not been run.
+
+
+Phase 6 live-recognition diagnostic test added (2026-10-31): Added opt-in diagnostics to `thashu/vision/vision_core.py` and `thashu/vision/face_database.py`. Run the Pi app with `THASHU_FACE_MATCH_DEBUG=1 python main.py` to report missing stable tracks/landmarks, unavailable embeddings, database-empty conditions, best and second similarity scores, score delta, configured thresholds, and the three-observation temporal-confirmation count. The diagnostic does not change thresholds or persist face images. It is diagnostic instrumentation only; Pi results, threshold calibration, and Phase 6 recognition acceptance remain pending.
+
+
+Phase 6 enrollment spelling precedence fix (2026-10-31): Updated `thashu/core/decision.py` so a self-introduction longer than four words is accepted only when it contains a valid spelled-letter suffix. The existing runtime parser then selects that suffix (for example, “my name is Dalun, T-H-A-R-U-N” resolves to “Tharun”), and the confirmed pending name is the one persisted. Ordinary unspelled introductions retain the four-word guard. This fixes the combined natural-name-plus-spelling parsing path; Raspberry Pi enrollment and persisted-label verification remain pending. No threshold changes or tests were made.
+
+
+Phase 6 speech-confirmation robustness update (2026-10-31): Face enrollment now requires the distinct multiword phrase “confirm save” to persist an identity; “try again” returns to spelling and “cancel registration” discards it. This reduces reliance on ambiguous one-word yes/no recognition. Deletion confirmation remains separate. Existing exact command parsing already includes “turn right” and “look straight”; a transcription error before command parsing still requires the exact `[STT] Heard:` transcript to diagnose. Whisper model and wake-word code were left unchanged. No Pi speech test has been run; command and identity validation remain open.
+
+Phase 6 Whisper repeatability update (2026-11-01): Updated `thashu/voice/speech_to_text.py` to use fixed beam decoding (`beam_size=5`, `best_of=1`, `temperature=0.0`) and disable previous-segment conditioning, while retaining the existing `tiny.en` model, int8 compute, English language setting, resampling, and VAD. This reduces run-to-run variation from sampling; it does not guarantee correct recognition when speech is clipped, noisy, or acoustically ambiguous. No wake-word code or command parsing was changed. Raspberry Pi comparison using repeated recordings and common short commands is still required; Phase 6 speech acceptance remains open.
+
+
+Phase 6 remember-me enrollment routing fix (2026-11-01): Updated \`thashu/core/decision.py\` so “remember me, my name is <name>” is recognized as a face-enrollment request and its candidate name is parsed as a draft. Updated \`thashu/main.py\` so the combined request starts five-view face capture, then asks the user to spell the draft name; the name is persisted only after face samples, spelling read-back, and the existing explicit “confirm save” command. If the user says only “remember me”, the prior capture-then-name path remains. This prevents the LLM fallback from claiming it will remember a name without enrollment. Code has not been executed on the Pi; verify capture logs, spelling prompt, and save gating there.
+
+
+Phase 6 text-only name persistence guard (2026-11-01): Updated `thashu/core/brain.py` so ordinary spoken self-introductions (for example, “my name is Tharun”) are acknowledged as unsaved and directed to the explicit “remember me” face-enrollment flow. Text-only long-term name storage and text-only name recall were removed from this path; existing Pi-local legacy memory values are left untouched and are no longer treated as verified identity. Fixed the word-boundary regex in the guard. Only the existing enrollment flow may save an identity after the required face samples, spoken spelling/read-back, and “confirm save”. Pi validation remains pending: verify an ordinary introduction does not save or claim identity, then complete enrollment and confirm persisted recognition after restart. No tests run.
+
+
+Phase 6 context-aware short-command transcription (2026-11-01): Updated `thashu/voice/speech_to_text.py` to accept optional expected phrases and pass them to faster-whisper through its supported `initial_prompt` parameter. Updated `thashu/main.py` to supply only the active identity-dialog choices: “confirm save”, “try again”, and “cancel registration” during save confirmation; “yes”, “no”, and “cancel” during deletion confirmation. Normal conversation, names, and spelling continue through the existing Whisper decoding path without a command prompt. This is a contextual bias, not a hard grammar constraint; existing state-specific command handling remains the authority and will not save on an unrelated transcript such as “yes” during the save-confirmation stage. Pi validation remains required, including valid choices, unrelated speech, silence, and ensuring normal STT is unchanged. No tests run.
+
+
+Phase 6 user-reported Pi verification (2026-11-01): The user confirms known-face recognition works at different distances and still works after reboot. The user also confirms the context-aware short-command transcription works. These results are recorded as passed for the tested conditions. Do not treat them as proof of lighting/pose coverage, unknown-person false-match rejection, enrollment/deletion/cancellation/failure safeguards, or the full automated/Pi acceptance suite; those criteria remain open until tested.
+
+
+Phase 6 user-reported verification update (2026-11-01): The user confirms enrollment safeguards and persistence/deletion tests (items 2 and 3 in the remaining-test summary) passed on the Raspberry Pi. The confirmed name-face persistence and explicit identity removal acceptance items are checked above. Full validation remains open for labeled positive/negative threshold calibration, representative lighting/pose coverage, false-match robustness, and any remaining ambiguity/failure scenarios; do not infer these from the reported tests.
+
+
+Phase 6 completion report (2026-11-01): The user confirms the remaining Phase 6 test passed. Together with earlier user-reported tests for known-face recognition across distances, poses, and reboot; unknown faces remaining Unknown; face enrollment/save safeguards; identity persistence/deletion; and contextual confirmation-command transcription, Phase 6 acceptance is recorded complete. Validation results in this report are user-reported; no independent test execution was performed in this task.

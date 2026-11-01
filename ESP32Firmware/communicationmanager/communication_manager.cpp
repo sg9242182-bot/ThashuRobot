@@ -60,8 +60,11 @@ void CommunicationManager::handle(char* line) {
             (forward ? SafetyManager::FORWARD : SafetyManager::REVERSE);
         safety->notePiFrame();
         if (!safety->allowMotion(motion, (uint8_t)speed)) {
+            const bool obstacleDetected = safety->obstacleDetectedFor(motion);
             motors->stop(); safety->setActiveMotion(SafetyManager::STOPPED, 0);
-            acknowledge(sequence, "ERROR|SAFETY_STOP"); return;
+            acknowledge(sequence, obstacleDetected ? "ERROR|OBSTACLE" : "ERROR|SENSOR_NOT_READY");
+            if (obstacleDetected) Serial.println("EVENT|0|BLOCKED|OBSTACLE");
+            return;
         }
         if (speed == 0) motors->stop();
         else if (forward) motors->setAll(speed);
@@ -135,12 +138,17 @@ void CommunicationManager::sendTelemetry() {
         else Serial.print("NA");
     }
     Serial.print("|US_REAR|");
-    if (rear->isFresh() && rear->isValid()) Serial.print((long)(rear->getDistanceCm() * 10.0f));
+    if (!rear->isFresh()) Serial.print("NA");
+    else if (rear->isValid()) Serial.print((long)(rear->getDistanceCm() * 10.0f));
+    else if (rear->isOutOfRange()) Serial.print("FAR");
     else Serial.print("NA");
     Serial.println();
 }
 
 void CommunicationManager::update() {
     readCommands();
+    if (safety && safety->consumeObstacleStop()) {
+        Serial.println("EVENT|0|STOP|OBSTACLE");
+    }
     sendTelemetry();
 }

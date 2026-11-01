@@ -133,6 +133,19 @@ class VisionLifecycleTests(unittest.TestCase):
             detector.release.set()
             vision.stop()
 
+    def test_publishes_short_lived_track_ids_and_frame_freshness(self):
+        vision, *_ = make_vision()
+        try:
+            vision.start()
+            self.assertTrue(wait_for(lambda: bool(vision.get_state()["faces"])))
+            state = vision.get_state()
+            self.assertEqual(state["faces"][0]["track_id"], 1)
+            self.assertFalse(state["faces"][0]["ambiguous"])
+            self.assertIsInstance(state["observed_at"], float)
+            self.assertEqual(state["frame_size"], (640, 480))
+        finally:
+            vision.stop()
+
     def test_vision_has_no_motor_or_servo_controller(self):
         vision, *_ = make_vision()
         self.assertFalse(hasattr(vision, "motors"))

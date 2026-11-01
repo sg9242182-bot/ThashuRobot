@@ -160,6 +160,7 @@ void setup() {
 
     stopNow();
     Serial.println("EVENT|0|READY|ISOLATED_MOTOR_TEST");
+    Serial.println("INFO|MOTOR_MAP|M0=Motor1(front-left)|M1=Motor2(rear-left)|M2=Motor3(front-right)|M3=Motor4(rear-right)");
     Serial.println("INFO|CMD|n|MOTOR|M0..M3 or ALL|signed_speed");
     Serial.println("INFO|CMD|n|STOP or CMD|n|ENCODERS");
     Serial.println("INFO|PWM limit +/-255 (full duty); each drive command stops after 1 second");

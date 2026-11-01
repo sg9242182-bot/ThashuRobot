@@ -9,6 +9,7 @@ public:
 
     float getDistanceCm() const;
     bool isValid() const;
+    bool isOutOfRange() const;
     bool isFresh() const;
     bool isObstacleDetected() const;
 
@@ -19,13 +20,16 @@ private:
     static constexpr uint8_t ECHO_PIN = 36;
 
     static constexpr unsigned long MEASUREMENT_INTERVAL_MS = 60;
-    static constexpr unsigned long ECHO_TIMEOUT_US = 25000;
+    // Allow margin for HC-SR04-compatible no-target ECHO pulses (nominally 38 ms).
+    static constexpr unsigned long ECHO_TIMEOUT_US = 50000;
 
     static constexpr float OBSTACLE_DISTANCE_CM = 30.0f;
 
     float distanceCm = 0.0f;
     bool valid = false;
+    bool outOfRange = false;
     bool obstacleDetected = false;
+    bool hasReading = false;
 
     unsigned long lastMeasurementTime = 0;
     unsigned long measurementStartTime = 0;

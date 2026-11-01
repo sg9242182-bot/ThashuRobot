@@ -66,23 +66,22 @@ class Brain:
         # ===== STEP 3: PERSONALITY =====
         self.personality.update(user_input)
 
-        # ===== STEP 4: LONG MEMORY =====
-        if "my name is" in text:
-            name = user_input.split("is")[-1].strip()
-            self.long_memory.set("user_name", name)
-
-            response = f"Okay, I will remember your name is {name}."
+        # ===== STEP 4: CONFIRMED PERSON MEMORY =====
+        # A spoken name alone is not a confirmed person identity. Face enrollment
+        # in main.py owns the only path that stores a name with face embeddings.
+        if re.match(r"^(?:my name is|i am|i'm|call me)\b", text):
+            response = (
+                "I heard your name, but I have not saved it. "
+                "To remember you by face, say remember me and I will start registration."
+            )
             self.memory.add(user_input, response)
             return response
 
-        if "what is my name" in text:
-            name = self.long_memory.get("user_name")
-
-            if name:
-                response = f"Your name is {name}."
-            else:
-                response = "I don't know your name yet."
-
+        if re.fullmatch(r"(?:what is|what's) my name(?: again)?[?.! ]*", text):
+            response = (
+                "I can only confirm your name from a registered face. "
+                "Say do you remember me while facing the camera."
+            )
             self.memory.add(user_input, response)
             return response
 
