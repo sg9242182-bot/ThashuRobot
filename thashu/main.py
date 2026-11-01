@@ -932,6 +932,15 @@ def main():
                     expected_phrases = ["confirm memory", "cancel memory"]
                 elif _memory_delete_pending is not None:
                     expected_phrases = ["confirm delete memories", "cancel memory deletion"]
+                elif recognized_person_at_wake is not None:
+                    expected_phrases = [
+                        "remember that [a fact to save]",
+                        "remember this event [an event to save]",
+                        "what do you remember about me",
+                        "forget all my memories",
+                        "forget everything you remember about me",
+                        "delete my saved memories",
+                    ]
 
                 text = transcribe(raw_audio, expected_phrases=expected_phrases)
 
