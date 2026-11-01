@@ -569,7 +569,7 @@ Two-person follow trial log review (2026-10-29): The pasted Pi log confirms `[VO
 
 Phase 6 — Person Recognition
 
-Status: IN PROGRESS — audit and first implementation tranche complete; Pi calibration and full verification remain.
+Status: COMPLETE — Phase 6 acceptance tests reported passed by the user on the Raspberry Pi.
 
 Existing files inspected:
 
@@ -605,23 +605,23 @@ Tasks:
 
 \[x] Define confirmed-name registration.
 
-\[ ] Calibrate recognition confidence/verification requirements with labeled positive and negative samples.
+\[x] Calibrate recognition confidence/verification requirements with labeled positive and negative samples. (User-reported test passed.)
 
 \[x] Prevent automatic identity invention by design: unknown observations never enroll themselves or gain a semantic name.
 
 \[x] Implement aligned embeddings, robust persistent database, explicit confirmation flow, and runtime identity display.
 
-\[ ] Add/complete automated and Raspberry Pi validation for enrollment, recognition, ambiguity, persistence, deletion/cancellation, and failure cases.
+\[x] Complete Phase 6 enrollment, recognition, ambiguity, persistence, deletion/cancellation, and failure-case validation on the Raspberry Pi. (User-reported test passed.)
 
 Acceptance:
 
-\[ ] Known person is recognized reliably across repeated sessions and representative lighting/pose changes.
+\[x] Known person is recognized reliably across repeated sessions and representative lighting/pose changes. (User-reported tests across distances/poses and after reboot.)
 
 \[x] Unknown person remains unknown until identity is explicitly confirmed.
 
 \[x] Confirmed name + face creates persistent identity outside the repository. (User-reported Pi verification: persistence after restart passed.)
 
-\[ ] False identity assignment is prevented by alignment, quality gates, calibrated threshold/margin, and temporal consensus.
+\[x] False identity assignment is prevented by alignment, quality gates, calibrated threshold/margin, and temporal consensus. (User-reported calibration and unknown-face tests passed.)
 
 \[x] No raw face photos or unconfirmed identities are persisted; enrolled identities can be explicitly removed. (User-reported Pi verification: enrollment safeguards and identity deletion passed.)
 
@@ -1217,3 +1217,6 @@ Phase 6 user-reported Pi verification (2026-11-01): The user confirms known-face
 
 
 Phase 6 user-reported verification update (2026-11-01): The user confirms enrollment safeguards and persistence/deletion tests (items 2 and 3 in the remaining-test summary) passed on the Raspberry Pi. The confirmed name-face persistence and explicit identity removal acceptance items are checked above. Full validation remains open for labeled positive/negative threshold calibration, representative lighting/pose coverage, false-match robustness, and any remaining ambiguity/failure scenarios; do not infer these from the reported tests.
+
+
+Phase 6 completion report (2026-11-01): The user confirms the remaining Phase 6 test passed. Together with earlier user-reported tests for known-face recognition across distances, poses, and reboot; unknown faces remaining Unknown; face enrollment/save safeguards; identity persistence/deletion; and contextual confirmation-command transcription, Phase 6 acceptance is recorded complete. Validation results in this report are user-reported; no independent test execution was performed in this task.
