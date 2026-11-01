@@ -642,68 +642,237 @@ Implementation snapshot (2026-10-29; on phase-6):
 - Existing tracked legacy face photos were not modified or imported. The project still needs a deliberate cleanup/migration decision for those historical artifacts; they must not be treated as enrolled identities.
 - No test suite or Pi hardware tests were run in this tranche. The recognition threshold/margin defaults are provisional and must be calibrated with labeled same-person and different-person trials before acceptance. Install/download YuNet on the Pi using `MODEL_SETUP.md`.
 
-Phase 7 — Person \& Conversation Memory
+THASHU ENGINEERING CHECKLIST
 
-Status: IN PROGRESS — runtime call sites are traced and short-term context now expires; permanent person/episodic memory contract is next.
+Project: Thashu — Intelligent Self-Reliant Robot  
+Checklist status: Active  
+Authoritative project checklist: Yes
 
-Existing files:
+Engineering Rules
 
-\[x] `memory/short\_term.py`
+Work on one phase at a time.
 
-\[x] `memory/long\_term.py`
+Reuse existing files and architecture whenever they are suitable.
 
-\[x] `memory/storage.py`
+Do not create new files/modules without a demonstrated architectural need.
 
-\[x] `memory/people.py`
+Do not mark a phase complete because code merely runs.
 
-\[x] `data/people.py` (empty placeholder inspected)
+A phase is complete only when its implementation, tests, and acceptance criteria pass.
 
-\[x] Trace runtime memory read/write call sites and confirm whether person-memory utilities are connected.
-\[x] Add per-pair time-based expiry to short-term conversation context (10-minute retention; implementation recorded below).
+Completed phases remain frozen unless a later test exposes a genuine regression.
 
-\[x] Related core/personality modules inspected: core/brain.py, core/decision.py, core/intent.py, core/quick_responses.py, core/response_manager.py, personality/personality_engine.py
+Record actual file-level changes and their purpose.
 
-Tasks:
+Do not silently delete or abandon existing code; document orphaned/obsolete components first.
 
-\[ ] Separate short-term and permanent memory.
+Safety functions must remain available even when AI/vision processing is paused.
 
-\[ ] Define permanent person facts.
-
-\[ ] Define significant interaction/episodic memory.
-
-\[ ] Associate memories with confirmed people.
-
-\[ ] Avoid permanent storage of irrelevant conversation.
-
-\[ ] Define memory retrieval behavior.
-
-\[ ] Preserve existing useful memory mechanisms.
-
-Acceptance:
-
-\[x] Temporary conversation expires appropriately (Pi quick test: 3-second expiry cleared the entry; six insertions retained only the newest five).
-
-\[ ] Important person facts persist.
-
-\[ ] Significant interactions persist.
-
-\[ ] Memories are correctly associated with people.
-
-\[ ] Memory retrieval is relevant and bounded.
-
-Audit findings (2026-11-01):
-- memory/short_term.py holds the latest five input/response pairs by count only; there is no time-based expiration.
-- memory/long_term.py is a generic key/value wrapper over memory/storage.py. Brain constructs it, but current brain.py no longer reads or writes it after the Phase 6 identity guard.
-- memory/storage.py writes to a working-directory-relative data/memory_db/long_term.json; malformed/unreadable JSON silently loads as an empty dictionary, and writes are not atomic.
-- Runtime call-site trace: `Brain` adds and reads only `ShortTermMemory` for conversation context. It constructs `LongTermMemory` but does not call its read/write API. `PeopleMemory` has no runtime caller in the application entry point or vision pipeline; its `people_seen` data is not currently populated by normal app flow. The face database remains separate and is used only by the confirmed identity/recognition path.
-- data/people.py is empty. The face database is routed to machine-local storage through data_path("people_faces.json"); Phase 7 must preserve that confirmed-identity boundary.
-- `memory/short_term.py` now retains at most five recent conversation pairs and expires each pair after ten minutes, using a monotonic clock. Expiry is checked on both insertion and context retrieval. The behavior is implemented but has not yet been tested on the Raspberry Pi.
-- Permanent person/episodic memory contract is still pending. No persistent interaction history is written by `Brain`; Phase 7 acceptance remains open.
-
-
-
-User-reported Pi short-term memory checks (2026-11-01): A `ShortTermMemory(expiration_seconds=3)` entry appeared immediately and returned an empty context after a four-second wait. The default-size buffer retained exactly five of six entries, from Question 1 through Question 5. These validate expiry and count bounds; permanent-memory behavior and other Phase 7 acceptance remain open.
 \---
+
+Hardware Baseline
+
+Raspberry Pi 4
+
+ESP32 NodeMCU
+
+2 × Makerbazar TA6586 dual-channel DC motor-driver modules (four independent motor channels total)
+
+2 × 0.96-inch OLED displays (robot eyes)
+
+3 × VL53LDK ToF sensors:
+
+Front-left
+
+Front-center
+
+Front-right
+
+1 × rear ultrasonic sensor
+
+Echo line uses a voltage divider for ESP32 safety
+
+Camera
+
+Existing servos, where retained and confirmed during Phase 1
+
+Hardware Responsibility
+
+Raspberry Pi
+
+High-level robot behavior
+
+AI / LLM
+
+Whisper / speech recognition
+
+Piper / speech output
+
+Camera processing
+
+Face recognition
+
+Person/place memory
+
+High-level decisions
+
+Supervisor/state machine
+
+ESP32
+
+Motor control
+
+Hardware-level motor stop/safety
+
+OLED displays
+
+ToF sensors
+
+Rear ultrasonic
+
+Servo hardware, if retained
+
+Pi ↔ hardware communication
+
+\---
+
+Memory Rules
+
+Temporary / Expiring Memory
+
+Normal conversation that has no lasting importance should not become permanent memory.
+
+Examples:
+
+Greetings
+
+Casual conversation
+
+Repetitive questions
+
+Temporary context
+
+Permanent Person Memory
+
+Store only useful, lasting information such as:
+
+Confirmed name
+
+Confirmed face/identity
+
+Important facts explicitly provided by the person
+
+Significant interactions
+
+Relevant preferences
+
+Important events
+
+Where/how the person was known, when meaningful
+
+A face alone does not establish identity.
+
+Unknown person flow:
+
+Detect unknown person.
+
+If interacting, ask their name when appropriate.
+
+Store the person only after their name is known/confirmed.
+
+Associate the face representation with the confirmed identity.
+
+Store important interaction memories, not a permanent transcript of every sentence.
+
+Permanent Place Memory
+
+Thashu must not invent semantic place names.
+
+A place becomes semantically known when the user explicitly labels it, for example:
+
+"This is our house."
+
+"This is my school."
+
+"This is a road."
+
+Store:
+
+User-provided place label
+
+Visual/environmental reference information
+
+Important observations/events associated with the place
+
+Later recognition must use the stored reference information and confidence thresholds. If confidence is insufficient, report the place as unknown rather than inventing an identity.
+
+Memory Layers
+
+Short-term: current conversation/context; expires.
+
+Episodic: important interactions/events.
+
+Long-term semantic: stable facts about people and places.
+
+\---
+
+Phase Status
+
+Phase 0 — Architecture \& Source Audit
+
+Status: COMPLETE
+
+Completed
+
+\[x] Source repository structure audited.
+
+\[x] Imports/dependencies traced.
+
+\[x] Threads/processes/data paths examined.
+
+\[x] Vision/voice concurrency problem identified.
+
+\[x] Face/person pipeline orphaning identified.
+
+\[x] Motor STOP command-path problem identified.
+
+\[x] Duplicate eye hardware ownership identified.
+
+\[x] TTS timeout/recovery issue identified.
+
+\[x] Existing architecture assessed for refactoring rather than blind rewrite.
+
+Phase 0 Acceptance
+
+\[x] Baseline architecture understood.
+
+\[x] Major architectural risks documented.
+
+\---
+
+Phase 1 — Hardware Abstraction \& ESP32 Migration
+
+Status: COMPLETE
+
+Existing Files to Inspect First
+
+\[x] `hardware/gpio\_control.py`
+
+\[x] `hardware/motors.py`
+
+\[x] `hardware/eyes.py`
+
+\[x] `hardware/servo\_tracking.py`
+
+\[x] `hardware/shutdown\_button.py`
+
+\[x] `hardware/\_\_init\_\_.py`
+
+\[x] Relevant `core/` hardware-command paths
+
+\[x] Existing Pi ↔ hardware/serial communication
+
+\[\---
 
 Phase 8 — Place / Environment Memory
 
