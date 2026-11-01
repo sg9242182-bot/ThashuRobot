@@ -402,8 +402,8 @@ def get_person_memory_request(user_input: str):
     """
     text = " ".join((user_input or "").strip().split())
     patterns = (
-        ("event", r"remember this event(?:\s*:\s*|\s+)(.+)"),
-        ("fact", r"remember that(?:\s*:\s*|\s+)(.+)"),
+        ("event", r"remember this event(?:\s*[:,;]\s*|\s+)(.+)"),
+        ("fact", r"remember that(?:\s*[:,;]\s*|\s+)(.+)"),
     )
     for kind, pattern in patterns:
         match = re.fullmatch(pattern, text, flags=re.IGNORECASE)
@@ -411,6 +411,17 @@ def get_person_memory_request(user_input: str):
             content = match.group(1).strip(" .!?")
             if content:
                 return kind, content
+    return None
+
+
+
+def get_person_memory_save_confirmation(user_input: str):
+    """Return an exact explicit save-confirmation or cancellation command."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", (user_input or "").lower()).strip()
+    if normalized == "confirm memory":
+        return "CONFIRM"
+    if normalized == "cancel memory":
+        return "CANCEL"
     return None
 
 
