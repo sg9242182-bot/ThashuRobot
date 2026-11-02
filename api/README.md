@@ -128,11 +128,17 @@ local API-only development session, Uvicorn may be run separately only while
 the robot process is stopped; never let both processes open the ESP32 serial
 port at once.
 
-Run API tests with:
+Run the API and Pi protocol-framing tests from the repository root:
 
 ```powershell
 python -m unittest api.tests.test_api
+python -m unittest thashu.tests.test_gpio_protocol
 ```
+
+The Pi protocol test reads the shared vectors from
+`testdata/pi_esp32_protocol_vectors.csv`. It verifies Pi command framing and
+sequence handling; it does not execute the ESP32 parser or replace hardware
+verification.
 
 ## Error responses for the Flutter client
 
