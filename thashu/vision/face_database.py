@@ -12,7 +12,7 @@ class FaceDatabase:
     """Stores only confirmed names and normalized embeddings, never face photos."""
 
     VERSION = 1
-    MAX_EMBEDDINGS_PER_PERSON = 12
+    MAX_EMBEDDINGS_PER_PERSON = 15
     # Conservative initial gates; the Pi validation must tune/confirm them with
     # labeled same-person and different-person samples before Phase 6 completes.
     # Fail closed after a Pi-reported false positive (father matched as owner).
