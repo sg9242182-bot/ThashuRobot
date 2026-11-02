@@ -930,7 +930,7 @@ Acceptance:
 
 \[x] Tharun's tested facts/events are associated with the recognized person; an unrecognized face cannot save a memory (user-reported Pi tests).
 
-\[ ] Unknown/ambiguous faces are verified unable to recall another person's records.
+\[x] Unknown/ambiguous faces cannot recall another person's records (user-reported Pi test).
 
 \[x] Memory retrieval is relevant and bounded (user-reported Pi test).
 
@@ -1515,4 +1515,4 @@ Phase 7 explicit face enrollment sample increase (2026-11-02): Increased the spo
 
 Phase 7 face enrollment follow-up (2026-11-02; supersedes the twelve-view capture note above): Increased `FaceDatabase.MAX_EMBEDDINGS_PER_PERSON` and explicit enrollment capture to 15. After capture completes, Thashu now asks the user to say only the name's letter names (for example, “T H A R U N”); a strict enrollment parser rejects surrounding phrases and words. Thashu reads the spelling back, then accepts the exact word “confirm” in that confirmation state (or the existing “confirm save”), with “confirm” added to Whisper’s expected phrases and try-again/cancel preserved. Progress prompts no longer ask the user to repeat a name before capture finishes. No face-match threshold or margin changed, and uncertain identities are still not learned automatically. A fresh 15-view enrollment replaces that identity's prior stored templates because the per-person cap is 15. Pull phase-7 and validate the full Pi flow, including wrong spelling, plain confirm, try again, cancel, and matching/unknown-face outcomes. No tests run.
 
-Phase 7 user-reported Pi acceptance update (2026-11-02): The user reports successful event save and recall, draft cancellation, memory persistence through restart, explicit memory-deletion confirmation, correct Tharun fact/event recall, rejection of memory saving when no face is recognized, and relevant/bounded recall. The user also reports that face recognition remains intermittent: the latest diagnostic frames were rejected by the configured score/margin gates, so the 15-view enrollment update and recognition reliability are still unverified. Punctuation variants and unknown/ambiguous-person recall isolation were not specifically reported and remain open. No independent tests were run.
+Phase 7 user-reported Pi acceptance update (2026-11-02): The user reports successful event save and recall, draft cancellation, memory persistence through restart, explicit memory-deletion confirmation, correct Tharun fact/event recall, rejection of memory saving when no face is recognized, and relevant/bounded recall. The user also reports that face recognition remains intermittent: the latest diagnostic frames were rejected by the configured score/margin gates, so the 15-view enrollment update and recognition reliability are still unverified. Punctuation variants were not specifically reported and remain open; unknown/ambiguous-person recall isolation was reported as passed. No independent tests were run.
