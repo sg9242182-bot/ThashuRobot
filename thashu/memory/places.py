@@ -4,6 +4,7 @@ Visual references are added by the vision pipeline in a later Phase 8 step. A
 label with no references is never sufficient to recognize a place.
 """
 
+import copy
 import json
 import os
 import tempfile
@@ -32,21 +33,28 @@ class PlaceMemory:
     """Machine-local place labels and compact visual references."""
 
     def __init__(self, path=None):
-        self.path = path or PLACES_PATH
+        self.path = os.fspath(path or PLACES_PATH)
+        self._load_error = None
         self.data = self._load()
 
     def _load(self):
         try:
             with open(self.path, "r", encoding="utf-8") as handle:
                 data = json.load(handle)
+            if not isinstance(data, dict) or not isinstance(data.get("places"), dict):
+                raise ValueError("place memory root must contain a places object")
+            data.setdefault("schema_version", 1)
+            return data
         except FileNotFoundError:
             return {"schema_version": 1, "places": {}}
-        if not isinstance(data, dict) or not isinstance(data.get("places"), dict):
-            raise ValueError("Place memory file has an invalid structure")
-        data.setdefault("schema_version", 1)
-        return data
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            self._load_error = f"{self.path}: {exc}"
+            print(f"[PLACE] Store could not be read; preserving it: {self._load_error}")
+            return {"schema_version": 1, "places": {}}
 
     def _save(self):
+        if self._load_error is not None:
+            raise OSError(f"Refusing to overwrite an unreadable place store: {self._load_error}")
         directory = os.path.dirname(self.path)
         os.makedirs(directory, mode=0o700, exist_ok=True)
         fd, temporary = tempfile.mkstemp(prefix=".places-", suffix=".tmp", dir=directory)
@@ -87,6 +95,8 @@ class PlaceMemory:
         if any(not isinstance(view, str) or not view for view in views):
             raise ValueError("Visual views must be nonempty encoded descriptors")
 
+        original = self.data
+        self.data = copy.deepcopy(self.data)
         key = label.casefold()
         record = self.data["places"].get(key)
         if record is None:
@@ -99,7 +109,11 @@ class PlaceMemory:
         record.setdefault("views", []).extend(views)
         # Bound persistent storage while retaining a spread of recent views.
         record["views"] = record["views"][-12:]
-        self._save()
+        try:
+            self._save()
+        except Exception:
+            self.data = original
+            raise
         return len(record["views"])
 
     def rename(self, old_label, new_label):
@@ -111,8 +125,14 @@ class PlaceMemory:
             raise KeyError(old_label)
         if new_key != old_key and new_key in self.data["places"]:
             raise FileExistsError(new_label)
+        original = self.data
+        self.data = copy.deepcopy(self.data)
         record = self.data["places"].pop(old_key)
         record["label"] = new_label
         self.data["places"][new_key] = record
-        self._save()
+        try:
+            self._save()
+        except Exception:
+            self.data = original
+            raise
         return new_label
