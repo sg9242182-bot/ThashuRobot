@@ -82,10 +82,15 @@ class PlaceMemory:
         return normalize_place_label(label).casefold()
 
     def labels(self):
-        return [record["label"] for record in self.data["places"].values()]
+        return [
+            record["label"]
+            for record in self.data["places"].values()
+            if isinstance(record, dict) and isinstance(record.get("label"), str)
+        ]
 
     def get(self, label):
-        return self.data["places"].get(self._key(label))
+        record = self.data["places"].get(self._key(label))
+        return record if isinstance(record, dict) else None
 
     def save_views(self, label, views):
         """Persist confirmed multi-view descriptors for a user-labeled place."""
