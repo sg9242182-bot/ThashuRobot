@@ -1310,7 +1310,7 @@ def main():
                                     "to show five different directions, pausing briefly at each view. "
                                     "I will tell you when the views are captured. Say cancel place to stop."
                                 )
-                        except (OSError, TypeError, ValueError, KeyError, FileExistsError) as exc:
+                        except (OSError, TypeError, ValueError, KeyError, FileExistsError, RuntimeError) as exc:
                             print(f"[PLACE] Label update rejected: {exc}")
                             response = "I couldn't safely update that place label."
                         _place_pending = None
@@ -1320,22 +1320,17 @@ def main():
                             "or cancel place to discard it."
                         )
                 elif place_label_request is not None:
-                    if place_memory.get(place_label_request) is not None:
-                        response = (
-                            f"I already have a place labeled {place_label_request}. "
-                            "Say rename place, or choose a different label."
-                        )
-                    else:
-                        _place_pending = {
-                            "operation": "add",
-                            "label": place_label_request,
-                            "expires_at": time.monotonic() + PENDING_PLACE_CONFIRM_SECONDS,
-                        }
-                        response = (
-                            f"I heard the place label {place_label_request}. "
-                            "Say confirm place to save that label, or cancel place to discard it."
-                        )
-                        print(f"[PLACE] Draft label awaiting confirmation: {place_label_request}")
+                    _place_pending = {
+                        "operation": "teach",
+                        "label": place_label_request,
+                        "expires_at": time.monotonic() + PENDING_PLACE_CONFIRM_SECONDS,
+                    }
+                    response = (
+                        f"I heard the place label {place_label_request}. "
+                        "Say confirm place to start learning its views, "
+                        "or cancel place to discard it."
+                    )
+                    print(f"[PLACE] Draft label awaiting confirmation: {place_label_request}")
                 elif place_relabel_request is not None:
                     old_label, new_label = place_relabel_request
                     if place_memory.get(old_label) is None:
