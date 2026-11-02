@@ -56,6 +56,7 @@ COMMAND_VOICE_PROMPTS = {
     "identity_spell_retry": "I didn't catch the spelling. Please say each letter separately, for example T H A R U N.",
     "identity_spelling_required": "Please spell the name using ordinary letter names, like T H A R U N, or say cancel.",
     "identity_not_recognized": "I don't recognize a confirmed face right now.",
+    "person_recognized": "I recognize a known person.",
     "identity_registration_cancelled": "I cancelled face registration.",
     "identity_change_cancelled": "I cancelled that identity change.",
     "identity_not_saved": "I did not save the face identity.",
