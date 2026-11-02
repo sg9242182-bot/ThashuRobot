@@ -79,19 +79,28 @@ class PlaceMemory:
     def get(self, label):
         return self.data["places"].get(self._key(label))
 
-    def add_label(self, label):
-        """Save a confirmed label, initially with no recognition references."""
+    def save_views(self, label, views):
+        """Persist confirmed multi-view descriptors for a user-labeled place."""
         label = normalize_place_label(label)
+        if not isinstance(views, list) or not views:
+            raise ValueError("At least one captured visual view is required")
+        if any(not isinstance(view, str) or not view for view in views):
+            raise ValueError("Visual views must be nonempty encoded descriptors")
+
         key = label.casefold()
-        if key in self.data["places"]:
-            return False
-        self.data["places"][key] = {
-            "label": label,
-            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "views": [],
-        }
+        record = self.data["places"].get(key)
+        if record is None:
+            record = {
+                "label": label,
+                "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "views": [],
+            }
+            self.data["places"][key] = record
+        record.setdefault("views", []).extend(views)
+        # Bound persistent storage while retaining a spread of recent views.
+        record["views"] = record["views"][-12:]
         self._save()
-        return True
+        return len(record["views"])
 
     def rename(self, old_label, new_label):
         """Relabel one existing place without disturbing any captured views."""
