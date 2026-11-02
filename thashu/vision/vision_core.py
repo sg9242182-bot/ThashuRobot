@@ -69,6 +69,7 @@ class VisionCore:
         self._reported_person_count = 0
         self._recognition_votes = {}
         self._last_adaptive_sample_at = {}
+        self._auto_face_adapt = os.environ.get("THASHU_FACE_AUTO_ADAPT", "").strip() == "1"
         # Haar detections can flicker between frames. Only publish a face after
         # it is spatially consistent across three consecutive camera frames.
         self._detection_candidates = []
@@ -590,6 +591,7 @@ class VisionCore:
                             and len(faces) == 1
                             and track_id not in ambiguous_ids
                             and not enrollment_active
+                            and self._auto_face_adapt
                             and time.monotonic()
                                 - self._last_adaptive_sample_at.get(published_name, 0.0)
                                 >= 60.0
