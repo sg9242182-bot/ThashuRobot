@@ -55,24 +55,24 @@ Understand the approved system boundaries before writing application logic.
 Create a reproducible, runnable Flutter project without losing existing work.
 
 ### Checklist
-- [ ] Check whether the Flutter project already exists before running `flutter create`.
-- [ ] Record the project path and verify `flutter doctor`.
-- [ ] Run `flutter pub get` and launch the unmodified app on the available Android emulator/device.
-- [ ] Preserve the valid `lib/main.dart` entry point.
-- [ ] Establish a small, understandable structure, adapting existing files rather than recreating them blindly:
+- [x] Check whether the Flutter project already exists before running `flutter create`.
+- [x] Record the project path and verify `flutter doctor`.
+- [x] Run `flutter pub get` and launch the unmodified app on the available Android emulator/device.
+- [x] Preserve the valid `lib/main.dart` entry point.
+- [x] Establish a small, understandable structure, adapting existing files rather than recreating them blindly:
   - `app/` — app setup, routing, theme
   - `core/` — shared constants and utilities
   - `models/` — typed API/telemetry models
   - `services/` — REST and WebSocket clients
   - `features/` — dashboard, manual control, settings, diagnostics, developer
   - `widgets/` — reusable UI components
-- [ ] Add only necessary dependencies; document why each non-standard dependency is needed.
-- [ ] Ensure secrets and private credentials are not committed.
+- [x] Add only necessary dependencies; document why each non-standard dependency is needed.
+- [x] Ensure secrets and private credentials are not committed.
 
 ### Exit criteria
-- [ ] App builds and opens on Android.
-- [ ] Folder structure is understandable and the entry point remains intact.
-- [ ] Setup steps are documented and a baseline commit exists.
+- [x] App builds and opens on Android.
+- [x] Folder structure is understandable and the entry point remains intact.
+- [x] Setup steps are documented and a baseline commit exists.
 
 ## Phase 2 — App shell, navigation, and visual system
 
@@ -80,17 +80,17 @@ Create a reproducible, runnable Flutter project without losing existing work.
 Build the navigable app foundation before wiring robot behavior.
 
 ### Checklist
-- [ ] Implement the agreed app theme, typography, spacing, and reusable components.
-- [ ] Add navigation for Dashboard, Manual Control, Settings, Diagnostics, and Developer/Recovery.
-- [ ] Make loading, empty, offline, unavailable, and error states explicit.
-- [ ] Ensure layouts work on the target Android screen sizes and remain accessible.
-- [ ] Keep navigation and widgets separate from network implementation.
-- [ ] Use mock/sample data only when clearly marked as mock; never present it as live robot data.
+- [x] Implement the agreed app theme, typography, spacing, and reusable components.
+- [x] Add navigation for Dashboard, Manual Control, Settings, Diagnostics, and Developer/Recovery.
+- [x] Make loading, empty, offline, unavailable, and error states explicit.
+- [x] Ensure layouts work on the target Android screen sizes and remain accessible.
+- [x] Keep navigation and widgets separate from network implementation.
+- [x] Use mock/sample data only when clearly marked as mock; never present it as live robot data.
 
 ### Exit criteria
-- [ ] All agreed screens can be navigated.
-- [ ] Shared visual components are reused.
-- [ ] UI clearly distinguishes real data from placeholders.
+- [x] All agreed screens can be navigated.
+- [x] Shared visual components are reused.
+- [x] UI clearly distinguishes real data from placeholders.
 
 ## Phase 3 — Typed models and REST client
 
@@ -220,6 +220,13 @@ For each phase, record:
 - **Evidence:** commit/PR, test command and result, screenshots only where useful
 - **Open issues:** specific blockers, not guesses
 - **Dependency owner:** name the teammate who must resolve an interface or integration dependency
+
+### Phase 2 — App shell, navigation, and visual system
+
+- **Status:** Complete
+- **Evidence:** Flutter analysis passed; 4 widget tests passed for the five destinations, all notice states, and a 360×800 Android viewport with accessible navigation targets; Android debug APK built successfully. Niteshvar also confirmed navigation on the physical Android phone.
+- **Open issues:** No Phase 2 issues. Robot API integration remains for later phases and is not represented as live data.
+- **Dependency owner:** None for Phase 2.
 
 Do not mark a phase complete just because the code was written. Complete the phase only when its exit criteria are demonstrated.
 
