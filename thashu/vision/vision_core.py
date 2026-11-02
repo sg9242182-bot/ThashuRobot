@@ -17,6 +17,8 @@ class VisionCore:
         tracker=None,
         person_detector=None,
         person_tracker=None,
+        place_memory=None,
+        place_recognizer=None,
     ):
         # Lazy imports let lifecycle behavior be tested without opening hardware
         # or loading vision models. Production still uses the existing modules.
@@ -50,6 +52,10 @@ class VisionCore:
         self.recognizer = recognizer
         self.database = database
         self.tracker = tracker
+        self.place_recognizer = place_recognizer
+        if self.place_recognizer is None and place_memory is not None:
+            from vision.place_recognition import PlaceRecognizer
+            self.place_recognizer = PlaceRecognizer(place_memory)
         self._thread = None
         self._running = False
         self._lifecycle_lock = threading.Lock()
@@ -62,6 +68,7 @@ class VisionCore:
         self.current_names = {}
         self.current_tracks = []
         self.current_people = []
+        self.current_place = {"label": None, "confidence": 0.0, "observed_at": None}
         self.latest_frame_at = None
         self.frame_size = (640, 480)
         self.person_present = False
@@ -105,6 +112,9 @@ class VisionCore:
             self.current_names.clear()
             self.current_tracks = []
             self.current_people = []
+            self.current_place = {"label": None, "confidence": 0.0, "observed_at": None}
+            if self.place_recognizer is not None:
+                self.place_recognizer.reset_temporal()
             self.latest_frame_at = None
             self.person_present = False
             self._reported_face_count = 0
@@ -145,6 +155,7 @@ class VisionCore:
                 self.current_names.clear()
                 self.current_tracks = []
                 self.current_people = []
+                self.current_place = {"label": None, "confidence": 0.0, "observed_at": None}
                 self.latest_frame_at = None
                 self.person_present = False
                 self._reported_person_count = 0
@@ -180,11 +191,31 @@ class VisionCore:
             return {
                 "faces": faces,
                 "persons": [dict(person) for person in self.current_people],
+                "place": dict(self.current_place),
                 "names": dict(self.current_names),
                 "present": self.person_present,
                 "observed_at": self.latest_frame_at,
                 "frame_size": self.frame_size,
             }
+
+    def begin_place_enrollment(self, label, required_views=5, timeout=180.0):
+        """Capture distinct camera views for an explicitly confirmed place label."""
+        if self.place_recognizer is None:
+            raise RuntimeError("Place recognition is not configured")
+        self.place_recognizer.begin_capture(label, required_views, timeout)
+
+    def place_enrollment_status(self):
+        if self.place_recognizer is None:
+            return {"status": "unavailable", "captured": 0, "required": 0}
+        return self.place_recognizer.capture_status()
+
+    def cancel_place_enrollment(self):
+        if self.place_recognizer is not None:
+            self.place_recognizer.cancel_capture()
+
+    def clear_place_enrollment(self):
+        if self.place_recognizer is not None:
+            self.place_recognizer.clear_capture()
 
     def begin_enrollment(self, required_samples=5, timeout=45.0):
         """Collect a short-lived batch from one stable, unambiguous face."""
@@ -396,6 +427,20 @@ class VisionCore:
                 continue
             if not self._processing_enabled.is_set():
                 continue
+
+            if self.place_recognizer is not None:
+                place_state = self.place_recognizer.update(frame, frame_timestamp)
+                with self._lock:
+                    previous_place = self.current_place.get("label")
+                    self.current_place = place_state
+                if place_state.get("label") != previous_place:
+                    if place_state.get("label"):
+                        print(
+                            f"[PLACE] Recognized stable view: {place_state['label']} "
+                            f"(score={place_state.get('confidence', 0.0):.2f})"
+                        )
+                    elif previous_place:
+                        print("[PLACE] Place confidence lost; reporting UNKNOWN")
 
             try:
                 frame_height, frame_width = frame.shape[:2]
