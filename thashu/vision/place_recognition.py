@@ -26,6 +26,7 @@ class PlaceRecognizer:
     DEFAULT_CAPTURE_TIMEOUT = 180.0
     TEMPORAL_WINDOW = 5
     TEMPORAL_VOTES = 3
+    MAX_FRAME_AGE_SECONDS = 1.0
 
     def __init__(self, place_memory, cv2_module=None):
         self.cv2 = cv2_module or cv2
@@ -38,6 +39,7 @@ class PlaceRecognizer:
             fastThreshold=12,
         )
         self._capture = None
+        self._last_frame_at = None
         self._votes = deque(maxlen=self.TEMPORAL_WINDOW)
         self._last_output = {"label": None, "confidence": 0.0, "observed_at": None}
 
@@ -181,6 +183,17 @@ class PlaceRecognizer:
     def update(self, frame, observed_at=None):
         """Capture diverse views or publish a temporally stable place candidate."""
         now = time.monotonic() if observed_at is None else observed_at
+        if observed_at is not None:
+            if observed_at == self._last_frame_at:
+                return dict(self._last_output)
+            self._last_frame_at = observed_at
+            if time.monotonic() - observed_at > self.MAX_FRAME_AGE_SECONDS:
+                self.reset_temporal()
+                self._last_output = {
+                    "label": None, "confidence": 0.0, "observed_at": observed_at
+                }
+                return dict(self._last_output)
+
         descriptors = self._extract(frame)
         if self._capture and self._capture["status"] == "capturing":
             self._capture_frame(descriptors, now)
