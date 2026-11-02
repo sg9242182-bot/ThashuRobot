@@ -1008,7 +1008,9 @@ Acceptance:
 
 \[ ] Events are associated only with a stable, confirmed place label.
 
-\[ ] Place data persists across restart and remains outside Git-managed model/code files.\---
+\[ ] Place data persists across restart and remains outside Git-managed model/code files.
+
+\[ ] Recognition runtime and memory use are measured on the Raspberry Pi 4.\---
 
 Phase 9 — Unified Person + Place + Episodic Memory
 
