@@ -1298,7 +1298,7 @@ def main():
                                 )
                                 response = (
                                     f"I renamed the place to {pending['label']}. "
-                                    "I still need learned views before I can recognize it."
+                                    "Its saved camera views are still attached to it."
                                 )
                             else:
                                 vision.begin_place_enrollment(
