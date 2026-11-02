@@ -1023,7 +1023,7 @@ def main():
                     if not getattr(vision.detector, "recognition_ready", False):
                         response = "Face registration is unavailable because the landmark model is not installed."
                     else:
-                        vision.begin_enrollment(required_samples=8, timeout=45.0)
+                        vision.begin_enrollment(required_samples=12, timeout=45.0)
                         _identity_enrollment_state = "capturing"
                         # A name in this utterance is only a draft; enrollment
                         # still requires captured face samples, spelling, and save.
@@ -1031,12 +1031,12 @@ def main():
                         if registration_name:
                             response = (
                                 f"I heard your name as {registration_name}. "
-                                "I am collecting eight face views at several angles first. "
+                                "I am collecting twelve face views at several angles first. "
                                 "After that, I will ask you to spell the name."
                             )
                         else:
                             response = (
-                                "I am collecting eight views of one face. Keep one face in view; slowly turn your head a little left, return to center, then a little right."
+                                "I am collecting twelve views of one face. Keep one face in view; slowly turn your head a little left, return to center, then a little right, and pause briefly at each position."
                             )
                 elif removal_name:
                     matched_name = vision.database.resolve_name(removal_name)
@@ -1081,7 +1081,7 @@ def main():
                         response = "I could not get a stable single face. Please try again with only one face in view."
                     else:
                         count = status.get("sample_count", 0)
-                        required = status.get("required_samples", 8)
+                        required = status.get("required_samples", 12)
                         response = (
                             f"I have {count} of {required} clear face views so far. "
                             "I will tell you when they are ready. Please stay still and try again in a few seconds."
@@ -1152,7 +1152,7 @@ def main():
                     else:
                         status = vision.enrollment_status()
                         count = status.get("sample_count", 0)
-                        required = status.get("required_samples", 8)
+                        required = status.get("required_samples", 12)
                         response = (
                             f"I am still collecting clear views, {count} of {required}. "
                             "Stay still and say your name again in a few seconds."
