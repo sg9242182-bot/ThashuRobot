@@ -5,6 +5,7 @@ import serial
 import serial.tools.list_ports
 import threading
 import time
+from uuid import uuid4
 
 
 class GPIOControl:
@@ -14,8 +15,9 @@ class GPIOControl:
     Phase 1 contract:
       - USB CDC serial, 115200 baud
       - line-delimited ASCII frames
-      - Pi commands: CMD|sequence|...
-      - ESP32 responses/events: ACK|..., TEL|..., EVENT|..., FAULT|...
+      - Pi commands: CMD|version|session_id|sequence|...
+      - Correlated replies: ACK/ENC|version|session_id|sequence|...
+      - Unsolicited frames: TEL/EVENT/FAULT|version|sequence|...
       - heartbeat every 100 ms
       - ESP32 watchdog: 500 ms (enforced on ESP32)
 
@@ -26,6 +28,7 @@ class GPIOControl:
     _instance = None
     _instance_lock = threading.Lock()
 
+    PROTOCOL_VERSION = 1
     HEARTBEAT_INTERVAL = 0.100
     RECONNECT_INTERVAL = 1.0
     DEFAULT_BAUD = 115200
@@ -48,6 +51,7 @@ class GPIOControl:
         self._write_lock = threading.Lock()
         self._state_lock = threading.Lock()
         self._sequence_lock = threading.Lock()
+        self._session_id = uuid4().hex
         self._next_sequence = 1
 
         self._incoming = queue.Queue()
@@ -164,10 +168,10 @@ class GPIOControl:
 
     def _allocate_sequence(self):
         with self._sequence_lock:
+            if self._next_sequence > 0x7FFFFFFF:
+                return None
             sequence = self._next_sequence
             self._next_sequence += 1
-            if self._next_sequence > 0x7FFFFFFF:
-                self._next_sequence = 1
             return sequence
 
     def send(self, command: str):
@@ -185,7 +189,11 @@ class GPIOControl:
             raise ValueError("command must be a non-empty single-line payload")
 
         sequence = self._allocate_sequence()
-        frame = f"CMD|{sequence}|{command}\n".encode("ascii")
+        if sequence is None:
+            return None
+        frame = (
+            f"CMD|{self.PROTOCOL_VERSION}|{self._session_id}|{sequence}|{command}\n"
+        ).encode("ascii")
 
         with self._write_lock:
             with self._state_lock:
@@ -230,16 +238,45 @@ class GPIOControl:
             except queue.Empty:
                 return events
 
+    def _record_acknowledgement(self, line):
+        """Store only version-1 ACKs correlated to this Pi process session."""
+        fields = line.split("|", 4)
+        if len(fields) != 5 or fields[0] != "ACK":
+            return
+        try:
+            version = int(fields[1])
+            sequence = int(fields[3])
+        except ValueError:
+            return
+        session_id, result = fields[2], fields[4]
+        if (
+            version != self.PROTOCOL_VERSION
+            or session_id != self._session_id
+            or sequence < 0
+            or result == "ALIVE"
+        ):
+            return
+
+        key = (session_id, sequence)
+        with self._ack_condition:
+            self._acknowledgements[key] = result
+            while len(self._acknowledgements) > 128:
+                self._acknowledgements.pop(next(iter(self._acknowledgements)))
+            self._ack_condition.notify_all()
+        if result.startswith("ERROR"):
+            print(f"[ESP32] {line}")
+
     def wait_for_ack(self, sequence, timeout=0.75):
-        """Wait for one command ACK; return its payload (for example, OK or ERROR|OBSTACLE)."""
+        """Wait for this process session's ACK; return OK or ERROR|reason."""
+        key = (self._session_id, sequence)
         deadline = time.monotonic() + timeout
         with self._ack_condition:
-            while sequence not in self._acknowledgements:
+            while key not in self._acknowledgements:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return None
                 self._ack_condition.wait(remaining)
-            return self._acknowledgements.pop(sequence)
+            return self._acknowledgements.pop(key)
 
     # ------------------------------------------------------------------
     # Background transport
@@ -292,22 +329,7 @@ class GPIOControl:
                     if line.startswith("TEL|"):
                         self._update_sensor_snapshot(line)
                     if line.startswith("ACK|"):
-                        fields = line.split("|", 2)
-                        try:
-                            sequence = int(fields[1])
-                            result = fields[2] if len(fields) == 3 else ""
-                        except (ValueError, IndexError):
-                            sequence = None
-                            result = ""
-
-                        if sequence is not None and result != "ALIVE":
-                            with self._ack_condition:
-                                self._acknowledgements[sequence] = result
-                                while len(self._acknowledgements) > 128:
-                                    self._acknowledgements.pop(next(iter(self._acknowledgements)))
-                                self._ack_condition.notify_all()
-                        if result.startswith("ERROR"):
-                            print(f"[ESP32] {line}")
+                        self._record_acknowledgement(line)
                     if line.startswith(("EVENT|", "FAULT|")):
                         print(f"[ESP32] {line}")
                         self._events.put(line)
@@ -320,10 +342,10 @@ class GPIOControl:
     def _update_sensor_snapshot(self, line):
         """Parse one ESP32 sensor frame and publish a timestamped snapshot."""
         fields = line.split("|")
-        if len(fields) != 11 or fields[:3] != ["TEL", "0", "SENSORS"]:
+        if len(fields) != 12 or fields[:4] != ["TEL", "1", "0", "SENSORS"]:
             return
 
-        raw = dict(zip(fields[3::2], fields[4::2]))
+        raw = dict(zip(fields[4::2], fields[5::2]))
         labels = ("TOF_L", "TOF_C", "TOF_R", "US_REAR")
         if any(label not in raw for label in labels):
             return

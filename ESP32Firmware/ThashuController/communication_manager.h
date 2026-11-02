@@ -16,6 +16,7 @@ public:
 
 private:
     static constexpr size_t COMMAND_BUFFER_SIZE = 128;
+    static constexpr long PROTOCOL_VERSION = 1;
     MotorManager* motors = nullptr;
     SafetyManager* safety = nullptr;
     EyeManager* eyes = nullptr;
@@ -29,5 +30,5 @@ private:
     void handle(char* line);
     void readCommands();
     void sendTelemetry();
-    void acknowledge(long sequence, const char* result);
+    void acknowledge(long version, const char* sessionId, long sequence, const char* result);
 };

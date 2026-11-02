@@ -301,7 +301,7 @@ bool ServoManager::begin()
 
     if (!panServo.attached() ||
         !tiltServo.attached()) {
-        Serial.println("FAULT|0|SERVO|ATTACH");
+        Serial.println("FAULT|1|0|SERVO|ATTACH");
         return false;
     }
 
