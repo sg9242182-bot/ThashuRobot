@@ -976,23 +976,31 @@ Existing files to inspect first:
 
 Tasks:
 
-\[ ] Define and implement explicit user labeling, read-back, confirm, cancel, and relabel flows.
+\[x] Define and implement explicit user labeling, read-back, confirm, cancel, and relabel flows.
 
-\[ ] Capture multiple quality-filtered, distinct reference views for each labeled place.
+\[x] Capture multiple quality-filtered, distinct reference views for each labeled place.
 
-\[ ] Store place labels and visual descriptors safely in persistent machine-local storage.
+\[x] Store place labels and visual descriptors safely in persistent machine-local storage.
 
-\[ ] Recognize known places by matching several visual references and requiring temporal stability.
+\[x] Recognize known places by matching several visual references and requiring temporal stability.
 
 \[ ] Calibrate score and ambiguity handling with labeled known-place and unknown-place Pi trials.
 
-\[ ] Support user labels such as home, school, and road without hard-coding identities.
+\[x] Support user labels such as home, school, and road without hard-coding identities.
 
 \[ ] Associate an event with a place only when the place label is stable and unambiguous.
 
-\[ ] Return UNKNOWN for weak evidence, close competing labels, stale frames, or insufficient visual features.
+\[x] Return UNKNOWN for weak evidence, close competing labels, stale frames, or insufficient visual features.
 
 \[ ] Support explicit replacement/deletion without corrupting other place records.
+
+
+Implementation note (2026-11-02; Pi calibration and acceptance still pending):
+- Added `thashu/memory/places.py`, a separate machine-local place store at `~/.local/share/thashu/data/places.json`; it uses atomic writes, restrictive file permissions, and refuses to overwrite an unreadable store. Place records keep labels and compact descriptors, not camera photographs.
+- Added `thashu/vision/place_recognition.py` using the repository's existing OpenCV ORB support. The spoken flow accepts “remember this place as [label]”, reads the label back, then requires “confirm place” or “cancel place”. Confirming starts a five-view capture; the user slowly turns the robot to show distinct headings. Weak-feature and near-duplicate frames are skipped, and capture expires after three minutes. A confirmed relabel preserves stored references.
+- Connected `thashu/vision/vision_core.py` to capture and publish place-only visual results. Matching uses multiple saved views, provisional score/margin gates, and 3-of-5 temporal agreement; weak or tied evidence remains unknown. This output is observational and has no motor/safety connection.
+- Updated `thashu/core/decision.py` and `thashu/main.py` for deterministic spoken teaching, read-back confirmation/cancel, progress/complete reports, capture cancellation, and recognition logs.
+- Recognition score thresholds are provisional, not accuracy claims. Raspberry Pi known-place held-out views, visually similar/unknown locations, reboot persistence, CPU/memory, and false-label behavior remain unverified. No Phase 8 acceptance criterion is marked passed.
 
 Acceptance:
 
@@ -1232,7 +1240,8 @@ File	Status	Phase	Notes
 
 `hardware/servo\_tracking.py`	REVIEW	1/4/5	Servo/follow control
 
-`vision/vision\_core.py`	REVIEW	4/5	Perception lifecycle and follow-mode input
+`vision/vision\_core.py`	MODIFY	4/5/8	Perception lifecycle, follow input, place capture/output
+`vision/place\_recognition.py`	MODIFY	8	OpenCV ORB view capture and place matching
 `vision/follow\_logic.py`	REVIEW	5	Existing target selection/debounce logic
 
 `vision/face\_database.py`	REVIEW	6	Face storage
@@ -1242,6 +1251,7 @@ File	Status	Phase	Notes
 `vision/auto\_capture.py`	REVIEW	6	Existing registration path
 
 `memory/people.py`	REVIEW	6/7	Person memory
+`memory/places.py`	MODIFY	8	Machine-local place labels and compact visual references
 
 `memory/short\_term.py`	REVIEW	7	Short-term memory
 
