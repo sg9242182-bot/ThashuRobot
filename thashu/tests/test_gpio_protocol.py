@@ -12,7 +12,8 @@ if str(THASHU_ROOT) not in sys.path:
 from hardware.gpio_control import GPIOControl
 
 
-FIXTURE_PATH = Path(__file__).parent / "fixtures" / "pi_esp32_protocol_vectors.csv"
+REPO_ROOT = THASHU_ROOT.parent
+FIXTURE_PATH = REPO_ROOT / "testdata" / "pi_esp32_protocol_vectors.csv"
 
 
 class FakeSerial:
