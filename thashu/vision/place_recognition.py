@@ -184,15 +184,16 @@ class PlaceRecognizer:
         """Capture diverse views or publish a temporally stable place candidate."""
         now = time.monotonic() if observed_at is None else observed_at
         if observed_at is not None:
-            if observed_at == self._last_frame_at:
-                return dict(self._last_output)
-            self._last_frame_at = observed_at
             if time.monotonic() - observed_at > self.MAX_FRAME_AGE_SECONDS:
+                self._last_frame_at = observed_at
                 self.reset_temporal()
                 self._last_output = {
                     "label": None, "confidence": 0.0, "observed_at": observed_at
                 }
                 return dict(self._last_output)
+            if observed_at == self._last_frame_at:
+                return dict(self._last_output)
+            self._last_frame_at = observed_at
 
         descriptors = self._extract(frame)
         if self._capture and self._capture["status"] == "capturing":
