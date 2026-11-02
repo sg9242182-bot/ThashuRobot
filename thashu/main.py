@@ -77,7 +77,7 @@ wake = WakeWordEngine(
 )
 vad    = VoiceActivityDetector()
 attn   = AttentionSystem()
-vision = VisionCore()
+vision = VisionCore(place_memory=place_memory)
 eyes   = Eyes()
 follow_logic = FollowLogic()
 servo_tracker = ServoTracker()
@@ -815,6 +815,27 @@ def main():
     while True:
         process_safety_events()
 
+        if runtime.current == RuntimeState.IDLE:
+            place_capture = vision.place_enrollment_status()
+            if place_capture.get("status") in ("complete", "timed_out", "error"):
+                label = place_capture.get("label", "the place")
+                count = place_capture.get("captured", 0)
+                vision.clear_place_enrollment()
+                if place_capture.get("status") == "complete":
+                    message = (
+                        f"I captured {count} distinct views for {label}. "
+                        "I can now try to recognize it from the camera."
+                    )
+                    print(f"[PLACE] Place teaching complete: {label} ({count} views)")
+                else:
+                    message = (
+                        f"I couldn't finish learning {label}; I captured {count} distinct views. "
+                        "Please try again and slowly show different directions."
+                    )
+                    print(f"[PLACE] Place teaching ended: {place_capture.get('status')} ({count} views)")
+                _announce_enrollment_status(message)
+                continue
+
         if runtime.current == RuntimeState.IDLE and _identity_enrollment_state == "capturing":
             capture = vision.enrollment_status()
             if capture.get("status") == "ready":
@@ -956,6 +977,8 @@ def main():
                     expected_phrases = ["yes", "no", "cancel"]
                 elif _place_pending is not None:
                     expected_phrases = ["confirm place", "cancel place"]
+                elif vision.place_enrollment_status().get("status") == "capturing":
+                    expected_phrases = ["cancel place"]
                 elif _memory_pending is not None:
                     expected_phrases = ["confirm memory", "cancel memory"]
                 elif _memory_delete_pending is not None:
@@ -1242,6 +1265,21 @@ def main():
                             f"{confirmed_person}? Say confirm delete memories or "
                             "cancel memory deletion."
                         )
+                elif vision.place_enrollment_status().get("status") == "capturing":
+                    if place_save_confirmation == "CANCEL":
+                        vision.cancel_place_enrollment()
+                        vision.clear_place_enrollment()
+                        response = "I cancelled learning that place. Captured views were discarded."
+                        print("[PLACE] Place teaching cancelled by user")
+                    else:
+                        progress = vision.place_enrollment_status()
+                        response = (
+                            f"I have {progress.get('captured', 0)} of "
+                            f"{progress.get('required', 5)} distinct views for "
+                            f"{progress.get('label', 'this place')}. "
+                            "Please keep slowly turning the robot to show new directions, "
+                            "or say cancel place."
+                        )
                 elif _place_pending is not None:
                     pending = _place_pending
                     if time.monotonic() > pending["expires_at"]:
@@ -1263,18 +1301,15 @@ def main():
                                     "I still need learned views before I can recognize it."
                                 )
                             else:
-                                saved = place_memory.add_label(pending["label"])
-                                if saved:
-                                    print(f"[PLACE] Confirmed user label: {pending['label']}")
-                                    response = (
-                                        f"I saved the place label {pending['label']}. "
-                                        "I still need learned views before I can recognize it."
-                                    )
-                                else:
-                                    response = (
-                                        f"I already have a place labeled {pending['label']}. "
-                                        "I still need learned views before I can recognize it."
-                                    )
+                                vision.begin_place_enrollment(
+                                    pending["label"], required_views=5, timeout=180.0
+                                )
+                                print(f"[PLACE] Confirmed label; beginning view capture: {pending['label']}")
+                                response = (
+                                    f"Confirmed {pending['label']}. Slowly turn the robot in place "
+                                    "to show five different directions, pausing briefly at each view. "
+                                    "I will tell you when the views are captured. Say cancel place to stop."
+                                )
                         except (OSError, TypeError, ValueError, KeyError, FileExistsError) as exc:
                             print(f"[PLACE] Label update rejected: {exc}")
                             response = "I couldn't safely update that place label."
