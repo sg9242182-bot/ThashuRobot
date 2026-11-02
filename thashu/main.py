@@ -94,7 +94,7 @@ _memory_delete_pending = None
 _memory_pending = None
 _last_idle_recognized_person = None
 _last_idle_recognized_at = 0.0
-_announced_recognition_names = set()
+_announced_recognition_names = {}
 _motion_timer = None
 _motion_generation = 0
 _motion_lock = threading.Lock()
@@ -875,6 +875,14 @@ def main():
             isinstance(observed_at, (int, float))
             and 0.0 <= time.monotonic() - observed_at <= 0.75
         )
+        if runtime.current == RuntimeState.IDLE and frame_fresh:
+            now_monotonic = time.monotonic()
+            visible_names = {face["name"] for face in known_faces}
+            for announced_name in list(_announced_recognition_names):
+                if announced_name in visible_names:
+                    _announced_recognition_names[announced_name] = now_monotonic
+                elif now_monotonic - _announced_recognition_names[announced_name] >= 10.0:
+                    del _announced_recognition_names[announced_name]
         if len(faces) == 1 and len(known_faces) == 1 and frame_fresh:
             _last_idle_recognized_person = known_faces[0]["name"]
             _last_idle_recognized_at = time.monotonic()
@@ -1448,7 +1456,7 @@ def main():
             ):
                 recognized_name = known_faces[0]["name"]
                 if recognized_name not in _announced_recognition_names:
-                    _announced_recognition_names.add(recognized_name)
+                    _announced_recognition_names[recognized_name] = time.monotonic()
                     print(f"[VISION] Announcing confirmed recognition: {recognized_name}")
                     _announce_recognized_person()
 
