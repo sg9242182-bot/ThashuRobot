@@ -876,7 +876,7 @@ Existing Files to Inspect First
 
 Phase 7 — Person & Conversation Memory
 
-Status: IN PROGRESS — short-term expiry and explicit person/episodic memory flows are implemented; Pi persistence, identity-isolation, recall, and deletion tests remain.
+Status: IN PROGRESS — the user reports that the core person/event memory, cancellation, deletion, and bounded-recall tests passed on the Pi. The 15-view face re-enrollment flow and remaining privacy/edge-case checks still need validation.
 
 Existing files:
 
@@ -920,17 +920,21 @@ Acceptance:
 
 \[x] Temporary conversation expires appropriately (Pi quick test: a 3-second expiry cleared an entry; six insertions retained only the newest five).
 
-\[ ] Voice memory-save flow correctly handles punctuation, reads the transcript back, saves only after “confirm memory,” and discards on “cancel memory.”
+\[x] Voice memory-save read-back, explicit “confirm memory” save, and “cancel memory” draft discard (user-reported Pi tests).
 
-\[ ] Important person facts persist after restart.
+\[ ] Punctuation variations of fact/event save phrases are verified on the Pi.
 
-\[ ] Significant interactions persist after restart.
+\[x] Important person facts persist after restart (user-reported Pi test).
 
-\[ ] Memories are correctly associated with confirmed people; unknown/ambiguous faces cannot access another person's records.
+\[x] Significant event memories persist after restart (user-reported Pi test).
 
-\[ ] Memory retrieval is relevant and bounded.
+\[x] Tharun's tested facts/events are associated with the recognized person; an unrecognized face cannot save a memory (user-reported Pi tests).
 
-\[ ] A person can explicitly delete their saved facts/events after a separate confirmation.
+\[ ] Unknown/ambiguous faces are verified unable to recall another person's records.
+
+\[x] Memory retrieval is relevant and bounded (user-reported Pi test).
+
+\[x] A person can delete saved facts/events after a separate confirmation (user-reported Pi test).
 
 Audit and implementation record (2026-11-01):
 
@@ -1510,3 +1514,5 @@ Phase 7 recognition WAV repeat policy (2026-11-02): Updated `thashu/main.py` so 
 Phase 7 explicit face enrollment sample increase (2026-11-02): Increased the spoken-confirmed face registration capture from eight to twelve embeddings in `thashu/main.py`; the user is prompted to slowly turn slightly left, return to center, then slightly right, pausing briefly at each position. The existing database cap remains 12 embeddings per identity, so a fresh 12-view re-enrollment replaces that identity's previous stored template set after the existing name spelling/read-back and explicit `confirm save` flow. No thresholds or margins were weakened, and default-off automatic adaptation remains disabled; uncertain live matches are not learned. Pi validation remains required: re-enroll Tharun and confirm `12/12`, then compare labeled frontal/left/right debug results and ensure ambiguous/unknown faces remain Unknown. No tests run.
 
 Phase 7 face enrollment follow-up (2026-11-02; supersedes the twelve-view capture note above): Increased `FaceDatabase.MAX_EMBEDDINGS_PER_PERSON` and explicit enrollment capture to 15. After capture completes, Thashu now asks the user to say only the name's letter names (for example, “T H A R U N”); a strict enrollment parser rejects surrounding phrases and words. Thashu reads the spelling back, then accepts the exact word “confirm” in that confirmation state (or the existing “confirm save”), with “confirm” added to Whisper’s expected phrases and try-again/cancel preserved. Progress prompts no longer ask the user to repeat a name before capture finishes. No face-match threshold or margin changed, and uncertain identities are still not learned automatically. A fresh 15-view enrollment replaces that identity's prior stored templates because the per-person cap is 15. Pull phase-7 and validate the full Pi flow, including wrong spelling, plain confirm, try again, cancel, and matching/unknown-face outcomes. No tests run.
+
+Phase 7 user-reported Pi acceptance update (2026-11-02): The user reports successful event save and recall, draft cancellation, memory persistence through restart, explicit memory-deletion confirmation, correct Tharun fact/event recall, rejection of memory saving when no face is recognized, and relevant/bounded recall. The user also reports that face recognition remains intermittent: the latest diagnostic frames were rejected by the configured score/margin gates, so the 15-view enrollment update and recognition reliability are still unverified. Punctuation variants and unknown/ambiguous-person recall isolation were not specifically reported and remain open. No independent tests were run.
