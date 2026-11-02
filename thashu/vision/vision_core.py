@@ -68,7 +68,7 @@ class VisionCore:
         self.current_names = {}
         self.current_tracks = []
         self.current_people = []
-        self.current_place = {"label": None, "confidence": 0.0, "observed_at": None}
+        self.current_place = {"label": "UNKNOWN", "confidence": 0.0, "observed_at": None}
         self.latest_frame_at = None
         self.frame_size = (640, 480)
         self.person_present = False
@@ -430,17 +430,21 @@ class VisionCore:
 
             if self.place_recognizer is not None:
                 place_state = self.place_recognizer.update(frame, frame_timestamp)
+                place_state["label"] = place_state.get("label") or "UNKNOWN"
                 with self._lock:
-                    previous_place = self.current_place.get("label")
+                    previous_place = self.current_place.get("label", "UNKNOWN")
                     self.current_place = place_state
                 if place_state.get("label") != previous_place:
-                    if place_state.get("label"):
+                    if place_state["label"] != "UNKNOWN":
                         print(
                             f"[PLACE] Recognized stable view: {place_state['label']} "
                             f"(score={place_state.get('confidence', 0.0):.2f})"
                         )
-                    elif previous_place:
-                        print("[PLACE] Place confidence lost; reporting UNKNOWN")
+                    else:
+                        print(
+                            "[PLACE] UNKNOWN (low confidence, ambiguous, stale, "
+                            "or insufficient visual features)"
+                        )
 
             try:
                 frame_height, frame_width = frame.shape[:2]
