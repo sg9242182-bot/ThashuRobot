@@ -94,6 +94,7 @@ _memory_delete_pending = None
 _memory_pending = None
 _last_idle_recognized_person = None
 _last_idle_recognized_at = 0.0
+_announced_recognition_names = set()
 _motion_timer = None
 _motion_generation = 0
 _motion_lock = threading.Lock()
@@ -212,6 +213,30 @@ def _rearm_wake_after_audio():
         except Exception as exc:
             print(f"[WAKE] Could not reset detection history: {exc}")
     wake.unlock()
+
+
+def _announce_recognized_person():
+    """Play the prepared recognition WAV once while vision and wake input are paused."""
+    message = "I recognize a known person."
+    transition_runtime(RuntimeState.SPEAKING)
+    wake.lock()
+    audio.pause()
+    eyes.happy()
+    try:
+        if not play_cached_response(message):
+            print(
+                "[VISION] Recognition WAV is missing; run "
+                "prepare_command_voice_cache({person_recognized}) once."
+            )
+        time.sleep(0.4)
+    except Exception as exc:
+        print(f"[VISION] Could not play recognition announcement: {exc}")
+    finally:
+        audio.resume()
+        _rearm_wake_after_audio()
+        eyes.idle()
+        transition_runtime(RuntimeState.RETURN_TO_IDLE)
+        transition_runtime(RuntimeState.IDLE)
 
 
 def _announce_enrollment_status(message):
@@ -865,7 +890,8 @@ def main():
             # Ignore wake input only while the camera is actively sweeping
             # to acquire a follow target. Idle face tracking and target tracking
             # continue to listen for the wake word.
-            if not _follow_search_active and wake.process(chunk):
+            wake_triggered = not _follow_search_active and wake.process(chunk)
+            if wake_triggered:
                 # Snapshot identity before the interaction pauses vision and STT delays dispatch.
                 recognized_person_at_wake = _recently_recognized_person()
                 transition_runtime(RuntimeState.WAKE_DETECTED)
@@ -1414,6 +1440,17 @@ def main():
 
                 transition_runtime(RuntimeState.RETURN_TO_IDLE)
                 transition_runtime(RuntimeState.IDLE)
+            elif (
+                not _follow_search_active
+                and len(faces) == 1
+                and len(known_faces) == 1
+                and frame_fresh
+            ):
+                recognized_name = known_faces[0]["name"]
+                if recognized_name not in _announced_recognition_names:
+                    _announced_recognition_names.add(recognized_name)
+                    print(f"[VISION] Announcing confirmed recognition: {recognized_name}")
+                    _announce_recognized_person()
 
 
 if __name__ == "__main__":
