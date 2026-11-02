@@ -953,45 +953,62 @@ Audit and implementation record (2026-11-01):
 
 Phase 8 — Place / Environment Memory
 
-Status: NOT STARTED
+Status: IN PROGRESS — best-effort camera-only place recognition is the agreed goal. This phase identifies familiar scenes from learned views; it does not promise mapping, exact position, or SLAM.
+
+Scope and behavior:
+- A place label is created only through an explicit teach flow and user confirmation. The system never invents or silently saves a place name.
+- One place is represented by multiple distinct camera views/keyframes, not one whole-scene photograph. Capture should cover different headings and nearby viewpoints; repeated near-identical frames do not count as useful coverage.
+- Recognition combines visual evidence from several stored views and requires stable evidence over successive observations. A lone object or one uncertain frame cannot establish a place.
+- If views are poor, evidence is weak, or two labels are close, report UNKNOWN. Best-effort false rejects are acceptable; confident wrong place labels are not.
+- Persist place descriptors and labels in machine-local storage outside the Git checkout. Save only the compact visual features needed for recognition unless testing proves reference images are necessary.
+- Place recognition is observational only. It cannot authorize motor movement, route planning, or safety decisions.
+- Prefer existing OpenCV camera and image-processing support; benchmark the chosen lightweight visual feature method on the Raspberry Pi before adding models or dependencies.
 
 Existing files to inspect first:
 
-\[ ] `vision/camera.py`
+\[x] `vision/camera.py`
 
-\[ ] `vision/vision\_core.py`
+\[x] `vision/vision\_core.py`
 
-\[ ] Existing storage/memory files
+\[x] Existing storage/memory paths: `memory/storage.py`, `memory/people.py`, and `core/model_paths.py`
 
-\[ ] Existing image/vision utilities
+\[x] Existing image/vision utilities inspected; no place-specific recognizer exists.
 
 Tasks:
 
-\[ ] Define explicit user labeling flow.
+\[ ] Define and implement explicit user labeling, read-back, confirm, cancel, and relabel flows.
 
-\[ ] Store reference images/features for labeled places.
+\[ ] Capture multiple quality-filtered, distinct reference views for each labeled place.
 
-\[ ] Define place recognition confidence threshold.
+\[ ] Store place labels and visual descriptors safely in persistent machine-local storage.
 
-\[ ] Support labels such as house, school, road.
+\[ ] Recognize known places by matching several visual references and requiring temporal stability.
 
-\[ ] Associate significant observations/events with places.
+\[ ] Calibrate score and ambiguity handling with labeled known-place and unknown-place Pi trials.
 
-\[ ] Return UNKNOWN when confidence is insufficient.
+\[ ] Support user labels such as home, school, and road without hard-coding identities.
 
-\[ ] Prevent invented place identities.
+\[ ] Associate an event with a place only when the place label is stable and unambiguous.
+
+\[ ] Return UNKNOWN for weak evidence, close competing labels, stale frames, or insufficient visual features.
+
+\[ ] Support explicit replacement/deletion without corrupting other place records.
 
 Acceptance:
 
-\[ ] User can explicitly teach a place.
+\[ ] User can teach a place with a spoken label, see/hear the exact label read back, confirm it, or cancel it.
 
-\[ ] Thashu can later recognize the place using references.
+\[ ] Multiple views from different headings/viewpoints are retained and survive a process restart.
 
-\[ ] Unknown places remain unknown.
+\[ ] Thashu recognizes a taught place from held-out views, not just the exact teaching frames.
 
-\[ ] Important place memories persist.
+\[ ] Unknown and lookalike places do not receive confident incorrect labels in Pi trials.
 
-\---
+\[ ] Low-confidence and ambiguous scenes are reported as UNKNOWN.
+
+\[ ] Events are associated only with a stable, confirmed place label.
+
+\[ ] Place data persists across restart and remains outside Git-managed model/code files.\---
 
 Phase 9 — Unified Person + Place + Episodic Memory
 
