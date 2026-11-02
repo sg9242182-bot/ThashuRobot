@@ -1021,7 +1021,7 @@ def main():
                         _identity_enrollment_state = "capturing"
                         # A name in this utterance is only a draft; enrollment
                         # still requires captured face samples, spelling, and save.
-                        _identity_pending_name = registration_name
+                        _identity_pending_name = None
                         response = (
                             "I am collecting fifteen views of one face. Keep one face in view; "
                             "slowly turn your head a little left, return to center, then a little "
@@ -1045,30 +1045,33 @@ def main():
                                 f"I didn't find {removal_name}, but I found {matched_name}. "
                                 f"Do you want me to delete {matched_name}? Say yes to confirm or no to cancel."
                             )
-                elif _identity_enrollment_state in ("capturing", "awaiting_name") and registration_name:
-                    if _identity_enrollment_state == "capturing" and _identity_pending_name is None:
-                        _identity_pending_name = registration_name
+                elif _identity_enrollment_state in ("capturing", "awaiting_name"):
                     status = vision.enrollment_status()
                     samples = vision.enrollment_samples()
-                    if status.get("status") == "ready" and samples:
-                        _identity_pending_name = registration_name
-                        if registration_was_spelled:
-                            _identity_enrollment_state = "confirm"
-                            spelled_letters = " ".join(registration_name.upper())
-                            response = (
-                                f"I heard {spelled_letters}, which is {registration_name}. "
-                                f"Say confirm to save, try again to spell it again, or cancel registration."
-                            )
-                        else:
-                            _identity_enrollment_state = "spelling"
-                            response = (
-                                f"I heard the name {_identity_pending_name}. "
-                                "Please spell your name using only separate letters, like T H A R U N."
-                            )
-                    elif status.get("status") in ("ambiguous", "timed_out"):
+                    if status.get("status") in ("ambiguous", "timed_out"):
                         vision.clear_enrollment()
                         _identity_enrollment_state = "idle"
                         response = "I could not get a stable single face. Please try again with only one face in view."
+                    elif status.get("status") == "ready" and samples:
+                        _identity_enrollment_state = "spelling"
+                        spelled_name = get_enrollment_spelling(text)
+                        if spelled_name:
+                            _identity_pending_name = spelled_name
+                            _identity_enrollment_state = "confirm"
+                            spelled_letters = " ".join(spelled_name.upper())
+                            response = (
+                                f"I heard {spelled_letters}, which is {spelled_name}. "
+                                "Say confirm to save, try again to spell it again, or cancel registration."
+                            )
+                        else:
+                            response = (
+                                "Face capture is complete. Please spell your name one letter at a time. "
+                                "Say only the letters, like T H A R U N."
+                            )
+                    elif status.get("status") == "ready":
+                        vision.clear_enrollment()
+                        _identity_enrollment_state = "idle"
+                        response = "I could not load the captured face samples. Please start registration again."
                     else:
                         count = status.get("sample_count", 0)
                         required = status.get("required_samples", 15)
@@ -1133,20 +1136,6 @@ def main():
                     response = "Please say confirm, try again to spell the name again, or cancel registration."
                 elif _identity_enrollment_state == "delete_confirm":
                     response = "Please say yes to confirm deleting this saved face identity, or no to cancel."
-                elif _identity_enrollment_state == "capturing":
-                    status = vision.enrollment_status()
-                    if status.get("status") in ("ambiguous", "timed_out"):
-                        vision.clear_enrollment()
-                        _identity_enrollment_state = "idle"
-                        response = "I could not get a stable single face. Please try again with only one face in view."
-                    else:
-                        status = vision.enrollment_status()
-                        count = status.get("sample_count", 0)
-                        required = status.get("required_samples", 15)
-                        response = (
-                            f"I am still collecting clear views, {count} of {required}. "
-                            "Stay still and say your name again in a few seconds."
-                        )
                 elif _memory_pending is not None:
                     pending = _memory_pending
                     confirmed_person = recognized_person_at_wake
