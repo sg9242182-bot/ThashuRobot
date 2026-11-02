@@ -1,6 +1,6 @@
 """Persistent, user-labeled place records, stored separately from person memory.
 
-Visual references are added by the vision pipeline in a later Phase 8 step. A
+Visual references are added only after the confirmed multi-view capture completes. A
 label with no references is never sufficient to recognize a place.
 """
 
