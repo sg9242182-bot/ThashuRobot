@@ -1074,7 +1074,7 @@ def main():
                         required = status.get("required_samples", 15)
                         response = (
                             f"I have {count} of {required} clear face views so far. "
-                            "I will tell you when they are ready. Please stay still and try again in a few seconds."
+                            "Please keep one face in view. I will ask you to spell your name when capture is complete."
                         )
                 elif _identity_enrollment_state == "spelling":
                     spelled_name = get_enrollment_spelling(text)
