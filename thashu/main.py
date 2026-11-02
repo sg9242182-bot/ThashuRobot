@@ -943,6 +943,7 @@ def main():
                 expected_phrases = None
                 if _identity_enrollment_state == "confirm":
                     expected_phrases = [
+                        "confirm",
                         "confirm save",
                         "try again",
                         "cancel registration",
