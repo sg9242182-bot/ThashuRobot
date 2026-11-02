@@ -122,6 +122,8 @@ class PlaceRecognizer:
             state["status"] = "timed_out"
             state["error"] = "capture timed out before enough distinct views were collected"
             return
+        if descriptors is None:
+            return
         if now - state["started_at"] < self.CAPTURE_INTERVAL_SECONDS:
             return
         if len(descriptors) < self.MIN_FEATURES:
