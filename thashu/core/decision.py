@@ -445,29 +445,30 @@ def get_person_memory_save_confirmation(user_input: str):
 
 _PLACE_LABEL_PATTERN = re.compile(
     r"(?:remember|save|learn) (?:this|that) place"
-    r"(?: (?:as|is|called|named))? (.+)"
+    r"(?: (?:as|is|called|named))? (.+)",
+    re.IGNORECASE,
 )
-_PLACE_RELABEL_PATTERN = re.compile(r"rename place (.+?) to (.+)")
+_PLACE_RELABEL_PATTERN = re.compile(r"rename place (.+?) to (.+)", re.IGNORECASE)
 
 
 def get_place_label_request(user_input: str):
     """Return a bounded explicit place label from a teach-place utterance."""
-    normalized = re.sub(r"[^a-z0-9 .'-]+", " ", (user_input or "").lower())
-    normalized = " ".join(normalized.split())
-    match = _PLACE_LABEL_PATTERN.fullmatch(normalized)
+    text = " ".join((user_input or "").split())
+    match = _PLACE_LABEL_PATTERN.fullmatch(text)
     if not match:
         return None
     label = " ".join(match.group(1).strip(" .'-").split())
-    if not label or len(label) > 48 or label in {"confirm", "cancel"}:
+    if not label or len(label) > 48 or label.casefold() in {"confirm", "cancel"}:
+        return None
+    if any(ord(character) < 32 for character in label):
         return None
     return label
 
 
 def get_place_relabel_request(user_input: str):
     """Return (old, new) for an explicit rename-place request."""
-    normalized = re.sub(r"[^a-z0-9 .'-]+", " ", (user_input or "").lower())
-    normalized = " ".join(normalized.split())
-    match = _PLACE_RELABEL_PATTERN.fullmatch(normalized)
+    text = " ".join((user_input or "").split())
+    match = _PLACE_RELABEL_PATTERN.fullmatch(text)
     if not match:
         return None
     old, new = (" ".join(part.strip(" .'-").split()) for part in match.groups())
