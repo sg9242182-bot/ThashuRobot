@@ -21,9 +21,10 @@ from vision.follow_logic   import FollowLogic
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
 from hardware.servo_tracking import ServoTracker
-from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, get_enrollment_spelling, is_recognition_query, get_person_memory_request, get_person_memory_save_confirmation, is_person_memory_query, get_person_memory_delete_command
+from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, get_enrollment_spelling, is_recognition_query, get_person_memory_request, get_person_memory_save_confirmation, is_person_memory_query, get_person_memory_delete_command, get_place_label_request, get_place_relabel_request, get_place_save_confirmation
 from core.model_paths import model_path, project_path
 from memory.people import PeopleMemory
+from memory.places import PlaceMemory
 
 # ── Sounds ────────────────────────────────────────────────────────────────────
 SOUND_STARTUP   = project_path("sounds", "startup.wav")
@@ -54,6 +55,7 @@ FOLLOW_PULSE_INTERVAL_SECONDS = 0.75
 FOLLOW_SENSOR_MAX_AGE_SECONDS = 0.75
 FOLLOW_OBSTACLE_CLEARANCE_MM = 300
 PENDING_MEMORY_CONFIRM_SECONDS = 120.0
+PENDING_PLACE_CONFIRM_SECONDS = 120.0
 
 # ── Shutdown Button ───────────────────────────────────────────────────────────
 BUTTON_PIN = 17
@@ -65,6 +67,7 @@ event_bus = EventBus()
 
 brain  = Brain()
 person_memory = PeopleMemory()
+place_memory = PlaceMemory()
 motors = MotorController()
 audio  = AudioManager(sample_rate=SAMPLE_RATE, blocksize=BLOCK_SIZE)
 wake = WakeWordEngine(
@@ -92,6 +95,7 @@ _identity_enrollment_state = "idle"
 _identity_pending_name = None
 _memory_delete_pending = None
 _memory_pending = None
+_place_pending = None
 _last_idle_recognized_person = None
 _last_idle_recognized_at = 0.0
 _announced_recognition_names = {}
@@ -769,7 +773,7 @@ def process_safety_events():
 # ── Main loop ──────────────────────────────────────────────────────────────────
 def main():
     global _identity_enrollment_state, _identity_pending_name
-    global _memory_delete_pending, _memory_pending
+    global _memory_delete_pending, _memory_pending, _place_pending
     global _last_idle_recognized_person, _last_idle_recognized_at
     print("[SYSTEM] Jarvis started")
 
@@ -950,18 +954,27 @@ def main():
                     ]
                 elif _identity_enrollment_state == "delete_confirm":
                     expected_phrases = ["yes", "no", "cancel"]
+                elif _place_pending is not None:
+                    expected_phrases = ["confirm place", "cancel place"]
                 elif _memory_pending is not None:
                     expected_phrases = ["confirm memory", "cancel memory"]
                 elif _memory_delete_pending is not None:
                     expected_phrases = ["confirm delete memories", "cancel memory deletion"]
                 elif recognized_person_at_wake is not None:
                     expected_phrases = [
+                        "remember this place as [place name]",
+                        "rename place [old name] to [new name]",
                         "remember that [a fact to save]",
                         "remember this event [an event to save]",
                         "what do you remember about me",
                         "forget all my memories",
                         "forget everything you remember about me",
                         "delete my saved memories",
+                    ]
+                else:
+                    expected_phrases = [
+                        "remember this place as [place name]",
+                        "rename place [old name] to [new name]",
                     ]
 
                 text = transcribe(raw_audio, expected_phrases=expected_phrases)
@@ -1006,6 +1019,9 @@ def main():
                 )
                 memory_delete_command = get_person_memory_delete_command(text)
                 memory_save_confirmation = get_person_memory_save_confirmation(text)
+                place_save_confirmation = get_place_save_confirmation(text)
+                place_label_request = get_place_label_request(text)
+                place_relabel_request = get_place_relabel_request(text)
                 registration_name, registration_was_spelled = _registration_details(text)
                 removal_name = get_remove_identity_name(text)
                 if identity_command == "CANCEL" and _identity_enrollment_state != "idle":
@@ -1226,6 +1242,83 @@ def main():
                             f"{confirmed_person}? Say confirm delete memories or "
                             "cancel memory deletion."
                         )
+                elif _place_pending is not None:
+                    pending = _place_pending
+                    if time.monotonic() > pending["expires_at"]:
+                        _place_pending = None
+                        response = "That place-label confirmation expired. Nothing was saved."
+                    elif place_save_confirmation == "CANCEL":
+                        _place_pending = None
+                        response = "I cancelled that place label. Nothing was saved."
+                    elif place_save_confirmation == "CONFIRM":
+                        try:
+                            if pending["operation"] == "rename":
+                                place_memory.rename(pending["old_label"], pending["label"])
+                                print(
+                                    f"[PLACE] Confirmed relabel: "
+                                    f"{pending['old_label']} -> {pending['label']}"
+                                )
+                                response = (
+                                    f"I renamed the place to {pending['label']}. "
+                                    "I still need learned views before I can recognize it."
+                                )
+                            else:
+                                saved = place_memory.add_label(pending["label"])
+                                if saved:
+                                    print(f"[PLACE] Confirmed user label: {pending['label']}")
+                                    response = (
+                                        f"I saved the place label {pending['label']}. "
+                                        "I still need learned views before I can recognize it."
+                                    )
+                                else:
+                                    response = (
+                                        f"I already have a place labeled {pending['label']}. "
+                                        "I still need learned views before I can recognize it."
+                                    )
+                        except (OSError, TypeError, ValueError, KeyError, FileExistsError) as exc:
+                            print(f"[PLACE] Label update rejected: {exc}")
+                            response = "I couldn't safely update that place label."
+                        _place_pending = None
+                    else:
+                        response = (
+                            f"I heard {pending['label']}. Say confirm place to save that label, "
+                            "or cancel place to discard it."
+                        )
+                elif place_label_request is not None:
+                    if place_memory.get(place_label_request) is not None:
+                        response = (
+                            f"I already have a place labeled {place_label_request}. "
+                            "Say rename place, or choose a different label."
+                        )
+                    else:
+                        _place_pending = {
+                            "operation": "add",
+                            "label": place_label_request,
+                            "expires_at": time.monotonic() + PENDING_PLACE_CONFIRM_SECONDS,
+                        }
+                        response = (
+                            f"I heard the place label {place_label_request}. "
+                            "Say confirm place to save that label, or cancel place to discard it."
+                        )
+                        print(f"[PLACE] Draft label awaiting confirmation: {place_label_request}")
+                elif place_relabel_request is not None:
+                    old_label, new_label = place_relabel_request
+                    if place_memory.get(old_label) is None:
+                        response = f"I couldn't find a saved place labeled {old_label}."
+                    elif place_memory.get(new_label) is not None and old_label.casefold() != new_label.casefold():
+                        response = f"A place labeled {new_label} already exists."
+                    else:
+                        _place_pending = {
+                            "operation": "rename",
+                            "old_label": old_label,
+                            "label": new_label,
+                            "expires_at": time.monotonic() + PENDING_PLACE_CONFIRM_SECONDS,
+                        }
+                        response = (
+                            f"I heard rename {old_label} to {new_label}. "
+                            "Say confirm place to apply it, or cancel place to leave it unchanged."
+                        )
+                        print(f"[PLACE] Draft relabel awaiting confirmation: {old_label} -> {new_label}")
                 elif (memory_request := get_person_memory_request(text)) is not None:
                     confirmed_person = recognized_person_at_wake
                     if confirmed_person is None:
