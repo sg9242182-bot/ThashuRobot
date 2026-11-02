@@ -267,6 +267,21 @@ def get_spelled_registration_name(user_input):
     return "".join(letters).title()
 
 
+
+def get_enrollment_spelling(user_input):
+    """Accept only a direct sequence of spoken letter names for enrollment."""
+    tokens = _normalize_phrase(user_input).split()
+    if len(tokens) < 2:
+        return None
+    letters = []
+    for token in tokens:
+        letter = _LETTER_NAMES.get(token)
+        if letter is None:
+            return None
+        letters.append(letter)
+    return "".join(letters).title()
+
+
 def get_remove_identity_name(user_input):
     """Return a name only for an explicit request to remove its stored face identity."""
     normalized = _normalize_phrase(user_input)
