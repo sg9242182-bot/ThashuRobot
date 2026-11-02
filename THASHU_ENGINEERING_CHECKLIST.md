@@ -1222,7 +1222,7 @@ Use this section to track actual repository files as they are inspected.
 
 File	Status	Phase	Notes
 
-`main.py`	REVIEW	2	Existing entry point
+`main.py`	MODIFY	2/8	Existing runtime entry point; confirmed place teaching flow
 
 `core/state.py`	REVIEW	2	Existing state module
 
@@ -1230,7 +1230,7 @@ File	Status	Phase	Notes
 
 `core/brain.py`	REVIEW	2/3	AI/command path
 
-`core/decision.py`	REVIEW	3	Decision path
+`core/decision.py`	MODIFY	3/8	Deterministic actuator and place voice commands
 
 `hardware/gpio\_control.py`	REVIEW	1	Existing hardware interface
 
