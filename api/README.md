@@ -162,12 +162,12 @@ The app should treat `dispatched` as “the Pi wrote the command to its serial t
 
 ## Command logs
 
-The API writes one sanitized JSON log record for each move or stop outcome. Records include a timestamp, component, request ID, command, outcome, HTTP status, and the control mode on dispatch. Failure records include a stable error code. Bearer tokens and request authorization headers are not included.
+The API writes one sanitized JSON log record for each move or stop request outcome. Records include a timestamp, component, command ID, command, outcome, HTTP status, and the control mode on dispatch. Failure records include a stable error code. Bearer tokens and request authorization headers are not included.
 
 Example:
 
 ```json
-{"command":"forward","component":"pi_api","control_mode":"MANUAL","event":"robot_command","http_status":200,"outcome":"dispatched","command_id":"<uuid>","timestamp":"<UTC timestamp>"}
+{"command":"forward","component":"pi_api","control_mode":"MANUAL","event":"robot_command","http_status":202,"outcome":"dispatched","command_id":"<uuid>","timestamp":"<UTC timestamp>"}
 ```
 
 Use the response's `command_id` to find its matching API log entry. A `dispatched` log still means the Pi wrote the command to the serial transport; it does not confirm ESP32 acknowledgement or physical movement.
