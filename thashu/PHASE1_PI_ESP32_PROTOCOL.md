@@ -128,7 +128,8 @@ Pi reconnect behavior does not replace the ESP32 watchdog. Do not assume a succe
 
 - Agree the protocol-version/compatibility policy; the current wire format has no version field.
 - Decide whether restarting the Pi may reuse sequence numbers, or whether Pi sequence allocation must persist/change so IDs remain unique across restarts.
-- Add shared protocol test fixtures and cover valid, invalid, partial, overlong, and unknown frames plus timeout/reconnect behavior.
+- Shared vectors are in `testdata/pi_esp32_protocol_vectors.csv`; the Pi-side serializer test is `thashu/tests/test_gpio_protocol.py`. It checks the exact outbound frames and sequence wrap.
+- The integrated ESP32 has no test harness on this branch to consume the shared fixture. Add/agree firmware-side parser coverage for valid, invalid, partial, overlong, and unknown frames, plus timeout/reconnect behavior.
 - Record cross-owner or physical hardware verification with Tharun. Do not infer it from API unit tests.
 
 ## Phase boundary
