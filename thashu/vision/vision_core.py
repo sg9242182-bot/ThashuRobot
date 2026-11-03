@@ -482,7 +482,7 @@ class VisionCore:
                     enrollment and enrollment["status"] == "collecting"
                 )
             recog_interval = (
-                enrollment_recog_interval if enrollment_active else 2.0
+                enrollment_recog_interval if enrollment_active else 0.5
             )
             if now - last_recog > recog_interval and faces:
                 for face_index, (x1, y1, x2, y2) in enumerate(faces):
