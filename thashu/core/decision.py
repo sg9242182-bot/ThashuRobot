@@ -443,50 +443,6 @@ def get_person_memory_save_confirmation(user_input: str):
     return None
 
 
-_PLACE_LABEL_PATTERN = re.compile(
-    r"(?:remember|save|learn) (?:this|that) place"
-    r"(?: (?:as|is|called|named))? (.+)",
-    re.IGNORECASE,
-)
-_PLACE_RELABEL_PATTERN = re.compile(r"rename place (.+?) to (.+)", re.IGNORECASE)
-
-
-def get_place_label_request(user_input: str):
-    """Return a bounded explicit place label from a teach-place utterance."""
-    text = " ".join((user_input or "").split())
-    match = _PLACE_LABEL_PATTERN.fullmatch(text)
-    if not match:
-        return None
-    label = " ".join(match.group(1).strip(" .'-").split())
-    if not label or len(label) > 48 or label.casefold() in {"confirm", "cancel"}:
-        return None
-    if any(ord(character) < 32 for character in label):
-        return None
-    return label
-
-
-def get_place_relabel_request(user_input: str):
-    """Return (old, new) for an explicit rename-place request."""
-    text = " ".join((user_input or "").split())
-    match = _PLACE_RELABEL_PATTERN.fullmatch(text)
-    if not match:
-        return None
-    old, new = (" ".join(part.strip(" .'-").split()) for part in match.groups())
-    if not old or not new or len(old) > 48 or len(new) > 48:
-        return None
-    return old, new
-
-
-def get_place_save_confirmation(user_input: str):
-    """Recognize only the exact place confirmation or cancellation phrases."""
-    normalized = re.sub(r"[^a-z0-9]+", " ", (user_input or "").lower()).strip()
-    if normalized == "confirm place":
-        return "CONFIRM"
-    if normalized == "cancel place":
-        return "CANCEL"
-    return None
-
-
 _MEMORY_DELETE_PHRASES = {
     "forget all my memories",
     "forget everything you remember about me",
