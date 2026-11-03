@@ -770,27 +770,13 @@ Associate the face representation with the confirmed identity.
 
 Store important interaction memories, not a permanent transcript of every sentence.
 
-Permanent Place Memory
+Event Location Context
 
-Thashu must not invent semantic place names.
+Thashu must not infer a place from camera images or invent a location.
 
-A place becomes semantically known when the user explicitly labels it, for example:
+A location may be stored only as context explicitly supplied by the user for a specific important event, for example: “I met Tharun at school.” Store that wording as event metadata; it does not create a recognized place identity or a persistent map.
 
-"This is our house."
-
-"This is my school."
-
-"This is a road."
-
-Store:
-
-User-provided place label
-
-Visual/environmental reference information
-
-Important observations/events associated with the place
-
-Later recognition must use the stored reference information and confidence thresholds. If confidence is insufficient, report the place as unknown rather than inventing an identity.
+If no location was provided, leave the event location unknown. Do not guess from visual appearance, nearby objects, or an unvalidated sensor.
 
 Memory Layers
 
@@ -1002,7 +988,9 @@ Acceptance:
 
 Phase 9 — Unified Person + Place + Episodic Memory
 
-Status: NOT STARTED
+Status: NOT STARTED — generalized cross-record memory work; Phase 8 stores only a single event’s user-provided encounter context.
+
+Phase boundary: Phase 8 does not build a place-recognition system or a generalized person/place/event relationship graph. Phase 9 remains future work for broader cross-record relationships and retrieval.
 
 Tasks:
 
