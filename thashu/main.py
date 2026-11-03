@@ -1020,7 +1020,7 @@ def main():
                     if not getattr(vision.detector, "recognition_ready", False):
                         response = "Face registration is unavailable because the landmark model is not installed."
                     else:
-                        vision.begin_enrollment(required_samples=15, timeout=45.0)
+                        vision.begin_enrollment(required_samples=15, timeout=120.0)
                         _identity_enrollment_state = "capturing"
                         # A name in this utterance is only a draft; enrollment
                         # still requires captured face samples, spelling, and save.
