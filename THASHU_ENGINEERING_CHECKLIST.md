@@ -68,7 +68,7 @@ Camera processing
 
 Face recognition
 
-Person/place memory
+Person and encounter memory
 
 High-level decisions
 
@@ -154,7 +154,7 @@ Short-term: current conversation/context; expires.
 
 Episodic: important interactions/events.
 
-Long-term semantic: stable facts about people and places.
+Long-term semantic: stable facts about people; event locations are recorded only as event metadata.
 
 \---
 
@@ -698,7 +698,7 @@ Camera processing
 
 Face recognition
 
-Person/place memory
+Person and encounter memory
 
 High-level decisions
 
@@ -784,7 +784,7 @@ Short-term: current conversation/context; expires.
 
 Episodic: important interactions/events.
 
-Long-term semantic: stable facts about people and places.
+Long-term semantic: stable facts about people; event locations are recorded only as event metadata.
 
 \---
 
