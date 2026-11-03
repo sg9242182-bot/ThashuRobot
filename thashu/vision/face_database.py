@@ -18,7 +18,7 @@ class FaceDatabase:
     # Fail closed after a Pi-reported false positive (father matched as owner).
     # Recalibrate with labeled owner/non-owner samples before lowering this.
     DEFAULT_THRESHOLD = 0.78
-    DEFAULT_MARGIN = 0.15
+    DEFAULT_MARGIN = 0.08
 
     def __init__(self, db_path="data/people_faces.json",
                  threshold=DEFAULT_THRESHOLD, margin=DEFAULT_MARGIN):
