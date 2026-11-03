@@ -18,21 +18,21 @@ ServoManager servos;
 
 void setup() {
     Serial.begin(115200);
-    Serial.println("EVENT|1|0|BOOT");
+    Serial.println("EVENT|0|BOOT");
     if (!motors.begin()) {
-        Serial.println("FAULT|1|0|MOTOR|INIT");
+        Serial.println("FAULT|0|MOTOR|INIT");
         while (true) { motors.stop(); delay(100); }
     }
     if (!eyes.begin()) {
-        Serial.println("FAULT|1|0|OLED|INIT");
+        Serial.println("FAULT|0|OLED|INIT");
         while (true) { motors.stop(); delay(100); }
     }
     if (!servos.begin()) {
-        Serial.println("FAULT|1|0|SERVO|INIT");
+        Serial.println("FAULT|0|SERVO|INIT");
         while (true) { motors.stop(); delay(100); }
     }
     if (!safety.begin(motors, frontTof, rearUltrasonic, eyes, servos)) {
-        Serial.println("FAULT|1|0|SAFETY|SENSOR_INIT");
+        Serial.println("FAULT|0|SAFETY|SENSOR_INIT");
         while (true) { motors.stop(); delay(100); }
     }
     eyes.setExpression(EXPR_IDLE);
