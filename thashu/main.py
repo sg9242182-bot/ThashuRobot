@@ -1251,7 +1251,9 @@ def main():
                             "location": location,
                             "expires_at": time.monotonic() + PENDING_MEMORY_CONFIRM_SECONDS,
                         }
-                        location_readback = f" at {location}" if location else ""
+                        location_readback = (
+                            f" at {location}" if location else " with no location recorded"
+                        )
                         response = (
                             f"I heard this event: {event_text}. I will save it for "
                             f"{confirmed_person}{location_readback}. "
@@ -1318,8 +1320,12 @@ def main():
                             entries = []
                             for record in records:
                                 entry = f"{record['kind']}: {record['text'][:120]}"
-                                if record.get("location"):
-                                    entry += f" at {record['location']}"
+                                if record["kind"] == "event":
+                                    entry += (
+                                        f" at {record['location']}"
+                                        if record.get("location")
+                                        else " (location unknown)"
+                                    )
                                 entries.append(entry)
                             response = (
                                 f"For {confirmed_person}, I remember: "
