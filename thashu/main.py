@@ -854,7 +854,9 @@ def main():
                     )
                 continue
             if capture.get("status") in ("ambiguous", "timed_out"):
+                overlap_rejections = capture.get("overlap_rejections", 0)
                 _identity_enrollment_state = "idle"
+                _identity_pending_name = None
                 vision.clear_enrollment()
                 message = (
                     "I saw more than one face, so I cancelled face registration. "
@@ -863,11 +865,14 @@ def main():
                     else (
                         "I could not capture enough non-overlapping face views in time. "
                         "Please try again with a different angle or lighting."
-                        if capture.get("overlap_rejections", 0)
+                        if overlap_rejections
                         else "I could not capture enough clear face pictures in time. Please try again."
                     )
                 )
-                print(f"[VISION] Enrollment ended: {capture.get('status')}")
+                print(
+                    f"[VISION] Enrollment ended: {capture.get('status')}; "
+                    f"overlap_rejections={overlap_rejections}"
+                )
                 _announce_enrollment_status(message)
                 continue
 
@@ -1085,9 +1090,20 @@ def main():
                     status = vision.enrollment_status()
                     samples = vision.enrollment_samples()
                     if status.get("status") in ("ambiguous", "timed_out"):
+                        overlap_rejections = status.get("overlap_rejections", 0)
                         vision.clear_enrollment()
                         _identity_enrollment_state = "idle"
-                        response = "I could not get a stable single face. Please try again with only one face in view."
+                        _identity_pending_name = None
+                        response = (
+                            "I could not get a stable single face. Please try again with only one face in view."
+                            if status.get("status") == "ambiguous"
+                            else (
+                                "I could not capture enough non-overlapping face views in time. "
+                                "Please try again with a different angle or lighting."
+                                if overlap_rejections
+                                else "I could not get enough clear face views in time. Please try again."
+                            )
+                        )
                     elif status.get("status") == "ready" and samples:
                         _identity_enrollment_state = "spelling"
                         spelled_name = get_enrollment_spelling(text)
@@ -1138,11 +1154,18 @@ def main():
                         response = "I could not load the captured face samples. Please start registration again."
                     else:
                         count = status.get("sample_count", 0)
-                        required = status.get("required_samples", 15)
-                        response = (
-                            f"I have {count} of {required} clear face views so far. "
-                            "Please keep one face in view. I will ask you to spell your name when capture is complete."
-                        )
+                        required = status.get("required_samples", FACE_ENROLLMENT_SAMPLE_COUNT)
+                        if _identity_pending_name:
+                            response = (
+                                f"I have {count} of {required} non-overlapping views for "
+                                f"{_identity_pending_name}. Please keep one face in view; "
+                                "I will keep replacing views that match another saved identity."
+                            )
+                        else:
+                            response = (
+                                f"I have {count} of {required} clear face views so far. "
+                                "Please keep one face in view. I will ask you to spell your name when capture is complete."
+                            )
                 elif _identity_enrollment_state == "spelling":
                     spelled_name = get_enrollment_spelling(text)
                     if spelled_name:
