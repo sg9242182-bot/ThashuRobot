@@ -34,19 +34,19 @@ The Pi owns high-level robot services, API orchestration, command validation, st
 Identify current implementation, approved interfaces, and unresolved decisions before backend changes.
 
 ### Checklist
-- [ ] Read README, architecture docs, protocol docs, hardware notes, and current Pi/ESP32/mobile implementation.
-- [ ] Confirm actual repository paths and existing code before creating duplicate modules.
-- [ ] Inventory API routes already implemented and distinguish them from planned routes.
-- [ ] Inventory the current Pi–ESP32 transport, parser, command format, and telemetry format from code and hardware evidence.
-- [ ] Create a contract-gap list: endpoint/schema, mode transition, command acknowledgement, timeout, heartbeat, error taxonomy, versioning, and auth.
-- [ ] Agree mobile-facing API behavior with Niteshvar and hardware/protocol behavior with Tharun.
-- [ ] Record unresolved decisions in repository documentation or a focused issue.
-- [ ] Do not claim an interface is approved solely because it appears in an AI-generated draft.
+- [x] Read README, architecture docs, protocol docs, hardware notes, and current Pi/ESP32/mobile implementation.
+- [x] Confirm actual repository paths and existing code before creating duplicate modules.
+- [x] Inventory API routes already implemented and distinguish them from planned routes.
+- [x] Inventory the current Pi–ESP32 transport, parser, command format, and telemetry format from code and hardware evidence.
+- [x] Create a contract-gap list: endpoint/schema, mode transition, command acknowledgement, timeout, heartbeat, error taxonomy, versioning, and auth.
+- [ ] Finalize the mobile-facing production API behavior with Niteshvar; his proposed contract still awaits review. Hardware/protocol behavior with Tharun is confirmed for protocol v1.
+- [x] Record unresolved decisions in repository documentation or a focused issue.
+- [x] Do not claim an interface is approved solely because it appears in an AI-generated draft.
 
 ### Exit criteria
-- [ ] Existing behavior and gaps are documented.
-- [ ] Owners are identified for each unresolved shared contract.
-- [ ] No incompatible replacement contract is introduced.
+- [x] Existing behavior and gaps are documented.
+- [x] Owners are identified for each unresolved shared contract.
+- [x] No incompatible replacement contract is introduced.
 
 ## Phase 1 — Raspberry Pi service foundation
 
@@ -54,18 +54,23 @@ Identify current implementation, approved interfaces, and unresolved decisions b
 Create a maintainable, testable backend structure and reproducible local development environment.
 
 ### Checklist
-- [ ] Confirm supported Python/runtime versions and Raspberry Pi OS assumptions from the repository.
-- [ ] Establish or verify virtual environment, dependency management, configuration loading, and test setup.
-- [ ] Keep API routes, robot orchestration, ESP32 communication, safety policy, telemetry, diagnostics, and logging in separate modules consistent with the existing repository structure.
-- [ ] Centralize configuration; keep credentials and secrets out of source control.
-- [ ] Add structured logging with severity, timestamp, component, correlation/request ID where practical, and sanitized error details.
-- [ ] Define startup/shutdown behavior and graceful handling of unavailable hardware.
-- [ ] Add baseline tests and document development commands.
+- [x] Confirm supported Python/runtime versions and Raspberry Pi OS assumptions from the repository. Pi Setup records Raspberry Pi OS Bookworm and Python 3.11.2; the API supports Python 3.10 or newer.
+- [x] Set up dependency management, environment-backed API token configuration, and automated test commands.
+- [ ] Create and verify the virtual environment on the target Pi.
+- [ ] Keep API routes, robot orchestration, ESP32 communication, safety policy, telemetry, diagnostics, and logging in separate modules consistent with the existing repository structure. The broader diagnostics/logging separation still needs review.
+- [x] Keep the API token in environment configuration, outside source control.
+- [ ] Centralize and validate the rest of the backend configuration.
+- [x] Add structured JSON logs for move/stop outcomes with severity, timestamp, component, command ID, and sanitized error codes.
+- [ ] Extend structured logging across other backend services and request flows.
+- [x] Document startup/shutdown commands and handle unavailable serial hardware without crashing the API; status reports unavailable transport. Full startup behavior on the target Pi has not been verified.
+- [x] Add baseline API/protocol tests and document development test commands.
 
 ### Exit criteria
-- [ ] Backend starts reproducibly in development.
-- [ ] Configuration and logs are consistent.
-- [ ] Hardware absence or disconnection produces a controlled degraded state rather than a crash loop.
+- [x] API-only backend starts in local development (Vishal verified it in Swagger). Full robot-process startup on the Pi remains unverified.
+- [ ] Configuration and logs are consistent across the full backend.
+- [x] Software handles unavailable/disconnected serial hardware as a degraded state; API status tests cover unavailable transport. Physical Pi behavior remains unverified.
+
+**Phase 1 evidence (2026-11-03):** Pi Setup documents Bookworm/Python 3.11.2, API dependencies, token configuration, and start/stop commands. Vishal previously reported 13/13 API tests passing; protocol tests passed 9/9 after the latest Pi transport changes. Phase 1 remains in progress because the target-Pi virtual environment/startup and full-backend configuration/logging review are still open.
 
 ## Phase 2 — Pi–ESP32 protocol contract and transport
 
@@ -73,20 +78,23 @@ Create a maintainable, testable backend structure and reproducible local develop
 Make hardware communication explicit and reliable before exposing movement controls.
 
 ### Checklist
-- [ ] Collaborate with Tharun to approve transport, framing, message schema, and protocol version.
-- [ ] Define command IDs/correlation, acknowledgements, response/error codes, telemetry fields, timestamps/sequence handling, and compatibility behavior as needed.
-- [ ] Define serial connection startup, partial reads, message boundaries, malformed frames, buffer limits, and reconnect behavior.
-- [ ] Define heartbeat/timeout responsibilities and safe behavior on missed heartbeat or lost connection.
-- [ ] Validate incoming messages and reject unknown or out-of-range commands.
-- [ ] Ensure only one authoritative path dispatches hardware commands.
-- [ ] Separate transport parsing from robot behavior and API code.
-- [ ] Add protocol documentation and test fixtures shared with the ESP32 implementation.
-- [ ] Do not invent pin mappings or assume the current motor driver; the ESP32/hardware owner owns those details.
+- [x] Collaborate with Tharun to approve transport, framing, message schema, and protocol version. Tharun confirmed protocol version 1 and the command/ACK session and sequence fields on 2026-11-03.
+- [x] Define command IDs/correlation, acknowledgements, response/error codes, telemetry fields, timestamps/sequence handling, and compatibility behavior as needed.
+- [x] Define serial connection startup, partial reads, message boundaries, malformed frames, buffer limits, and reconnect behavior. Pi buffering, frame-size limits, and reconnect handling are implemented and documented.
+- [x] Define heartbeat/timeout responsibilities and safe behavior on missed heartbeat or lost connection.
+- [x] Validate incoming messages and reject unknown or out-of-range commands in the integrated ESP32 parser; Pi ACK/session handling rejects mismatched versions and sessions.
+- [x] Ensure one authoritative robot manager path dispatches API movement commands to the motor service.
+- [x] Separate transport parsing from robot behavior and API code.
+- [x] Add protocol documentation and language-neutral test vectors; Pi tests consume the shared vectors.
+- [x] Do not invent pin mappings or assume the current motor driver; the integrated firmware remains the hardware source of truth.
+- [ ] Run shared vectors through an ESP32 parser-specific automated test. Tharun reports there is no standalone parser test harness on the branch yet.
 
 ### Exit criteria
-- [ ] Both sides agree on the same versioned contract.
-- [ ] Valid, invalid, partial, stale, and unknown messages have defined behavior.
-- [ ] Transport failures are detectable and cannot silently appear as success.
+- [x] Both sides agree on the same versioned contract.
+- [x] Valid, invalid, partial, stale, and unknown messages have defined behavior.
+- [x] Transport failures are detectable and cannot silently appear as success.
+
+**Phase 2 evidence (2026-11-03):** Pi protocol tests passed 9/9 after the receive-buffer changes. Tharun confirmed the integrated firmware uses protocol v1 and echoes session IDs and sequence numbers; this was a code review, not an automated ESP32 parser test. The ESP32 parser test harness/vector run remains open, so Phase 2 stays in progress until that validation is recorded.
 
 ## Phase 3 — Robot manager, modes, and command lifecycle
 

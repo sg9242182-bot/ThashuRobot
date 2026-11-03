@@ -34,6 +34,7 @@ class GPIOControl:
     DEFAULT_BAUD = 115200
     SERIAL_TIMEOUT = 0.2
     RX_SILENCE_TIMEOUT = 2.0
+    MAX_FRAME_BYTES = 128
 
     def __new__(cls, port=None, baud=DEFAULT_BAUD):
         if cls._instance is None:
@@ -297,16 +298,31 @@ class GPIOControl:
             self._stop_event.wait(0.01)
 
     def _reader_loop(self):
+        rx_buffer = bytearray()
+        discarding_oversized_frame = False
+        reader_serial = None
+
         while not self._stop_event.is_set():
             with self._state_lock:
                 serial_conn = self._serial
 
             if serial_conn is None:
+                rx_buffer.clear()
+                discarding_oversized_frame = False
+                reader_serial = None
                 self._stop_event.wait(0.05)
                 continue
 
+            if serial_conn is not reader_serial:
+                # Never join a partial frame received before a disconnect to
+                # bytes from a newly opened serial connection.
+                rx_buffer.clear()
+                discarding_oversized_frame = False
+                reader_serial = serial_conn
+
             try:
-                raw = serial_conn.readline()
+                waiting = serial_conn.in_waiting
+                raw = serial_conn.read(max(1, min(waiting or 1, self.MAX_FRAME_BYTES + 1)))
                 if not raw:
                     with self._state_lock:
                         is_current = self._serial is serial_conn
@@ -323,21 +339,57 @@ class GPIOControl:
                         continue
                     self._last_rx_monotonic = time.monotonic()
 
-                line = raw.decode("ascii", errors="replace").strip()
-                if line:
-                    self._incoming.put(line)
-                    if line.startswith("TEL|"):
-                        self._update_sensor_snapshot(line)
-                    if line.startswith("ACK|"):
-                        self._record_acknowledgement(line)
-                    if line.startswith(("EVENT|", "FAULT|")):
-                        print(f"[ESP32] {line}")
-                        self._events.put(line)
+                discarding_oversized_frame = self._consume_serial_bytes(
+                    raw, rx_buffer, discarding_oversized_frame
+                )
             except (serial.SerialException, OSError) as exc:
                 self._disconnect(f"read failed: {exc}", expected_serial=serial_conn)
             except Exception as exc:
                 # A malformed inbound frame must not kill the reader thread.
                 print(f"[GPIO] ESP32 receive error: {exc}")
+
+    def _consume_serial_bytes(self, chunk, rx_buffer, discarding_oversized_frame=False):
+        """Assemble newline-delimited frames without retaining partial/oversized lines."""
+        for byte in chunk:
+            if discarding_oversized_frame:
+                if byte == ord("\n"):
+                    discarding_oversized_frame = False
+                continue
+
+            if byte == ord("\n"):
+                frame = bytes(rx_buffer)
+                rx_buffer.clear()
+                if frame.endswith(b"\r"):
+                    frame = frame[:-1]
+                if frame:
+                    self._process_inbound_frame(frame)
+                continue
+
+            if len(rx_buffer) >= self.MAX_FRAME_BYTES:
+                rx_buffer.clear()
+                discarding_oversized_frame = True
+                continue
+
+            rx_buffer.append(byte)
+
+        return discarding_oversized_frame
+
+    def _process_inbound_frame(self, frame):
+        """Decode and dispatch one complete ASCII protocol frame."""
+        try:
+            line = frame.decode("ascii")
+        except UnicodeDecodeError:
+            print("[GPIO] Ignoring non-ASCII ESP32 frame")
+            return
+
+        self._incoming.put(line)
+        if line.startswith("TEL|"):
+            self._update_sensor_snapshot(line)
+        if line.startswith("ACK|"):
+            self._record_acknowledgement(line)
+        if line.startswith(("EVENT|", "FAULT|")):
+            print(f"[ESP32] {line}")
+            self._events.put(line)
 
     def _update_sensor_snapshot(self, line):
         """Parse one ESP32 sensor frame and publish a timestamped snapshot."""

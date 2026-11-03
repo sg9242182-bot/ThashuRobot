@@ -42,7 +42,7 @@ Legacy unversioned command frames are not accepted by the integrated parser. A c
 
 ## Framing and parser behavior
 
-The ESP32 accumulates partial serial reads until a newline in a 128-byte command buffer. CRLF is accepted by stripping the trailing carriage return. An overlong frame is discarded through its next newline. The Pi's serial reader uses newline-delimited reads with a 200 ms timeout.
+The ESP32 accumulates partial serial reads until a newline in a 128-byte command buffer. CRLF is accepted by stripping the trailing carriage return. An overlong frame is discarded through its next newline. On the Pi, the serial reader accumulates chunks until newline rather than treating a serial timeout as a frame boundary. It accepts at most 128 bytes before the newline, strips a trailing carriage return, and discards an oversized frame through its next newline. An incomplete frame is cleared when the serial connection changes so bytes from different connections cannot be joined. The serial read timeout is 200 ms; a timeout leaves a partial frame buffered.
 
 The Pi accepts an `ACK` for command tracking only when the frame version is 1 and the session ID matches its current process session. A delayed ACK from an earlier Pi session cannot complete a new command with the same sequence number. Heartbeat `ALIVE` replies are not exposed as ordinary command results.
 

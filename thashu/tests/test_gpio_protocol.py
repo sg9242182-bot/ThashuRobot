@@ -1,8 +1,10 @@
 import csv
+import queue
 import sys
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 THASHU_ROOT = Path(__file__).resolve().parents[1]
@@ -21,10 +23,19 @@ class FakeSerial:
     def __init__(self):
         self.is_open = True
         self.frames = []
+        self.closed = False
+        self.in_waiting = 0
 
     def write(self, frame):
         self.frames.append(frame)
         return len(frame)
+
+    def read(self, size=1):
+        return b""
+
+    def close(self):
+        self.closed = True
+        self.is_open = False
 
 
 def make_transport(starting_sequence, session_id=TEST_SESSION):
@@ -36,6 +47,8 @@ def make_transport(starting_sequence, session_id=TEST_SESSION):
     transport._sequence_lock = threading.Lock()
     transport._ack_condition = threading.Condition()
     transport._acknowledgements = {}
+    transport._incoming = queue.Queue()
+    transport._events = queue.Queue()
     transport._sensor_snapshot = None
     transport._session_id = session_id
     transport._next_sequence = starting_sequence
@@ -114,6 +127,57 @@ class PiEsp32ProtocolVectorTests(unittest.TestCase):
             transport.send("STOP\nCMD|2|STOP")
 
         self.assertEqual(transport._serial.frames, [])
+
+    def test_inbound_frame_is_not_published_until_newline_arrives(self):
+        transport = make_transport(1)
+        rx_buffer = bytearray()
+        frame = f"ACK|1|{TEST_SESSION}|1|OK".encode("ascii")
+
+        discarding = transport._consume_serial_bytes(frame[:12], rx_buffer)
+        self.assertFalse(discarding)
+        self.assertEqual(transport._incoming.qsize(), 0)
+
+        discarding = transport._consume_serial_bytes(frame[12:] + b"\n", rx_buffer, discarding)
+        self.assertFalse(discarding)
+        self.assertEqual(transport._incoming.get_nowait(), frame.decode("ascii"))
+        self.assertEqual(transport.wait_for_ack(1, timeout=0.001), "OK")
+
+    def test_oversized_inbound_frame_is_discarded_through_newline(self):
+        transport = make_transport(1)
+        rx_buffer = bytearray()
+        oversized = b"X" * (transport.MAX_FRAME_BYTES + 1) + b"ignored\n"
+        valid = f"ACK|1|{TEST_SESSION}|1|OK\n".encode("ascii")
+
+        discarding = transport._consume_serial_bytes(oversized, rx_buffer)
+        self.assertFalse(discarding)
+        self.assertEqual(transport._incoming.qsize(), 0)
+
+        transport._consume_serial_bytes(valid, rx_buffer, discarding)
+        self.assertEqual(transport._incoming.get_nowait(), valid.decode("ascii").strip())
+        self.assertEqual(transport.wait_for_ack(1, timeout=0.001), "OK")
+
+    def test_reconnect_opens_a_new_serial_connection(self):
+        transport = object.__new__(GPIOControl)
+        previous = FakeSerial()
+        reconnected = FakeSerial()
+        transport._serial = previous
+        transport._state_lock = threading.Lock()
+        transport._configured_port = "fake-port"
+        transport._port = "fake-port"
+        transport._baud = GPIOControl.DEFAULT_BAUD
+        transport._last_heartbeat = 1.0
+        transport._last_rx_monotonic = 1.0
+        transport._resolve_port = lambda: "fake-port"
+
+        self.assertTrue(transport._disconnect("test disconnect"))
+        self.assertFalse(transport.is_connected())
+
+        with patch("hardware.gpio_control.serial.Serial", return_value=reconnected):
+            self.assertTrue(transport._connect())
+
+        self.assertTrue(transport.is_connected())
+        self.assertTrue(previous.closed)
+        self.assertIs(transport._serial, reconnected)
 
 
 if __name__ == "__main__":
