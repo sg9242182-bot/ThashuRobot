@@ -64,16 +64,28 @@ class PeopleMemory:
             raise ValueError("Facts cannot carry an event location")
 
         people = self.data.setdefault(self.MEMORY_KEY, {})
+        if not isinstance(people, dict):
+            raise ValueError("Person memory records are malformed")
         person_existed = name in people
         person = people.setdefault(name, {"facts": [], "events": []})
+        if not isinstance(person, dict):
+            raise ValueError("Person memory record is malformed")
         key = "facts" if kind == "fact" else "events"
         records = person.setdefault(key, [])
+        if not isinstance(records, list):
+            raise ValueError("Person memory list is malformed")
+
         def same_record(record):
-            if not isinstance(record, dict) or record.get("text", "").casefold() != text.casefold():
+            if not isinstance(record, dict):
+                return False
+            existing_text = record.get("text")
+            if not isinstance(existing_text, str) or existing_text.casefold() != text.casefold():
                 return False
             if kind == "event":
                 existing_location = record.get("location")
-                return (existing_location or "").casefold() == (location or "").casefold()
+                if not isinstance(existing_location, str):
+                    existing_location = ""
+                return existing_location.casefold() == (location or "").casefold()
             return True
         if any(same_record(record) for record in records):
             return False
@@ -96,25 +108,48 @@ class PeopleMemory:
             raise
         return True
 
-    def recall(self, name: str, limit=DEFAULT_RECALL_LIMIT):
-        """Return a small, newest-first set of saved facts and events."""
+    def recall(self, name: str, limit=DEFAULT_RECALL_LIMIT, *, kind=None, contains=None):
+        """Return a bounded newest-first set, optionally filtered by kind or text."""
         if not self._confirmed_name(name):
             return []
+        if kind is not None and kind not in self.MEMORY_KINDS:
+            raise ValueError("Memory kind must be 'fact' or 'event'")
+        if contains is not None and not isinstance(contains, str):
+            raise ValueError("Memory search text must be plain text")
+        needle = " ".join((contains or "").casefold().split())
         limit = max(1, min(self.DEFAULT_RECALL_LIMIT, int(limit)))
-        person = self.data.get(self.MEMORY_KEY, {}).get(name, {})
+        people = self.data.get(self.MEMORY_KEY, {})
+        if not isinstance(people, dict):
+            return []
+        person = people.get(name, {})
+        if not isinstance(person, dict):
+            return []
         records = []
-        for kind, key in (("fact", "facts"), ("event", "events")):
-            for record in person.get(key, []):
-                if isinstance(record, dict) and isinstance(record.get("text"), str):
-                    recalled = {
-                        "kind": kind,
-                        "text": record["text"],
-                        "saved_at": record.get("saved_at"),
-                    }
-                    location = record.get("location")
-                    if kind == "event" and isinstance(location, str) and location.strip():
-                        recalled["location"] = location.strip()
-                    records.append(recalled)
+        for item_kind, key in (("fact", "facts"), ("event", "events")):
+            if kind is not None and item_kind != kind:
+                continue
+            entries = person.get(key, [])
+            if not isinstance(entries, list):
+                continue
+            for record in entries:
+                if not isinstance(record, dict) or not isinstance(record.get("text"), str):
+                    continue
+                location = record.get("location")
+                if not isinstance(location, str):
+                    location = None
+                searchable = record["text"].casefold()
+                if location:
+                    searchable += " " + location.casefold()
+                if needle and needle not in searchable:
+                    continue
+                recalled = {
+                    "kind": item_kind,
+                    "text": record["text"],
+                    "saved_at": record.get("saved_at"),
+                }
+                if item_kind == "event" and location and location.strip():
+                    recalled["location"] = location.strip()
+                records.append(recalled)
         records.sort(key=lambda record: record.get("saved_at") or "", reverse=True)
         return records[:limit]
 
