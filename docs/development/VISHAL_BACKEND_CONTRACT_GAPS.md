@@ -30,64 +30,64 @@ new endpoints or change the runtime contract.
 | Telemetry WebSocket | The API sends raw ESP32 lines and broadcasts `command_result` events to connected WebSocket clients. Raw serial telemetry remains a single-consumer queue. | Vishal and Niteshvar: integrate the event schema and reconnect behavior in Flutter. |
 | Network and credentials | The API binds to localhost by default. Devices in different homes cannot reach one another using `127.0.0.1` or the Pi's home-only LAN address. | Tharun: prepare a private encrypted connection and firewall access when the Pi is available. Vishal: provide a fresh test token securely. Only then set `THASHU_API_HOST=0.0.0.0` for access over that private connection. |
 
-## Phase 2 protocol contract (version 1)
+## Phase 2 protocol contract (deployed protocol v0)
 
-This section records the confirmed behavior of the integrated firmware. The
-integrated firmware is the source of truth; the separate
-`ESP32Firmware/communicationmanager/communication_manager.cpp` copy is stale
-in some behavior, and the old `command_parser.cpp` is not used by the
-integrated sketch.
+This documents the working protocol reported by Tharun and observed from the
+integrated ESP32 output (TEL|0|SENSORS...). The Pi client and integrated
+firmware on this branch are being aligned to this format.
 
-- Transport is USB CDC serial at 115200 baud. Commands use
-  `CMD|1|session_id|sequence|payload...\n`. ACKs use
-  `ACK|1|session_id|sequence|result...\n`; ENCODERS replies include
-  version, session, sequence, and four counts.
-- Supported payloads:
-  - `STOP` → `ACK|1|session_id|sequence|OK`
-  - `HEARTBEAT` → `ACK|1|session_id|sequence|ALIVE`
-  - `MOTOR|FORWARD/BACKWARD/LEFT/RIGHT|0..255` → `ACK|1|session_id|sequence|OK`
-    or a safety/error ACK
-  - `EYES|IDLE/HAPPY/THINKING/LISTENING/SPEAKING/ALERT/SLEEP`
-  - `SERVO|PAN_TILT|pan|tilt`
-  - `SERVO|MOVE|pan|tilt|duration_ms`
-  - `ENCODERS` → `ENC|1|session_id|sequence|count0|count1|count2|count3` (this
-    command responds with `ENC`, not an ACK)
-- Pi sequence numbers start at 1 and stop at 2,147,483,647; the Pi refuses
-  further sends rather than reusing an identity. A Pi process restart creates
-  a new session ID and resets the sequence. The command identity is
-  `(session_id, sequence)`; the ESP32 echoes both in correlated replies and
-  does not deduplicate commands.
-- All serial frames now carry version 1. STOP executes when parsed from the
-  serial input stream. It has no special parser-level priority or duplicate
-  suppression. ESP32 obstacle checks and the Pi watchdog independently stop
-  the motors.
-- The integrated motor driver is TA6586. `EYES` and `SERVO` are the
-  supported commands; `EXPRESSION` and `EAR` are legacy documentation and
-  must not be sent.
+- Transport: USB CDC serial at 115200 baud, newline-delimited ASCII.
+- Commands: CMD|sequence|payload...\n.
+- Acknowledgements: ACK|sequence|result...\n. Results include OK, ALIVE, and
+  ERROR|reason.
+- Encoder reply: ENC|sequence|count0|count1|count2|count3\n.
+- Sensor telemetry:
+  TEL|0|SENSORS|TOF_L|value|TOF_C|value|TOF_R|value|US_REAR|value\n.
+  Distances are millimetres; fresh out-of-range readings are FAR, and
+  unavailable/stale readings are NA.
+- Startup/fault/event frames use the deployed v0 forms, including
+  EVENT|0|READY, EVENT|0|STOP|OBSTACLE, EVENT|0|BLOCKED|OBSTACLE, and
+  FAULT|0|subsystem|detail.
+- Supported command payloads:
+  - STOP → ACK|sequence|OK
+  - HEARTBEAT → ACK|sequence|ALIVE
+  - MOTOR|FORWARD/BACKWARD/LEFT/RIGHT|0..255 → OK, a safety error,
+    or a validation error
+  - EYES|IDLE/HAPPY/THINKING/LISTENING/SPEAKING/ALERT/SLEEP
+  - SERVO|PAN_TILT|pan|tilt
+  - SERVO|MOVE|pan|tilt|duration_ms
+  - ENCODERS → an ENC frame, not an ACK
+- The Pi allocates positive sequence numbers from 1 through 2,147,483,647 and
+  stops instead of wrapping. The ESP32 parser accepts nonnegative sequence
+  numbers. The command and ACK frames carry no protocol-version field and no
+  session ID; ACK matching is by sequence only. A Pi restart resets the
+  sequence, so a delayed ACK from before restart cannot be distinguished from
+  a new ACK with a reused sequence.
+- This protocol has no unsupported-version response or duplicate-command
+  suppression. Do not send the incompatible v1 envelope
+  CMD|version|session_id|sequence|payload; the v0 parser expects the
+  sequence in field 2.
+- The integrated motor driver is TA6586. EYES and SERVO are supported;
+  legacy EXPRESSION and EAR commands must not be sent.
 - The Pi heartbeat is sent every 100 ms and the ESP32 watchdog is 500 ms.
-  The Pi's serial reconnect behavior is separate from that hardware watchdog.
-- Sensor telemetry is sent every 50 ms as
-  `TEL|1|0|SENSORS|TOF_L|value|TOF_C|value|TOF_R|value|US_REAR|value`;
-  distance values are millimetres, with `FAR` for fresh out-of-range and
-  `NA` for unavailable/stale readings.
-- Asynchronous frames include `EVENT|1|0|READY`,
-  `EVENT|1|0|BLOCKED|OBSTACLE`, `EVENT|1|0|STOP|OBSTACLE`, and
-  `FAULT|1|0|subsystem|detail`.
+  STOP, ESP32 obstacle checks, and the watchdog retain their existing behavior.
+- The separate ESP32Firmware/communicationmanager/ copy and
+  command_parser.cpp are legacy/stale; the integrated sketch uses
+  ESP32Firmware/ThashuController/communication_manager.cpp.
 
 ## Remaining Phase 2 decisions
 
-- The protocol document now reflects version 1 of the integrated command/
-  reply framing. Legacy `EXPRESSION` and `EAR` commands remain unsupported.
-- The API reports Pi dispatch immediately and forwards final ACK/error/
-  timeout results using the agreed `command_result` schema. Lookup is
-  available by command ID. Flutter integration remains for Vishal and
-  Niteshvar to coordinate.
-- Versioned Pi command framing and session-aware ACK matching are implemented
-  on the Pi side. The integrated ESP32 parser has been updated in the same
-  versioned protocol commit; the framing/session tests must pass after pulling
-  before the change is accepted.
-- The version-1 wire format has no legacy command compatibility: old
-  unversioned Pi frames are ignored.
+- The deployed v0 command/reply and telemetry frames are now the target for
+  the integrated sketch, Pi serial transport, shared protocol vectors, and
+  this document.
+- Session-aware ACK correlation and explicit command-version negotiation are
+  not provided by v0. Reintroducing either requires an agreed protocol change
+  coordinated across Pi, ESP32, and backend tests.
+- The user-reported test of the running v0 ESP32 parser passed 9 applicable
+  checks: valid HEARTBEAT/STOP/EYES, invalid and unknown commands, partial
+  frames, oversized-frame discard, and recovery after an oversized frame.
+  Unsupported-version testing was not applicable to v0. The branch-aligned
+  source still requires compile/upload and Pi integration verification.
 - STOP latch and selected/paused mode behavior still need the owners' decision
   before changing API semantics.
 
