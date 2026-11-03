@@ -186,16 +186,26 @@ class VisionCore:
                 "frame_size": self.frame_size,
             }
 
-    def begin_enrollment(self, required_samples=5, timeout=120.0):
-        """Collect a short-lived batch from one stable, unambiguous face."""
+    def begin_enrollment(
+        self, required_samples=5, timeout=120.0, *,
+        initial_samples=None, target_name=None,
+    ):
+        """Collect quality-approved samples, optionally replacing overlaps."""
+        required_samples = max(5, int(required_samples))
+        seed_samples = [sample.copy() for sample in (initial_samples or [])]
+        if len(seed_samples) > required_samples:
+            raise ValueError("Initial enrollment samples exceed the required count")
         with self._lock:
             self._enrollment = {
-                "status": "collecting",
+                "status": "ready" if len(seed_samples) >= required_samples else "collecting",
                 "started_at": time.monotonic(),
                 "expires_at": time.monotonic() + float(timeout),
-                "required_samples": max(5, int(required_samples)),
+                "required_samples": required_samples,
                 "track_id": None,
-                "samples": [],
+                "samples": [sample.copy() for sample in seed_samples],
+                "seed_samples": seed_samples,
+                "target_name": target_name,
+                "overlap_rejections": 0,
             }
 
     def enrollment_status(self):
@@ -208,6 +218,7 @@ class VisionCore:
                 "sample_count": len(state["samples"]),
                 "required_samples": state["required_samples"],
                 "expires_at": state["expires_at"],
+                "overlap_rejections": state.get("overlap_rejections", 0),
             }
 
     def enrollment_samples(self):
@@ -536,22 +547,55 @@ class VisionCore:
                         if enrollment and enrollment["status"] == "collecting":
                             if (len(faces) != 1 or track_id in ambiguous_ids
                                     or embedding is None):
-                                enrollment["samples"].clear()
+                                enrollment["samples"] = [
+                                    sample.copy() for sample in enrollment.get("seed_samples", [])
+                                ]
                                 enrollment["track_id"] = None
                             elif enrollment["track_id"] not in (None, track_id):
                                 enrollment["status"] = "ambiguous"
-                                enrollment["samples"].clear()
+                                enrollment["samples"] = [
+                                    sample.copy() for sample in enrollment.get("seed_samples", [])
+                                ]
                             else:
                                 enrollment["track_id"] = track_id
-                                enrollment["samples"].append(embedding.copy())
-                                sample_count = len(enrollment["samples"])
-                                print(
-                                    "[VISION] Enrollment face samples "
-                                    f"{sample_count}/{enrollment['required_samples']}"
+                                target_name = enrollment.get("target_name")
+                                overlap = (
+                                    self.database.best_other_match(
+                                        embedding, exclude_name=target_name
+                                    )
+                                    if target_name
+                                    else (None, -1.0)
                                 )
-                                if sample_count >= enrollment["required_samples"]:
-                                    enrollment["status"] = "ready"
-                                    print("[VISION] Face enrollment capture ready")
+                                other_name, overlap_score = overlap
+                                if (
+                                    other_name is not None
+                                    and overlap_score >= self.database.threshold
+                                ):
+                                    enrollment["overlap_rejections"] = (
+                                        enrollment.get("overlap_rejections", 0) + 1
+                                    )
+                                    needed = max(
+                                        0,
+                                        enrollment["required_samples"]
+                                        - len(enrollment["samples"]),
+                                    )
+                                    print(
+                                        "[VISION] Rejected overlapping enrollment view: "
+                                        f"{other_name}={overlap_score:.3f}; "
+                                        f"replacement still needed "
+                                        f"({len(enrollment['samples'])}/"
+                                        f"{enrollment['required_samples']}, need {needed})"
+                                    )
+                                else:
+                                    enrollment["samples"].append(embedding.copy())
+                                    sample_count = len(enrollment["samples"])
+                                    print(
+                                        "[VISION] Enrollment face samples "
+                                        f"{sample_count}/{enrollment['required_samples']}"
+                                    )
+                                    if sample_count >= enrollment["required_samples"]:
+                                        enrollment["status"] = "ready"
+                                        print("[VISION] Face enrollment capture ready")
 
                     with self._lock:
                         if not self._processing_enabled.is_set():
