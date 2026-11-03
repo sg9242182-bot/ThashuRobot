@@ -424,19 +424,28 @@ def get_event_memory_request(user_input: str):
 
     event_text = request[1]
     separators = list(re.finditer(r"\s+(?:at|in)\s+", event_text, flags=re.IGNORECASE))
-    # Treat only a simple trailing at/in phrase as a location. This avoids
-    # guessing from arbitrary visual or conversational content.
+    # Only a simple trailing at/in phrase can be stored as a location.
     for match in reversed(separators):
         candidate = event_text[match.end():].strip(" .!?,'")
         description = event_text[:match.start()].strip(" .!?,'")
         if not description or not candidate or len(candidate) > 80:
             continue
+        temporal = re.search(
+            r"\s+(today|yesterday|tomorrow|tonight|this morning|this afternoon|last night)$",
+            candidate,
+            re.IGNORECASE,
+        )
+        if temporal:
+            description = (description + " " + candidate[temporal.start():].strip()).strip()
+            candidate = candidate[:temporal.start()].strip()
         words = candidate.split()
         if len(words) > 8 or not any(char.isalpha() for char in candidate):
             continue
-        if re.fullmatch(r"(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midnight)", candidate, re.IGNORECASE):
-            continue
-        if re.search(r"\b(?:today|yesterday|tomorrow|tonight|this morning|this afternoon|last night)\b$", candidate, re.IGNORECASE):
+        if re.fullmatch(
+            r"(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midnight|night|morning|afternoon|evening)",
+            candidate,
+            re.IGNORECASE,
+        ):
             continue
         if re.search(r"\b(?:with|because|then|while|although|but|and)\b", candidate, re.IGNORECASE):
             continue
