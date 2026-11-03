@@ -1191,7 +1191,7 @@ Use this section to track actual repository files as they are inspected.
 
 File	Status	Phase	Notes
 
-`main.py`	MODIFY	2/8	Existing runtime entry point; Phase 8 event capture/recall integration
+`main.py`	MODIFY	2/6/7/8	Existing runtime entry point; memory and enrollment flows
 
 `core/state.py`	REVIEW	2	Existing state module
 
@@ -1209,7 +1209,7 @@ File	Status	Phase	Notes
 
 `hardware/servo\_tracking.py`	REVIEW	1/4/5	Servo/follow control
 
-`vision/vision\_core.py`	REUSE	4/5	Perception lifecycle and follow input; no place recognition
+`vision/vision\_core.py`	MODIFY	4/5/6/7	Perception lifecycle, follow input, and enrollment capture timing
 `vision/follow\_logic.py`	REVIEW	5	Existing target selection/debounce logic
 
 `vision/face\_database.py`	REVIEW	6	Face storage
@@ -1512,5 +1512,7 @@ Phase 7 recognition WAV repeat policy (2026-11-02): Updated `thashu/main.py` so 
 Phase 7 explicit face enrollment sample increase (2026-11-02): Increased the spoken-confirmed face registration capture from eight to twelve embeddings in `thashu/main.py`; the user is prompted to slowly turn slightly left, return to center, then slightly right, pausing briefly at each position. The existing database cap remains 12 embeddings per identity, so a fresh 12-view re-enrollment replaces that identity's previous stored template set after the existing name spelling/read-back and explicit `confirm save` flow. No thresholds or margins were weakened, and default-off automatic adaptation remains disabled; uncertain live matches are not learned. Pi validation remains required: re-enroll Tharun and confirm `12/12`, then compare labeled frontal/left/right debug results and ensure ambiguous/unknown faces remain Unknown. No tests run.
 
 Phase 7 face enrollment follow-up (2026-11-02; supersedes the twelve-view capture note above): Increased `FaceDatabase.MAX_EMBEDDINGS_PER_PERSON` and explicit enrollment capture to 15. After capture completes, Thashu now asks the user to say only the name's letter names (for example, “T H A R U N”); a strict enrollment parser rejects surrounding phrases and words. Thashu reads the spelling back, then accepts the exact word “confirm” in that confirmation state (or the existing “confirm save”), with “confirm” added to Whisper’s expected phrases and try-again/cancel preserved. Progress prompts no longer ask the user to repeat a name before capture finishes. No face-match threshold or margin changed, and uncertain identities are still not learned automatically. A fresh 15-view enrollment replaces that identity's prior stored templates because the per-person cap is 15. Pull phase-7 and validate the full Pi flow, including wrong spelling, plain confirm, try again, cancel, and matching/unknown-face outcomes. No tests run.
+
+Phase 7 enrollment capture-timeout follow-up (2026-11-03; user-requested, implemented on phase-8): Increased the explicit 15-sample face enrollment window from 45 to 120 seconds in `thashu/main.py`, and raised the `VisionCore.begin_enrollment` default to the same 120 seconds. Sample quality gates, one-face/stable-track requirements, spelling confirmation, database cap, and matching thresholds are unchanged. Pi enrollment timing and successful completion still need user validation; no tests were run.
 
 Phase 7 user-reported Pi acceptance update (2026-11-02): The user reports successful event save and recall, draft cancellation, memory persistence through restart, explicit memory-deletion confirmation, correct Tharun fact/event recall, rejection of memory saving when no face is recognized, and relevant/bounded recall. The user also reports that face recognition remains intermittent: the latest diagnostic frames were rejected by the configured score/margin gates, so the 15-view enrollment update and recognition reliability remain a separate follow-up outside Phase 7 acceptance. Punctuation handling and unknown/ambiguous-person recall isolation are user-reported passed. No independent tests were run.
