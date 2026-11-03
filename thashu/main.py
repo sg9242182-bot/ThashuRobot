@@ -21,7 +21,7 @@ from vision.follow_logic   import FollowLogic
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
 from hardware.servo_tracking import ServoTracker
-from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, get_enrollment_spelling, is_recognition_query, get_person_memory_request, get_person_memory_save_confirmation, is_person_memory_query, get_person_memory_delete_command
+from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, get_enrollment_spelling, is_recognition_query, get_person_memory_request, get_event_memory_request, get_person_event_query, get_person_memory_save_confirmation, is_person_memory_query, get_person_memory_delete_command
 from core.model_paths import model_path, project_path
 from memory.people import PeopleMemory
 
@@ -957,8 +957,10 @@ def main():
                 elif recognized_person_at_wake is not None:
                     expected_phrases = [
                         "remember that [a fact to save]",
-                        "remember this event [an event to save]",
+                        "remember this event [an event to save] at [a place]",
                         "what do you remember about me",
+                        "what events do you remember about me",
+                        "where did I meet [a person]",
                         "forget all my memories",
                         "forget everything you remember about me",
                         "delete my saved memories",
@@ -1155,6 +1157,7 @@ def main():
                                 pending["kind"],
                                 pending["text"],
                                 confirmed_identity=True,
+                                location=pending.get("location"),
                             )
                             _memory_pending = None
                             if saved:
@@ -1162,7 +1165,13 @@ def main():
                                     f"[MEMORY] Explicit {pending['kind']} confirmed and saved "
                                     f"for {pending['person']}"
                                 )
-                                response = f"I saved that {pending['kind']} for {pending['person']}."
+                                if pending.get("location"):
+                                    response = (
+                                        f"I saved that event for {pending['person']}, "
+                                        f"at {pending['location']}."
+                                    )
+                                else:
+                                    response = f"I saved that {pending['kind']} for {pending['person']}."
                             else:
                                 response = "I already have that saved."
                         except (OSError, TypeError, ValueError, PermissionError) as exc:
@@ -1226,6 +1235,32 @@ def main():
                             f"{confirmed_person}? Say confirm delete memories or "
                             "cancel memory deletion."
                         )
+                elif (event_request := get_event_memory_request(text)) is not None:
+                    confirmed_person = recognized_person_at_wake
+                    if confirmed_person is None:
+                        response = (
+                            "I can only save a personal event when I recognize one "
+                            "confirmed person. Please face the camera and try again."
+                        )
+                    else:
+                        event_text, location = event_request
+                        _memory_pending = {
+                            "person": confirmed_person,
+                            "kind": "event",
+                            "text": event_text,
+                            "location": location,
+                            "expires_at": time.monotonic() + PENDING_MEMORY_CONFIRM_SECONDS,
+                        }
+                        location_readback = f" at {location}" if location else ""
+                        response = (
+                            f"I heard this event: {event_text}. I will save it for "
+                            f"{confirmed_person}{location_readback}. "
+                            "Say confirm memory to save it, or cancel memory to discard it."
+                        )
+                        print(
+                            f"[MEMORY] Pending explicit event for {confirmed_person}; "
+                            f"location={location or 'unknown'}; waiting for read-back confirmation"
+                        )
                 elif (memory_request := get_person_memory_request(text)) is not None:
                     confirmed_person = recognized_person_at_wake
                     if confirmed_person is None:
@@ -1257,17 +1292,36 @@ def main():
                             "one confirmed person."
                         )
                     else:
+                        event_query = get_person_event_query(text)
                         records = person_memory.recall(confirmed_person, limit=5)
-                        if not records:
-                            response = (
-                                f"I don't have any saved facts or events for "
-                                f"{confirmed_person} yet."
-                            )
-                        else:
-                            entries = [
-                                f"{record['kind']}: {record['text'][:120]}"
-                                for record in records
+                        if event_query is not None:
+                            records = [
+                                record for record in records
+                                if record["kind"] == "event"
+                                and (
+                                    not event_query
+                                    or event_query in record["text"].casefold()
+                                )
                             ]
+                        if not records:
+                            if event_query is not None:
+                                response = (
+                                    f"I don't have a saved event"
+                                    f"{' about ' + event_query if event_query else ''} "
+                                    f"for {confirmed_person}."
+                                )
+                            else:
+                                response = (
+                                    f"I don't have any saved facts or events for "
+                                    f"{confirmed_person} yet."
+                                )
+                        else:
+                            entries = []
+                            for record in records:
+                                entry = f"{record['kind']}: {record['text'][:120]}"
+                                if record.get("location"):
+                                    entry += f" at {record['location']}"
+                                entries.append(entry)
                             response = (
                                 f"For {confirmed_person}, I remember: "
                                 + "; ".join(entries)
