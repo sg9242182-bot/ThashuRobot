@@ -938,15 +938,15 @@ Scope and behavior:
 
 Existing files to inspect/reuse:
 
-\[ ] `memory/people.py`
+\[x] `memory/people.py`
 
-\[ ] `memory/storage.py`
+\[x] `memory/storage.py`
 
-\[ ] `memory/short_term.py`
+\[x] `memory/short_term.py`
 
-\[ ] `core/decision.py`
+\[x] `core/decision.py`
 
-\[ ] `main.py`
+\[x] `main.py`
 
 \[x] Removed Phase 8 camera-based place recognition implementation from `vision/vision_core.py`, `main.py`, and `core/decision.py`; deleted `memory/places.py` and `vision/place_recognition.py`.
 
@@ -954,19 +954,26 @@ Tasks:
 
 \[x] Decide that places are not identified or inferred from camera imagery in this phase.
 
-\[ ] Reuse the existing confirmed-person identity and event-memory path without adding duplicate storage architecture.
+\[x] Reuse the existing confirmed-person identity and event-memory path without adding duplicate storage architecture.
 
-\[ ] Parse explicit remember-event requests and optional user-provided encounter location deterministically.
+\[x] Parse explicit remember-event requests and optional user-provided encounter location deterministically.
 
-\[ ] Read back the exact event, canonical recognized person, and supplied location; confirm or cancel before writing.
+\[x] Read back the event, canonical recognized person, and supplied location (or state that location is unknown); confirm or cancel before writing.
 
-\[ ] Persist an important event with timestamp, optional confirmed person, and optional user-provided location, using machine-local storage.
+\[x] Persist an important event with timestamp, optional confirmed person, and optional user-provided location, using machine-local storage.
 
-\[ ] Refuse person-specific saving when the current identity is unknown, ambiguous, or stale; never substitute a name heard in speech for confirmed identity.
+\[x] Refuse person-specific saving when the current identity is unknown, ambiguous, or stale; never substitute a name heard in speech for confirmed identity.
 
-\[ ] Recall bounded, relevant event records and report unknown fields honestly.
+\[x] Recall bounded, relevant event records and report unknown fields honestly.
 
 \[ ] Verify persistence, deletion/cancellation behavior, duplicate handling, and failure-safe storage on the Raspberry Pi.
+
+Implementation note (2026-11-03; Raspberry Pi acceptance remains open):
+- Restored `thashu/main.py`, `thashu/core/decision.py`, and `thashu/vision/vision_core.py` to their Phase 7 versions to remove visual place teaching/matching; deleted Phase 8-only `thashu/memory/places.py` and `thashu/vision/place_recognition.py`.
+- Extended `thashu/memory/people.py` to store an optional explicitly supplied location on event records, retain the existing machine-local timestamp/store, reject malformed nested records, and support bounded event-only/topic recall. Existing fact/event records remain readable.
+- Extended `thashu/core/decision.py` with deterministic event/location extraction from explicit “remember this event … at/in [place]” phrasing and event-recall phrases. A location is never inferred from camera imagery.
+- Extended `thashu/main.py` to bind a pending event to the single recently confirmed identity, read back the event and location (or “no location recorded”), require the existing explicit confirm/cancel, and include locations in bounded recall. Recall can target events mentioning a named person.
+- Acceptance boxes remain open until the user tests event saving, cancellation, location recall, unknown identity behavior, and reboot persistence on the Pi. No Phase 8 tests were run in this implementation pass.
 
 Acceptance:
 
