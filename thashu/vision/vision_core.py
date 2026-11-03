@@ -187,7 +187,7 @@ class VisionCore:
             }
 
     def begin_enrollment(
-        self, required_samples=5, timeout=120.0, *,
+        self, required_samples=5, timeout=180.0, *,
         initial_samples=None, target_name=None,
     ):
         """Collect quality-approved samples, optionally replacing overlaps."""
