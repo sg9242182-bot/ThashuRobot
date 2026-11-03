@@ -29,5 +29,5 @@ private:
     void handle(char* line);
     void readCommands();
     void sendTelemetry();
-    void acknowledge(long version, const char* sessionId, long sequence, const char* result);
+    void acknowledge(long sequence, const char* result);
 };
