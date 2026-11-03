@@ -5,21 +5,20 @@ import serial
 import serial.tools.list_ports
 import threading
 import time
-from uuid import uuid4
 
 
 class GPIOControl:
     """
     Singleton transport for the Raspberry Pi <-> ESP32 hardware controller.
 
-    Phase 1 contract:
-      - USB CDC serial, 115200 baud
-      - line-delimited ASCII frames
-      - Pi commands: CMD|version|session_id|sequence|...
-      - Correlated replies: ACK/ENC|version|session_id|sequence|...
-      - Unsolicited frames: TEL/EVENT/FAULT|version|sequence|...
-      - heartbeat every 100 ms
-      - ESP32 watchdog: 500 ms (enforced on ESP32)
+    Current protocol-v0 contract:
+      - USB CDC serial, 115200 baud, newline-delimited ASCII
+      - Pi commands: CMD|sequence|payload...
+      - ACK replies: ACK|sequence|result...
+      - Encoder replies: ENC|sequence|count0|count1|count2|count3
+      - Telemetry: TEL|0|SENSORS|...
+      - No session ID or command-version field is transmitted
+      - heartbeat every 100 ms; ESP32 watchdog is 500 ms
 
     This class owns transport/reconnection only. Motor, eye and servo classes
     remain high-level command owners and do not know GPIO pin assignments.
@@ -28,7 +27,6 @@ class GPIOControl:
     _instance = None
     _instance_lock = threading.Lock()
 
-    PROTOCOL_VERSION = 1
     HEARTBEAT_INTERVAL = 0.100
     RECONNECT_INTERVAL = 1.0
     DEFAULT_BAUD = 115200
@@ -52,7 +50,6 @@ class GPIOControl:
         self._write_lock = threading.Lock()
         self._state_lock = threading.Lock()
         self._sequence_lock = threading.Lock()
-        self._session_id = uuid4().hex
         self._next_sequence = 1
 
         self._incoming = queue.Queue()
@@ -193,7 +190,7 @@ class GPIOControl:
         if sequence is None:
             return None
         frame = (
-            f"CMD|{self.PROTOCOL_VERSION}|{self._session_id}|{sequence}|{command}\n"
+            f"CMD|{sequence}|{command}\n"
         ).encode("ascii")
 
         with self._write_lock:
@@ -240,27 +237,24 @@ class GPIOControl:
                 return events
 
     def _record_acknowledgement(self, line):
-        """Store only version-1 ACKs correlated to this Pi process session."""
-        fields = line.split("|", 4)
-        if len(fields) != 5 or fields[0] != "ACK":
+        """Store a valid protocol-v0 ACK correlated by its sequence number."""
+        fields = line.split("|", 2)
+        if len(fields) != 3 or fields[0] != "ACK":
             return
         try:
-            version = int(fields[1])
-            sequence = int(fields[3])
+            sequence = int(fields[1])
         except ValueError:
             return
-        session_id, result = fields[2], fields[4]
-        if (
-            version != self.PROTOCOL_VERSION
-            or session_id != self._session_id
-            or sequence < 0
-            or result == "ALIVE"
+        result = fields[2]
+        if sequence < 0 or not (
+            result in ("OK", "ALIVE") or result.startswith("ERROR|")
         ):
             return
+        if result == "ALIVE":
+            return
 
-        key = (session_id, sequence)
         with self._ack_condition:
-            self._acknowledgements[key] = result
+            self._acknowledgements[sequence] = result
             while len(self._acknowledgements) > 128:
                 self._acknowledgements.pop(next(iter(self._acknowledgements)))
             self._ack_condition.notify_all()
@@ -269,7 +263,7 @@ class GPIOControl:
 
     def wait_for_ack(self, sequence, timeout=0.75):
         """Wait for this process session's ACK; return OK or ERROR|reason."""
-        key = (self._session_id, sequence)
+        key = sequence
         deadline = time.monotonic() + timeout
         with self._ack_condition:
             while key not in self._acknowledgements:
@@ -392,12 +386,12 @@ class GPIOControl:
             self._events.put(line)
 
     def _update_sensor_snapshot(self, line):
-        """Parse one ESP32 sensor frame and publish a timestamped snapshot."""
+        """Parse protocol-v0 sensor telemetry and publish a fresh snapshot."""
         fields = line.split("|")
-        if len(fields) != 12 or fields[:4] != ["TEL", "1", "0", "SENSORS"]:
+        if len(fields) != 11 or fields[:3] != ["TEL", "0", "SENSORS"]:
             return
 
-        raw = dict(zip(fields[4::2], fields[5::2]))
+        raw = dict(zip(fields[3::2], fields[4::2]))
         labels = ("TOF_L", "TOF_C", "TOF_R", "US_REAR")
         if any(label not in raw for label in labels):
             return
