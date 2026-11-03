@@ -326,6 +326,7 @@ class GPIOControl:
                             f"no ESP32 serial data for {self.RX_SILENCE_TIMEOUT:.0f}s",
                             expected_serial=serial_conn,
                         )
+                    self._stop_event.wait(0.01)
                     continue
 
                 with self._state_lock:

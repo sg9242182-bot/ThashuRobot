@@ -39,7 +39,7 @@ Identify current implementation, approved interfaces, and unresolved decisions b
 - [x] Inventory API routes already implemented and distinguish them from planned routes.
 - [x] Inventory the current Pi–ESP32 transport, parser, command format, and telemetry format from code and hardware evidence.
 - [x] Create a contract-gap list: endpoint/schema, mode transition, command acknowledgement, timeout, heartbeat, error taxonomy, versioning, and auth.
-- [ ] Finalize the mobile-facing production API behavior with Niteshvar; his proposed contract still awaits review. Hardware/protocol behavior with Tharun is confirmed for protocol v1.
+- [ ] Finalize the mobile-facing production API behavior with Niteshvar; his proposed contract still awaits review. Hardware/protocol behavior with Tharun is confirmed for deployed protocol v0.
 - [x] Record unresolved decisions in repository documentation or a focused issue.
 - [x] Do not claim an interface is approved solely because it appears in an AI-generated draft.
 
@@ -78,23 +78,24 @@ Create a maintainable, testable backend structure and reproducible local develop
 Make hardware communication explicit and reliable before exposing movement controls.
 
 ### Checklist
-- [x] Collaborate with Tharun to approve transport, framing, message schema, and protocol version. Tharun confirmed protocol version 1 and the command/ACK session and sequence fields on 2026-11-03.
-- [x] Define command IDs/correlation, acknowledgements, response/error codes, telemetry fields, timestamps/sequence handling, and compatibility behavior as needed.
+- [x] Collaborate with Tharun to approve transport, framing, message schema, and deployed protocol revision. Tharun confirmed v0 command, ACK, telemetry, and event frames on 2026-11-03; CMD/ACK carry no version field.
+- [x] Define command correlation by sequence, acknowledgements, response/error codes, telemetry fields, and compatibility behavior. Record that v0 has no session-aware stale-ACK protection or duplicate-command detection.
 - [x] Define serial connection startup, partial reads, message boundaries, malformed frames, buffer limits, and reconnect behavior. Pi buffering, frame-size limits, and reconnect handling are implemented and documented.
 - [x] Define heartbeat/timeout responsibilities and safe behavior on missed heartbeat or lost connection.
-- [x] Validate incoming messages and reject unknown or out-of-range commands in the integrated ESP32 parser; Pi ACK/session handling rejects mismatched versions and sessions.
+- [x] Validate incoming messages and reject unknown or out-of-range commands in the integrated ESP32 parser; Pi ACK handling matches the v0 sequence number.
 - [x] Ensure one authoritative robot manager path dispatches API movement commands to the motor service.
 - [x] Separate transport parsing from robot behavior and API code.
 - [x] Add protocol documentation and language-neutral test vectors; Pi tests consume the shared vectors.
 - [x] Do not invent pin mappings or assume the current motor driver; the integrated firmware remains the hardware source of truth.
-- [ ] Run shared vectors through an ESP32 parser-specific automated test. Tharun reports there is no standalone parser test harness on the branch yet.
+- [x] Record Tharun-reported v0 parser checks: HEARTBEAT, STOP, EYES, invalid EYES argument, unknown command, partial frames, oversized-frame discard, and recovery. Unsupported-version testing does not apply to v0.
+- [ ] Compile/upload the branch-aligned ESP32 firmware and verify Pi integration with the v0 client; record the tested firmware/backend revisions and result. No standalone ESP32 parser-test harness is present in the branch.
 
 ### Exit criteria
-- [x] Both sides agree on the same versioned contract.
+- [x] Both sides agree on the same documented v0 contract; CMD/ACK frames do not include a protocol-version field.
 - [x] Valid, invalid, partial, stale, and unknown messages have defined behavior.
 - [x] Transport failures are detectable and cannot silently appear as success.
 
-**Phase 2 evidence (2026-11-03):** Pi protocol tests passed 9/9 after the receive-buffer changes. Tharun confirmed the integrated firmware uses protocol v1 and echoes session IDs and sequence numbers; this was a code review, not an automated ESP32 parser test. The ESP32 parser test harness/vector run remains open, so Phase 2 stays in progress until that validation is recorded.
+**Phase 2 evidence (2026-11-03):** The `vishal-phase1` branch uses the deployed v0 framing in the integrated ESP32 parser, Pi client, tests, and shared vectors. Pi framing tests passed 9/9 and hardware-protocol tests passed 5/5 after pulling v0. Tharun reports the listed v0 parser checks passed; this is reported evidence, not a standalone parser-test harness result. Compile/upload of the branch-aligned firmware and Pi integration verification remain open. v0 matches ACKs by sequence only and cannot distinguish a delayed ACK after a Pi restart if the sequence is reused.
 
 ## Phase 3 — Robot manager, modes, and command lifecycle
 

@@ -33,8 +33,8 @@ new endpoints or change the runtime contract.
 ## Phase 2 protocol contract (deployed protocol v0)
 
 This documents the working protocol reported by Tharun and observed from the
-integrated ESP32 output (TEL|0|SENSORS...). The Pi client and integrated
-firmware on this branch are being aligned to this format.
+integrated ESP32 output (TEL|0|SENSORS...). The Pi client, shared vectors,
+tests, and integrated firmware on this branch use this format.
 
 - Transport: USB CDC serial at 115200 baud, newline-delimited ASCII.
 - Commands: CMD|sequence|payload...\n.
@@ -77,9 +77,9 @@ firmware on this branch are being aligned to this format.
 
 ## Remaining Phase 2 decisions
 
-- The deployed v0 command/reply and telemetry frames are now the target for
-  the integrated sketch, Pi serial transport, shared protocol vectors, and
-  this document.
+- The deployed v0 command/reply and telemetry frames are implemented in the
+  integrated sketch, Pi serial transport, shared protocol vectors, and this
+  document.
 - Session-aware ACK correlation and explicit command-version negotiation are
   not provided by v0. Reintroducing either requires an agreed protocol change
   coordinated across Pi, ESP32, and backend tests.

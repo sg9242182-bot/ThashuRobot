@@ -67,7 +67,7 @@ class FakeRobotManager:
 class ApiTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.old_services = main.services
-        main.services = main.ApiServices(lambda: FakeRobotManager(FakeMotor(messages=["EVENT|1|0|READY"])))
+        main.services = main.ApiServices(lambda: FakeRobotManager(FakeMotor(messages=["EVENT|0|READY"])))
         self.token_env = patch.dict(os.environ, {"THASHU_API_TOKEN": "test-token"})
         self.token_env.start()
 
@@ -205,7 +205,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         await main.telemetry(socket)
         self.assertEqual(socket.frames, [{
             "type": "esp32_line",
-            "line": "EVENT|1|0|READY",
+            "line": "EVENT|0|READY",
         }])
 
 

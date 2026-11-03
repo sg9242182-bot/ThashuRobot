@@ -10,12 +10,13 @@ class FakeSerial:
     def __init__(self, *args, **kwargs):
         self.is_open = True
         self.writes = []
+        self.in_waiting = 0
 
     def write(self, data):
         self.writes.append(data.decode("ascii"))
         return len(data)
 
-    def readline(self):
+    def read(self, size=1):
         return b""
 
     def close(self):
@@ -61,7 +62,7 @@ class HardwareProtocolTests(unittest.TestCase):
     def test_servo_protocol(self):
         servo = ServoTracker()
         servo.center()
-        self.assertTrue(any("|SERVO|PAN_TILT|90|90\n" in line for line in self._writes()))
+        self.assertTrue(any("|SERVO|MOVE|90|90|220\n" in line for line in self._writes()))
 
     def test_sequence_numbers_increase(self):
         self.transport.send("STOP")
