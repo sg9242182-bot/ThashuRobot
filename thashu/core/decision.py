@@ -423,29 +423,29 @@ def get_event_memory_request(user_input: str):
         return None
 
     event_text = request[1]
-    separators = list(re.finditer(r"\\s+(?:at|in)\\s+", event_text, flags=re.IGNORECASE))
+    separators = list(re.finditer(r"\s+(?:at|in)\s+", event_text, flags=re.IGNORECASE))
     # Treat only a simple trailing at/in phrase as a location. This avoids
     # guessing from arbitrary visual or conversational content.
     for match in reversed(separators):
-        candidate = event_text[match.end():].strip(" .!?,'\\"")
-        description = event_text[:match.start()].strip(" .!?,'\\"")
+        candidate = event_text[match.end():].strip(" .!?,'")
+        description = event_text[:match.start()].strip(" .!?,'")
         if not description or not candidate or len(candidate) > 80:
             continue
         words = candidate.split()
         if len(words) > 8 or not any(char.isalpha() for char in candidate):
             continue
-        if re.fullmatch(r"(?:\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?|noon|midnight)", candidate, re.IGNORECASE):
+        if re.fullmatch(r"(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midnight)", candidate, re.IGNORECASE):
             continue
-        if re.search(r"\\b(?:today|yesterday|tomorrow|tonight|this morning|this afternoon|last night)\\b$", candidate, re.IGNORECASE):
+        if re.search(r"\b(?:today|yesterday|tomorrow|tonight|this morning|this afternoon|last night)\b$", candidate, re.IGNORECASE):
             continue
-        if re.search(r"\\b(?:with|because|then|while|although|but|and)\\b", candidate, re.IGNORECASE):
+        if re.search(r"\b(?:with|because|then|while|although|but|and)\b", candidate, re.IGNORECASE):
             continue
         return description, candidate
     return event_text, None
 
 
 def get_person_event_query(user_input: str):
-    """Return a location/event recall target, empty for all events, or None."""
+    """Return an event recall target, empty for all events, or None."""
     normalized = re.sub(r"[^a-z0-9]+", " ", (user_input or "").lower()).strip()
     event_queries = {
         "what events do you remember about me",
@@ -455,7 +455,10 @@ def get_person_event_query(user_input: str):
     }
     if normalized in event_queries:
         return ""
-    match = re.fullmatch(r"(?:where did i meet|where have i met) ([a-z][a-z0-9' -]{0,62})", normalized)
+    match = re.fullmatch(
+        r"(?:where did i meet|where have i met) ([a-z][a-z0-9' -]{0,62})",
+        normalized,
+    )
     if not match:
         return None
     target = " ".join(match.group(1).split()).strip()
