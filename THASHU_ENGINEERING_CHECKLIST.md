@@ -140,27 +140,13 @@ Associate the face representation with the confirmed identity.
 
 Store important interaction memories, not a permanent transcript of every sentence.
 
-Permanent Place Memory
+Event Location Context
 
-Thashu must not invent semantic place names.
+Thashu must not infer a place from camera images or invent a location.
 
-A place becomes semantically known when the user explicitly labels it, for example:
+A location may be stored only as context explicitly supplied by the user for a specific important event, for example: “I met Tharun at school.” Store that wording as event metadata; it does not create a recognized place identity or a persistent map.
 
-"This is our house."
-
-"This is my school."
-
-"This is a road."
-
-Store:
-
-User-provided place label
-
-Visual/environmental reference information
-
-Important observations/events associated with the place
-
-Later recognition must use the stored reference information and confidence thresholds. If confidence is insufficient, report the place as unknown rather than inventing an identity.
+If no location was provided, leave the event location unknown. Never guess from visual appearance, nearby objects, or GPS/network data unless a separate future phase explicitly approves and validates such a source.
 
 Memory Layers
 
@@ -951,74 +937,68 @@ Audit and implementation record (2026-11-01):
 
 \---
 
-Phase 8 — Place / Environment Memory
+Phase 8 — Episodic Event & Encounter Memory
 
-Status: IN PROGRESS — best-effort camera-only place recognition is the agreed goal. This phase identifies familiar scenes from learned views; it does not promise mapping, exact position, or SLAM.
+Status: IN PROGRESS — remember significant events and, when explicitly supplied, where a recognized person was met. Camera-based place recognition is out of scope and has been removed. This phase does not implement SLAM, visual localization, maps, or generalized place identity.
 
 Scope and behavior:
-- A place label is created only through an explicit teach flow and user confirmation. The system never invents or silently saves a place name.
-- One place is represented by multiple distinct camera views/keyframes, not one whole-scene photograph. Capture should cover different headings and nearby viewpoints; repeated near-identical frames do not count as useful coverage.
-- Recognition combines visual evidence from several stored views and requires stable evidence over successive observations. A lone object or one uncertain frame cannot establish a place.
-- If views are poor, evidence is weak, or two labels are close, report UNKNOWN. Best-effort false rejects are acceptable; confident wrong place labels are not.
-- Persist place descriptors and labels in machine-local storage outside the Git checkout. Save only the compact visual features needed for recognition unless testing proves reference images are necessary.
-- Place recognition is observational only. It cannot authorize motor movement, route planning, or safety decisions.
-- Prefer existing OpenCV camera and image-processing support; benchmark the chosen lightweight visual feature method on the Raspberry Pi before adding models or dependencies.
+- Store only an event the user explicitly asks Thashu to remember; ordinary conversation remains temporary.
+- An encounter may be attached to the single, stable, confirmed person identity recognized during that interaction. Use the saved canonical name, not a possibly misheard name in the utterance. If identity is absent, ambiguous, or unstable, do not attach or save a person-specific event.
+- “Where” is optional and must come from the user’s spoken event/context, such as “I met Tharun at school.” Store it only on that event. Do not infer a location from camera content, room appearance, objects, or an unvalidated sensor.
+- Read back the event, recognized person, and supplied location before saving; require explicit confirmation and support cancellation. Missing location stays unknown; do not block a valid event solely because no location was stated.
+- Store timestamped event records in the existing machine-local memory architecture. Do not save raw conversation transcripts or images.
+- Recall should return a small, relevant set of saved events for a requested person or event topic, including the supplied location when present. Do not invent missing details.
+- Phase 8 covers an individual confirmed event/encounter record. Generalized person/place/event linking across records and broad cross-context retrieval remain Phase 9 work.
 
-Existing files to inspect first:
+Existing files to inspect/reuse:
 
-\[x] `vision/camera.py`
+\[ ] `memory/people.py`
 
-\[x] `vision/vision\_core.py`
+\[ ] `memory/storage.py`
 
-\[x] Existing storage/memory paths: `memory/storage.py`, `memory/people.py`, and `core/model_paths.py`
+\[ ] `memory/short_term.py`
 
-\[x] Existing image/vision utilities inspected; no place-specific recognizer exists.
+\[ ] `core/decision.py`
+
+\[ ] `main.py`
+
+\[x] Removed Phase 8 camera-based place recognition implementation from `vision/vision_core.py`, `main.py`, and `core/decision.py`; deleted `memory/places.py` and `vision/place_recognition.py`.
 
 Tasks:
 
-\[x] Define and implement explicit user labeling, read-back, confirm, cancel, and relabel flows.
+\[x] Decide that places are not identified or inferred from camera imagery in this phase.
 
-\[x] Capture multiple quality-filtered, distinct reference views for each labeled place.
+\[ ] Reuse the existing confirmed-person identity and event-memory path without adding duplicate storage architecture.
 
-\[x] Store place labels and visual descriptors safely in persistent machine-local storage.
+\[ ] Parse explicit remember-event requests and optional user-provided encounter location deterministically.
 
-\[x] Recognize known places by matching several visual references and requiring temporal stability.
+\[ ] Read back the exact event, canonical recognized person, and supplied location; confirm or cancel before writing.
 
-\[ ] Calibrate score and ambiguity handling with labeled known-place and unknown-place Pi trials.
+\[ ] Persist an important event with timestamp, optional confirmed person, and optional user-provided location, using machine-local storage.
 
-\[x] Support user labels such as home, school, and road without hard-coding identities.
+\[ ] Refuse person-specific saving when the current identity is unknown, ambiguous, or stale; never substitute a name heard in speech for confirmed identity.
 
-\[ ] Associate an event with a place only when the place label is stable and unambiguous.
+\[ ] Recall bounded, relevant event records and report unknown fields honestly.
 
-\[x] Return UNKNOWN for weak evidence, close competing labels, stale frames, or insufficient visual features.
-
-\[ ] Support explicit replacement/deletion without corrupting other place records.
-
-
-Implementation note (2026-11-02; Pi calibration and acceptance still pending):
-- Added `thashu/memory/places.py`, a separate machine-local place store at `~/.local/share/thashu/data/places.json`; it uses atomic writes, restrictive file permissions, and refuses to overwrite an unreadable store. Place records keep labels and compact descriptors, not camera photographs.
-- Added `thashu/vision/place_recognition.py` using the repository's existing OpenCV ORB support. The spoken flow accepts “remember this place as [label]”, reads the label back, then requires “confirm place” or “cancel place”. Confirming starts a five-view capture; the user slowly turns the robot to show distinct headings. Weak-feature and near-duplicate frames are skipped, and capture expires after three minutes. A confirmed relabel preserves stored references.
-- Connected `thashu/vision/vision_core.py` to capture and publish place-only visual results. Matching uses multiple saved views, provisional score/margin gates, and 3-of-5 temporal agreement; weak or tied evidence remains unknown. This output is observational and has no motor/safety connection.
-- Updated `thashu/core/decision.py` and `thashu/main.py` for deterministic spoken teaching, read-back confirmation/cancel, progress/complete reports, capture cancellation, and recognition logs.
-- Recognition score thresholds are provisional, not accuracy claims. Raspberry Pi known-place held-out views, visually similar/unknown locations, reboot persistence, CPU/memory, and false-label behavior remain unverified. No Phase 8 acceptance criterion is marked passed.
+\[ ] Verify persistence, deletion/cancellation behavior, duplicate handling, and failure-safe storage on the Raspberry Pi.
 
 Acceptance:
 
-\[ ] User can teach a place with a spoken label, see/hear the exact label read back, confirm it, or cancel it.
+\[ ] An explicitly requested event can be read back, confirmed, cancelled, and saved.
 
-\[ ] Multiple views from different headings/viewpoints are retained and survive a process restart.
+\[ ] When one confirmed person is recognized, the event uses that person’s canonical saved identity.
 
-\[ ] Thashu recognizes a taught place from held-out views, not just the exact teaching frames.
+\[ ] A user-stated encounter location is attached to the event; unstated locations remain unknown.
 
-\[ ] Unknown and lookalike places do not receive confident incorrect labels in Pi trials.
+\[ ] Camera images never cause Thashu to claim a place identity or event location.
 
-\[ ] Low-confidence and ambiguous scenes are reported as UNKNOWN.
+\[ ] Recalled events are bounded, relevant, and do not fabricate person, place, or time details.
 
-\[ ] Events are associated only with a stable, confirmed place label.
+\[ ] Saved event data survives restart and stays outside Git-managed code/model files.
 
-\[ ] Place data persists across restart and remains outside Git-managed model/code files.
+\[ ] Unknown/ambiguous identity, cancellation, malformed data, and storage errors cannot create a false person-event association.
 
-\[ ] Recognition runtime and memory use are measured on the Raspberry Pi 4.\---
+\---
 
 Phase 9 — Unified Person + Place + Episodic Memory
 
@@ -1186,17 +1166,11 @@ Person
 
 \[ ] Important interaction memory.
 
-Places
-
-\[ ] Teach house.
-
-\[ ] Teach school.
-
-\[ ] Teach road.
-
-\[ ] Reference-based recognition.
-
-\[ ] Unknown-place behavior.
+Event memory
+\[ ] Save a confirmed event for a recognized person.
+\[ ] Save an explicitly spoken encounter location.
+\[ ] Recall the event with its location.
+\[ ] Unknown location remains unknown; camera does not label the place.
 
 Reliability
 
@@ -1222,7 +1196,7 @@ Use this section to track actual repository files as they are inspected.
 
 File	Status	Phase	Notes
 
-`main.py`	MODIFY	2/8	Existing runtime entry point; confirmed place teaching flow
+`main.py`	MODIFY	2/8	Existing runtime entry point; Phase 8 event capture/recall integration
 
 `core/state.py`	REVIEW	2	Existing state module
 
@@ -1230,7 +1204,7 @@ File	Status	Phase	Notes
 
 `core/brain.py`	REVIEW	2/3	AI/command path
 
-`core/decision.py`	MODIFY	3/8	Deterministic actuator and place voice commands
+`core/decision.py`	MODIFY	3/8	Deterministic actuator and Phase 8 event commands
 
 `hardware/gpio\_control.py`	REVIEW	1	Existing hardware interface
 
@@ -1240,8 +1214,7 @@ File	Status	Phase	Notes
 
 `hardware/servo\_tracking.py`	REVIEW	1/4/5	Servo/follow control
 
-`vision/vision\_core.py`	MODIFY	4/5/8	Perception lifecycle, follow input, place capture/output
-`vision/place\_recognition.py`	MODIFY	8	OpenCV ORB view capture and place matching
+`vision/vision\_core.py`	REUSE	4/5	Perception lifecycle and follow input; no place recognition
 `vision/follow\_logic.py`	REVIEW	5	Existing target selection/debounce logic
 
 `vision/face\_database.py`	REVIEW	6	Face storage
@@ -1251,7 +1224,6 @@ File	Status	Phase	Notes
 `vision/auto\_capture.py`	REVIEW	6	Existing registration path
 
 `memory/people.py`	REVIEW	6/7	Person memory
-`memory/places.py`	MODIFY	8	Machine-local place labels and compact visual references
 
 `memory/short\_term.py`	REVIEW	7	Short-term memory
 
