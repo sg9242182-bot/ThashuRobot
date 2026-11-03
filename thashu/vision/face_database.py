@@ -167,6 +167,38 @@ class FaceDatabase:
             raise
         return True
 
+    def best_other_match(self, embedding, exclude_name=None):
+        """Return the strongest stored identity match other than the candidate label."""
+        query = self._normalize(embedding)
+        excluded = str(exclude_name or "").strip().casefold()
+        best_name, best_score = None, -1.0
+        for name, embeddings in self.data.items():
+            if name.casefold() == excluded:
+                continue
+            scores = [
+                float(np.dot(query, self._normalize(stored)))
+                for stored in embeddings
+            ]
+            if scores and max(scores) > best_score:
+                best_name, best_score = name, max(scores)
+        return best_name, best_score
+
+    def filter_enrollment_samples(self, name, embeddings):
+        """Reject new samples matching another saved identity at the score cutoff."""
+        if self.load_error is not None:
+            raise OSError("Face database could not be loaded; refusing enrollment")
+        name = self._clean_name(name)
+        accepted = []
+        rejected = []
+        for index, embedding in enumerate(embeddings):
+            vector = self._normalize(embedding)
+            other_name, score = self.best_other_match(vector, exclude_name=name)
+            if other_name is not None and score >= self.threshold:
+                rejected.append((index, other_name, score))
+            else:
+                accepted.append(vector)
+        return accepted, rejected
+
     def add_person_samples(self, name, embeddings, *, confirmed=False):
         """Persist a batch collected from one stable face after spoken confirmation."""
         if confirmed is not True:
@@ -183,30 +215,17 @@ class FaceDatabase:
         if pair_scores.size and float(np.median(pair_scores)) < 0.45:
             raise ValueError("Enrollment observations are inconsistent; no identity was saved")
 
-        # A high overlap can be a real lookalike (the Pi has confused two
-        # family members). Keep explicitly confirmed identities separate and let
-        # match() return Unknown whenever their live scores lack the required
-        # margin, instead of blocking the new person's enrollment.
-        overlaps = []
-        for existing_name, stored_embeddings in self.data.items():
-            if existing_name == name:
-                continue
-            score = max(
-                float(np.dot(vector, self._normalize(stored)))
-                for vector in vectors
-                for stored in stored_embeddings
-            )
-            if score >= self.threshold:
-                overlaps.append((existing_name, score))
-        if overlaps:
+        accepted, rejected = self.filter_enrollment_samples(name, vectors)
+        if rejected:
             summary = ", ".join(
-                f"{existing_name}={score:.3f}"
-                for existing_name, score in overlaps
+                f"sample {index + 1} overlaps {other_name}={score:.3f}"
+                for index, other_name, score in rejected
             )
-            print(
-                f"[DB] Confirmed enrollment for {name} overlaps existing identity "
-                f"embeddings ({summary}); retaining both; uncertain matches will be Unknown"
+            raise ValueError(
+                "Enrollment still contains overlapping samples; capture replacements: "
+                + summary
             )
+        vectors = accepted
 
         previous = self.data.get(name)
         combined = [np.asarray(item, dtype=np.float32) for item in (previous or [])]
