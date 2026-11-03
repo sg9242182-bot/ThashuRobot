@@ -40,7 +40,7 @@ class PeopleMemory:
         }
         save_data(self.data)
 
-    def remember(self, name: str, kind: str, text: str, *, confirmed_identity=False):
+    def remember(self, name: str, kind: str, text: str, *, confirmed_identity=False, location=None):
         """Persist an explicit fact/event for one confirmed person."""
         if confirmed_identity is not True or not self._confirmed_name(name):
             raise PermissionError("Memory writes require a confirmed face identity")
@@ -54,18 +54,46 @@ class PeopleMemory:
                 f"Memory text must contain 1 to {self.MAX_TEXT_LENGTH} characters"
             )
 
+        if location is not None:
+            if kind != "event" or not isinstance(location, str):
+                raise ValueError("A location is allowed only as event text context")
+            location = " ".join(location.strip().split())
+            if not location or len(location) > 80:
+                raise ValueError("Event location must contain 1 to 80 characters")
+        if kind != "event" and location is not None:
+            raise ValueError("Facts cannot carry an event location")
+
         people = self.data.setdefault(self.MEMORY_KEY, {})
+        person_existed = name in people
         person = people.setdefault(name, {"facts": [], "events": []})
-        records = person.setdefault("facts" if kind == "fact" else "events", [])
-        if any(record.get("text", "").casefold() == text.casefold() for record in records):
+        key = "facts" if kind == "fact" else "events"
+        records = person.setdefault(key, [])
+        def same_record(record):
+            if not isinstance(record, dict) or record.get("text", "").casefold() != text.casefold():
+                return False
+            if kind == "event":
+                existing_location = record.get("location")
+                return (existing_location or "").casefold() == (location or "").casefold()
+            return True
+        if any(same_record(record) for record in records):
             return False
 
-        records.append({
+        original_records = list(records)
+        record = {
             "text": text,
             "saved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        })
+        }
+        if kind == "event" and location is not None:
+            record["location"] = location
+        records.append(record)
         del records[:-self.MAX_MEMORIES_PER_KIND]
-        save_data(self.data)
+        try:
+            save_data(self.data)
+        except Exception:
+            person[key] = original_records
+            if not person_existed and not person.get("facts") and not person.get("events"):
+                people.pop(name, None)
+            raise
         return True
 
     def recall(self, name: str, limit=DEFAULT_RECALL_LIMIT):
@@ -78,11 +106,15 @@ class PeopleMemory:
         for kind, key in (("fact", "facts"), ("event", "events")):
             for record in person.get(key, []):
                 if isinstance(record, dict) and isinstance(record.get("text"), str):
-                    records.append({
+                    recalled = {
                         "kind": kind,
                         "text": record["text"],
                         "saved_at": record.get("saved_at"),
-                    })
+                    }
+                    location = record.get("location")
+                    if kind == "event" and isinstance(location, str) and location.strip():
+                        recalled["location"] = location.strip()
+                    records.append(recalled)
         records.sort(key=lambda record: record.get("saved_at") or "", reverse=True)
         return records[:limit]
 
