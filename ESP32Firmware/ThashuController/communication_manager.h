@@ -16,7 +16,6 @@ public:
 
 private:
     static constexpr size_t COMMAND_BUFFER_SIZE = 128;
-    static constexpr long PROTOCOL_VERSION = 1;
     MotorManager* motors = nullptr;
     SafetyManager* safety = nullptr;
     EyeManager* eyes = nullptr;
