@@ -186,7 +186,7 @@ class VisionCore:
                 "frame_size": self.frame_size,
             }
 
-    def begin_enrollment(self, required_samples=5, timeout=45.0):
+    def begin_enrollment(self, required_samples=5, timeout=120.0):
         """Collect a short-lived batch from one stable, unambiguous face."""
         with self._lock:
             self._enrollment = {
