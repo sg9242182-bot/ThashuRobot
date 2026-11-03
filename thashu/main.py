@@ -1293,16 +1293,15 @@ def main():
                         )
                     else:
                         event_query = get_person_event_query(text)
-                        records = person_memory.recall(confirmed_person, limit=5)
                         if event_query is not None:
-                            records = [
-                                record for record in records
-                                if record["kind"] == "event"
-                                and (
-                                    not event_query
-                                    or event_query in record["text"].casefold()
-                                )
-                            ]
+                            records = person_memory.recall(
+                                confirmed_person,
+                                limit=5,
+                                kind="event",
+                                contains=event_query or None,
+                            )
+                        else:
+                            records = person_memory.recall(confirmed_person, limit=5)
                         if not records:
                             if event_query is not None:
                                 response = (
