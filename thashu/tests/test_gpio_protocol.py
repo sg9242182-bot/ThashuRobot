@@ -16,7 +16,6 @@ from hardware.gpio_control import GPIOControl
 
 REPO_ROOT = THASHU_ROOT.parent
 FIXTURE_PATH = REPO_ROOT / "testdata" / "pi_esp32_protocol_vectors.csv"
-TEST_SESSION = "0123456789abcdef0123456789abcdef"
 
 
 class FakeSerial:
@@ -38,7 +37,7 @@ class FakeSerial:
         self.is_open = False
 
 
-def make_transport(starting_sequence, session_id=TEST_SESSION):
+def make_transport(starting_sequence):
     # Bypass the production singleton and hardware-opening constructor.
     transport = object.__new__(GPIOControl)
     transport._serial = FakeSerial()
@@ -50,13 +49,12 @@ def make_transport(starting_sequence, session_id=TEST_SESSION):
     transport._incoming = queue.Queue()
     transport._events = queue.Queue()
     transport._sensor_snapshot = None
-    transport._session_id = session_id
     transport._next_sequence = starting_sequence
     return transport
 
 
 class PiEsp32ProtocolVectorTests(unittest.TestCase):
-    def test_pi_frames_match_shared_protocol_vectors(self):
+    def test_pi_frames_match_shared_protocol_v0_vectors(self):
         with FIXTURE_PATH.open(newline="", encoding="utf-8") as fixture_file:
             vectors = list(csv.DictReader(fixture_file))
 
@@ -64,7 +62,7 @@ class PiEsp32ProtocolVectorTests(unittest.TestCase):
         for vector in vectors:
             with self.subTest(case=vector["case"]):
                 sequence = int(vector["sequence"])
-                transport = make_transport(sequence, vector["session_id"])
+                transport = make_transport(sequence)
 
                 result = transport.send(vector["payload"])
 
@@ -74,44 +72,35 @@ class PiEsp32ProtocolVectorTests(unittest.TestCase):
                     [(vector["expected_frame"] + "\n").encode("ascii")],
                 )
 
-    def test_sequence_exhaustion_never_reuses_identity(self):
+    def test_sequence_exhaustion_never_wraps_or_reuses_sequence(self):
         transport = make_transport(0x7FFFFFFF)
 
         self.assertEqual(transport.send("STOP"), 0x7FFFFFFF)
         self.assertIsNone(transport.send("HEARTBEAT"))
         self.assertEqual(
             transport._serial.frames,
-            [f"CMD|1|{TEST_SESSION}|2147483647|STOP\n".encode("ascii")],
+            [b"CMD|2147483647|STOP\n"],
         )
 
-    def test_ack_from_previous_session_cannot_match_current_sequence(self):
+    def test_acknowledgement_uses_sequence_only(self):
         transport = make_transport(1)
-
-        transport._record_acknowledgement(
-            "ACK|1|ffffffffffffffffffffffffffffffff|1|OK"
-        )
-        self.assertIsNone(transport.wait_for_ack(1, timeout=0.001))
-
-        transport._record_acknowledgement(
-            f"ACK|1|{TEST_SESSION}|1|ERROR|OBSTACLE"
-        )
+        transport._record_acknowledgement("ACK|1|ERROR|OBSTACLE")
         self.assertEqual(
             transport.wait_for_ack(1, timeout=0.001),
             "ERROR|OBSTACLE",
         )
 
-    def test_ignores_ack_with_unsupported_version(self):
+    def test_ignores_versioned_ack_frame(self):
         transport = make_transport(1)
-
         transport._record_acknowledgement(
-            f"ACK|2|{TEST_SESSION}|1|OK"
+            "ACK|1|0123456789abcdef0123456789abcdef|1|OK"
         )
         self.assertIsNone(transport.wait_for_ack(1, timeout=0.001))
 
-    def test_versioned_telemetry_is_parsed(self):
+    def test_v0_telemetry_is_parsed(self):
         transport = make_transport(1)
         transport._update_sensor_snapshot(
-            "TEL|1|0|SENSORS|TOF_L|420|TOF_C|385|TOF_R|FAR|US_REAR|NA"
+            "TEL|0|SENSORS|TOF_L|420|TOF_C|385|TOF_R|FAR|US_REAR|NA"
         )
 
         snapshot = transport._sensor_snapshot
@@ -131,13 +120,13 @@ class PiEsp32ProtocolVectorTests(unittest.TestCase):
     def test_inbound_frame_is_not_published_until_newline_arrives(self):
         transport = make_transport(1)
         rx_buffer = bytearray()
-        frame = f"ACK|1|{TEST_SESSION}|1|OK".encode("ascii")
+        frame = b"ACK|1|OK"
 
-        discarding = transport._consume_serial_bytes(frame[:12], rx_buffer)
+        discarding = transport._consume_serial_bytes(frame[:6], rx_buffer)
         self.assertFalse(discarding)
         self.assertEqual(transport._incoming.qsize(), 0)
 
-        discarding = transport._consume_serial_bytes(frame[12:] + b"\n", rx_buffer, discarding)
+        discarding = transport._consume_serial_bytes(frame[6:] + b"\n", rx_buffer, discarding)
         self.assertFalse(discarding)
         self.assertEqual(transport._incoming.get_nowait(), frame.decode("ascii"))
         self.assertEqual(transport.wait_for_ack(1, timeout=0.001), "OK")
@@ -146,14 +135,14 @@ class PiEsp32ProtocolVectorTests(unittest.TestCase):
         transport = make_transport(1)
         rx_buffer = bytearray()
         oversized = b"X" * (transport.MAX_FRAME_BYTES + 1) + b"ignored\n"
-        valid = f"ACK|1|{TEST_SESSION}|1|OK\n".encode("ascii")
+        valid = b"ACK|1|OK\n"
 
         discarding = transport._consume_serial_bytes(oversized, rx_buffer)
         self.assertFalse(discarding)
         self.assertEqual(transport._incoming.qsize(), 0)
 
         transport._consume_serial_bytes(valid, rx_buffer, discarding)
-        self.assertEqual(transport._incoming.get_nowait(), valid.decode("ascii").strip())
+        self.assertEqual(transport._incoming.get_nowait(), "ACK|1|OK")
         self.assertEqual(transport.wait_for_ack(1, timeout=0.001), "OK")
 
     def test_reconnect_opens_a_new_serial_connection(self):
