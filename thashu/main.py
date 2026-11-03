@@ -54,6 +54,8 @@ FOLLOW_PULSE_INTERVAL_SECONDS = 0.75
 FOLLOW_SENSOR_MAX_AGE_SECONDS = 0.75
 FOLLOW_OBSTACLE_CLEARANCE_MM = 300
 PENDING_MEMORY_CONFIRM_SECONDS = 120.0
+FACE_ENROLLMENT_SAMPLE_COUNT = 15
+FACE_ENROLLMENT_TIMEOUT_SECONDS = 120.0
 
 # ── Shutdown Button ───────────────────────────────────────────────────────────
 BUTTON_PIN = 17
@@ -766,6 +768,19 @@ def process_safety_events():
         # EVENT and FAULT lines are logged immediately by GPIOControl's reader thread.
 
 
+def _screen_enrollment_samples(vision, name, samples):
+    """Keep samples that do not match another saved identity; capture replacements."""
+    accepted, rejected = vision.database.filter_enrollment_samples(name, samples)
+    if rejected:
+        vision.begin_enrollment(
+            required_samples=FACE_ENROLLMENT_SAMPLE_COUNT,
+            timeout=FACE_ENROLLMENT_TIMEOUT_SECONDS,
+            initial_samples=accepted,
+            target_name=name,
+        )
+    return accepted, rejected
+
+
 # ── Main loop ──────────────────────────────────────────────────────────────────
 def main():
     global _identity_enrollment_state, _identity_pending_name
@@ -814,16 +829,29 @@ def main():
         if runtime.current == RuntimeState.IDLE and _identity_enrollment_state == "capturing":
             capture = vision.enrollment_status()
             if capture.get("status") == "ready":
-                _identity_enrollment_state = "spelling"
-                print(
-                    "[VISION] Required face images captured "
-                    f"({capture.get('sample_count', 0)}/{capture.get('required_samples', 15)}); "
-                    "waiting for letter-by-letter name spelling"
-                )
-                _announce_enrollment_status(
-                    "Face capture is complete. Please spell your name one letter at a time. "
-                    "Say only the letters, like T H A R U N."
-                )
+                if _identity_pending_name:
+                    _identity_enrollment_state = "confirm"
+                    print(
+                        "[VISION] Replacement capture complete "
+                        f"({capture.get('sample_count', 0)}/{capture.get('required_samples', FACE_ENROLLMENT_SAMPLE_COUNT)}) "
+                        f"for {_identity_pending_name}"
+                    )
+                    _announce_enrollment_status(
+                        f"I have fifteen face views for {_identity_pending_name}, after replacing "
+                        "views that overlapped another saved identity. Say confirm to save, "
+                        "or cancel registration."
+                    )
+                else:
+                    _identity_enrollment_state = "spelling"
+                    print(
+                        "[VISION] Required face images captured "
+                        f"({capture.get('sample_count', 0)}/{capture.get('required_samples', FACE_ENROLLMENT_SAMPLE_COUNT)}); "
+                        "waiting for letter-by-letter name spelling"
+                    )
+                    _announce_enrollment_status(
+                        "Face capture is complete. Please spell your name one letter at a time. "
+                        "Say only the letters, like T H A R U N."
+                    )
                 continue
             if capture.get("status") in ("ambiguous", "timed_out"):
                 _identity_enrollment_state = "idle"
@@ -832,7 +860,12 @@ def main():
                     "I saw more than one face, so I cancelled face registration. "
                     "Please try again with only one face in view."
                     if capture.get("status") == "ambiguous"
-                    else "I could not capture enough clear face pictures in time. Please try again."
+                    else (
+                        "I could not capture enough non-overlapping face views in time. "
+                        "Please try again with a different angle or lighting."
+                        if capture.get("overlap_rejections", 0)
+                        else "I could not capture enough clear face pictures in time. Please try again."
+                    )
                 )
                 print(f"[VISION] Enrollment ended: {capture.get('status')}")
                 _announce_enrollment_status(message)
@@ -1020,7 +1053,7 @@ def main():
                     if not getattr(vision.detector, "recognition_ready", False):
                         response = "Face registration is unavailable because the landmark model is not installed."
                     else:
-                        vision.begin_enrollment(required_samples=15, timeout=120.0)
+                        vision.begin_enrollment(required_samples=FACE_ENROLLMENT_SAMPLE_COUNT, timeout=FACE_ENROLLMENT_TIMEOUT_SECONDS)
                         _identity_enrollment_state = "capturing"
                         # A name in this utterance is only a draft; enrollment
                         # still requires captured face samples, spelling, and save.
@@ -1059,13 +1092,41 @@ def main():
                         _identity_enrollment_state = "spelling"
                         spelled_name = get_enrollment_spelling(text)
                         if spelled_name:
-                            _identity_pending_name = spelled_name
-                            _identity_enrollment_state = "confirm"
-                            spelled_letters = " ".join(spelled_name.upper())
-                            response = (
-                                f"I heard {spelled_letters}, which is {spelled_name}. "
-                                "Say confirm to save, try again to spell it again, or cancel registration."
-                            )
+                            try:
+                                accepted, rejected = _screen_enrollment_samples(
+                                    vision, spelled_name, samples
+                                )
+                                _identity_pending_name = spelled_name
+                                spelled_letters = " ".join(spelled_name.upper())
+                                if rejected:
+                                    _identity_enrollment_state = "capturing"
+                                    needed = FACE_ENROLLMENT_SAMPLE_COUNT - len(accepted)
+                                    competitors = sorted({
+                                        other_name for _, other_name, _ in rejected
+                                    })
+                                    print(
+                                        f"[VISION] Replacing {len(rejected)} overlapping views "
+                                        f"for {spelled_name}; retained {len(accepted)}/"
+                                        f"{FACE_ENROLLMENT_SAMPLE_COUNT}; overlaps={competitors}"
+                                    )
+                                    response = (
+                                        f"I heard {spelled_letters}, which is {spelled_name}. "
+                                        f"{len(rejected)} views overlapped with another saved identity. "
+                                        f"I kept {len(accepted)} and will capture {needed} replacements. "
+                                        "Keep one face in view and slowly change your angle."
+                                    )
+                                else:
+                                    _identity_enrollment_state = "confirm"
+                                    response = (
+                                        f"I heard {spelled_letters}, which is {spelled_name}. "
+                                        "Say confirm to save, try again to spell it again, or cancel registration."
+                                    )
+                            except (ValueError, OSError, PermissionError) as exc:
+                                print(f"[VISION] Enrollment screening failed: {exc}")
+                                vision.clear_enrollment()
+                                _identity_enrollment_state = "idle"
+                                _identity_pending_name = None
+                                response = "I could not safely check those face views. Please try registration again."
                         else:
                             response = (
                                 "Face capture is complete. Please spell your name one letter at a time. "
@@ -1085,13 +1146,44 @@ def main():
                 elif _identity_enrollment_state == "spelling":
                     spelled_name = get_enrollment_spelling(text)
                     if spelled_name:
-                        _identity_pending_name = spelled_name
-                        _identity_enrollment_state = "confirm"
-                        spelled_letters = " ".join(spelled_name.upper())
-                        response = (
-                            f"I heard {spelled_letters}, which is {spelled_name}. "
-                            f"Say confirm to save, try again to spell it again, or cancel registration."
-                        )
+                        samples = vision.enrollment_samples()
+                        try:
+                            if not samples:
+                                raise ValueError("Enrollment samples expired")
+                            accepted, rejected = _screen_enrollment_samples(
+                                vision, spelled_name, samples
+                            )
+                            _identity_pending_name = spelled_name
+                            spelled_letters = " ".join(spelled_name.upper())
+                            if rejected:
+                                _identity_enrollment_state = "capturing"
+                                needed = FACE_ENROLLMENT_SAMPLE_COUNT - len(accepted)
+                                competitors = sorted({
+                                    other_name for _, other_name, _ in rejected
+                                })
+                                print(
+                                    f"[VISION] Replacing {len(rejected)} overlapping views "
+                                    f"for {spelled_name}; retained {len(accepted)}/"
+                                    f"{FACE_ENROLLMENT_SAMPLE_COUNT}; overlaps={competitors}"
+                                )
+                                response = (
+                                    f"I heard {spelled_letters}, which is {spelled_name}. "
+                                    f"{len(rejected)} views overlapped with another saved identity. "
+                                    f"I kept {len(accepted)} and will capture {needed} replacements. "
+                                    "Keep one face in view and slowly change your angle."
+                                )
+                            else:
+                                _identity_enrollment_state = "confirm"
+                                response = (
+                                    f"I heard {spelled_letters}, which is {spelled_name}. "
+                                    "Say confirm to save, try again to spell it again, or cancel registration."
+                                )
+                        except (ValueError, OSError, PermissionError) as exc:
+                            print(f"[VISION] Enrollment screening failed: {exc}")
+                            vision.clear_enrollment()
+                            _identity_enrollment_state = "idle"
+                            _identity_pending_name = None
+                            response = "I could not safely check those face views. Please try registration again."
                     else:
                         response = (
                             "I didn't catch the spelling. Please say each letter separately, "
