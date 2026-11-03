@@ -17,6 +17,8 @@ class FaceDatabase:
     # labeled same-person and different-person samples before Phase 6 completes.
     # Fail closed after a Pi-reported false positive (father matched as owner).
     # Recalibrate with labeled owner/non-owner samples before lowering this.
+    # Runtime boundary: top cosine score >= 0.78 and >= 0.08 ahead of runner-up.
+    # These similarities are not calibrated probabilities; all other cases are Unknown.
     DEFAULT_THRESHOLD = 0.78
     DEFAULT_MARGIN = 0.08
 
