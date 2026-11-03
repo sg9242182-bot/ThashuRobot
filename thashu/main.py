@@ -22,7 +22,7 @@ from vision.vision_core   import VisionCore
 from vision.follow_logic   import FollowLogic
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
-from core.robot_manager   import ControlMode, RobotCommandManager
+from core.robot_manager   import ControlMode, RobotCommandManager, stop_and_wait_for_ack
 from hardware.servo_tracking import ServoTracker
 from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, is_recognition_query
 from core.model_paths import model_path, project_path
@@ -88,7 +88,7 @@ def _prepare_manual_command():
         _motion_timer.cancel()
         _motion_timer = None
     _follow_motion_active = False
-    return motors.stop() is not None
+    return stop_and_wait_for_ack(motors, timeout=0.75)
 
 
 robot_manager = RobotCommandManager(

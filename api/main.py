@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Callable, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from starlette.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from api.config import get_api_token
@@ -80,6 +81,10 @@ class ApiServices:
     async def dispatch(self, command: str, speed: int | None = None):
         manager = await self.robot_manager()
         return await asyncio.to_thread(manager.dispatch, command, speed)
+
+    async def safety_stop(self):
+        manager = await self.robot_manager()
+        return await asyncio.to_thread(manager.safety_stop)
 
     def _prune_command_results(self):
         now = time.monotonic()
@@ -171,6 +176,24 @@ class ApiServices:
         else:
             status, error_code = "safety_error", "UNEXPECTED_ACK"
 
+        # A motion command that is rejected or loses its ACK may still have
+        # reached the controller. Send the dedicated STOP as a fail-safe, but
+        # preserve the original command's result for the app. STOP failures do
+        # not recursively trigger another STOP.
+        if status in {"timed_out", "safety_error"}:
+            with self._command_lock:
+                record = self._command_results.get(command_id)
+                command = record["command"] if record is not None else None
+            if command in {"forward", "backward", "left", "right"}:
+                try:
+                    await self.safety_stop()
+                except Exception:
+                    logger.exception(
+                        "Fail-safe STOP dispatch failed after command %s result %s",
+                        command_id,
+                        status,
+                    )
+
         await self._publish_command_result(command_id, status, error_code)
 
     def start_ack_tracking(self, command_id, sequence):
@@ -218,6 +241,60 @@ bearer_scheme = HTTPBearer(auto_error=False)
 logger = logging.getLogger("thashu.api")
 
 
+class CommandBodySizeLimitMiddleware:
+    """Bound request bodies for robot command routes before JSON parsing."""
+
+    _COMMAND_PATHS = frozenset({
+        "/api/v1/robot/move",
+        "/api/v1/robot/stop",
+    })
+
+    def __init__(self, app, max_bytes=4096):
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope, receive, send):
+        if (
+            scope["type"] != "http"
+            or scope.get("method") != "POST"
+            or scope.get("path") not in self._COMMAND_PATHS
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        messages = []
+        size = 0
+        while True:
+            message = await receive()
+            messages.append(message)
+            if message["type"] == "http.disconnect":
+                return
+            if message["type"] != "http.request":
+                continue
+            size += len(message.get("body", b""))
+            if size > self.max_bytes:
+                response = JSONResponse(
+                    status_code=413,
+                    content={"detail": {"error": "request_body_too_large"}},
+                )
+                await response(scope, receive, send)
+                return
+            if not message.get("more_body", False):
+                break
+
+        index = 0
+
+        async def replay_body():
+            nonlocal index
+            if index < len(messages):
+                message = messages[index]
+                index += 1
+                return message
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        await self.app(scope, replay_body, send)
+
+
 def _log_command_outcome(
     *,
     command_id: str,
@@ -245,6 +322,14 @@ def _log_command_outcome(
 
 
 ROBOT_COMMAND_ERROR_RESPONSES = {
+    413: {
+        "description": "The request body exceeds the 4 KiB command limit.",
+        "content": {
+            "application/json": {
+                "example": {"detail": {"error": "request_body_too_large"}},
+            }
+        },
+    },
     401: {
         "description": "The Bearer token is missing or incorrect.",
         "content": {
@@ -313,6 +398,7 @@ app = FastAPI(
     description="Robot movement, health, status, and ESP32 telemetry endpoints.",
     lifespan=lifespan,
 )
+app.add_middleware(CommandBodySizeLimitMiddleware)
 
 
 @app.get("/health", tags=["health"])

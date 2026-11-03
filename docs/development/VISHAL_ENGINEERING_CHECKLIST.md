@@ -88,14 +88,14 @@ Make hardware communication explicit and reliable before exposing movement contr
 - [x] Add protocol documentation and language-neutral test vectors; Pi tests consume the shared vectors.
 - [x] Do not invent pin mappings or assume the current motor driver; the integrated firmware remains the hardware source of truth.
 - [x] Record Tharun-reported v0 parser checks: HEARTBEAT, STOP, EYES, invalid EYES argument, unknown command, partial frames, oversized-frame discard, and recovery. Unsupported-version testing does not apply to v0.
-- [ ] Compile/upload the branch-aligned ESP32 firmware and verify Pi integration with the v0 client; record the tested firmware/backend revisions and result. No standalone ESP32 parser-test harness is present in the branch.
+- [ ] Capture live serial output from the existing firmware showing `EVENT|0|READY`, `TEL|0|SENSORS|...`, `ACK|sequence|ALIVE` for HEARTBEAT, and `ACK|sequence|OK` for STOP. Do not reflash; record the firmware/backend revisions with the output. No standalone ESP32 parser-test harness is present in the branch.
 
 ### Exit criteria
 - [x] Both sides agree on the same documented v0 contract; CMD/ACK frames do not include a protocol-version field.
 - [x] Valid, invalid, partial, stale, and unknown messages have defined behavior.
 - [x] Transport failures are detectable and cannot silently appear as success.
 
-**Phase 2 evidence (2026-11-03):** The `vishal-phase1` branch uses the deployed v0 framing in the integrated ESP32 parser, Pi client, tests, and shared vectors. Pi framing tests passed 9/9 and hardware-protocol tests passed 5/5 after pulling v0. Tharun reports the listed v0 parser checks passed; this is reported evidence, not a standalone parser-test harness result. Compile/upload of the branch-aligned firmware and Pi integration verification remain open. v0 matches ACKs by sequence only and cannot distinguish a delayed ACK after a Pi restart if the sequence is reused.
+**Phase 2 evidence (2026-11-03):** The `vishal-phase1` branch uses the deployed v0 framing in the integrated ESP32 parser, Pi client, tests, and shared vectors. Pi framing tests passed 9/9 and hardware-protocol tests passed 5/5 after pulling v0. Tharun reports the listed v0 parser checks passed; this is reported evidence, not a standalone parser-test harness result. Tharun reports the existing ESP32 firmware and Pi connection work reliably; live serial output for READY, telemetry, HEARTBEAT ACK, and STOP ACK is pending. No reflash is planned. v0 matches ACKs by sequence only and cannot distinguish a delayed ACK after a Pi restart if the sequence is reused.
 
 ## Phase 3 — Robot manager, modes, and command lifecycle
 
@@ -103,19 +103,23 @@ Make hardware communication explicit and reliable before exposing movement contr
 Provide one authoritative high-level component for robot state and command coordination.
 
 ### Checklist
-- [ ] Implement or verify a single robot manager/service that owns the high-level mode and command lifecycle.
+- [x] Verify the single Pi-side `RobotCommandManager` path for API and voice motor commands; tests cover validation, mode tracking, and transport failure.
 - [ ] Define legal mode transitions with Tharun and the team; Manual and Auto must not control the robot simultaneously.
-- [ ] Route movement commands through validation, mode checks, dispatch, acknowledgement, and result reporting.
-- [ ] Define safe-stop transition behavior before switching modes.
-- [ ] Handle command timeout, rejection, duplicate request, stale state, and uncertain dispatch outcomes explicitly.
+- [x] Route movement commands through request validation, manager dispatch, ACK tracking, and command-result reporting.
+- [x] Require a STOP `ACK|sequence|OK` before the first Manual move; tests verify a rejected/missing ACK prevents the move and an already-Manual move does not repeat the transition STOP.
+- [ ] Agree safe-stop and resume behavior for all mode transitions before changing STOP semantics.
+- [x] Handle ESP32 ACK rejection and timeout in the command-result flow.
+- [ ] Define duplicate-request handling, stale-state behavior, and uncertain dispatch recovery with Niteshvar and Tharun.
 - [ ] Make Emergency Stop priority and semantics consistent with the approved safety contract.
-- [ ] Do not let API routes independently mutate low-level state or bypass the robot manager.
-- [ ] Keep hardware-specific timing and motor logic on the ESP32.
+- [x] Keep API routes from independently mutating low-level state; they dispatch through the robot manager.
+- [x] Keep motor actuation and hardware safety logic on the ESP32; the Pi sends semantic commands.
 
 ### Exit criteria
-- [ ] One authoritative service coordinates commands and mode state.
-- [ ] Conflicting commands are rejected or safely serialized according to the contract.
-- [ ] API responses distinguish known success from unknown outcome.
+- [x] One authoritative Pi service coordinates API/voice motor dispatch and its tracked mode.
+- [x] Conflicting commands are safely serialized through the shared manager lock; a concurrent move/STOP test verifies they do not overlap.
+- [x] API responses distinguish Pi dispatch from later ESP32 ACK, safety rejection, or timeout.
+
+**Phase 3 evidence (2026-11-03):** `RobotCommandManager` is the shared Pi dispatch path for API and voice movement. Vishal reports the combined robot-manager and API suites passed 31/31, including the pre-Manual STOP ACK guard, fail-safe STOP behavior, concurrent move/STOP serialization, request validation, command results, and oversized-body handling. A rejected or timed-out movement ACK triggers a dedicated fail-safe STOP while retaining the original result. The normal user-requested STOP still sets tracked mode to AUTO, but that behavior has not been approved as a complete mode/resume contract. Legal mode transitions, duplicate-request/stale-state recovery, and Emergency Stop semantics remain open for agreement with Tharun and the app owner.
 
 ## Phase 4 — REST API
 
@@ -134,15 +138,18 @@ The following routes are architectural candidates, not permission to invent thei
 - Voice, diagnostics, logs, configuration, and system routes only where specified and authorized.
 
 ### Checklist
-- [ ] Implement route handlers as thin adapters over the robot manager/services.
-- [ ] Validate content type, payload structure, command ranges, allowed enum values, and request size.
+- [x] Implement route handlers as thin adapters over the robot manager/services.
+- [x] Validate payload structure, command ranges, allowed enum values, and request size.
+- [ ] Explicitly validate and document supported request content types.
 - [ ] Use consistent response/error envelopes and documented HTTP status codes.
 - [ ] Add request timeouts and avoid blocking the API event loop/thread with long-running hardware work.
 - [ ] Define authentication and authorization requirements with the team before exposing privileged operations.
 - [ ] Apply rate limiting or duplicate-command protection where required by the threat model and command semantics.
 - [ ] Do not expose arbitrary shell execution, unrestricted filesystem access, or unrestricted hardware control.
-- [ ] Keep OpenAPI/schema documentation and tests synchronized with implementation.
+- [x] Keep OpenAPI/schema documentation and tests synchronized with implementation.
 - [ ] Add tests for success, malformed input, unauthorized access, backend unavailable, hardware disconnected, and timeout.
+
+**Phase 4 evidence (2026-11-03):** Move/stop routes use the shared robot manager through `ApiServices`. Move schema validation rejects unknown fields/directions and invalid speeds; move/stop bodies are capped at 4 KiB with HTTP 413 for oversized requests. HTTP 413 is documented in OpenAPI and the API tests. Vishal reports the API suite passed 17/17. Full error-envelope agreement, bounded dispatch timeouts, and rate/duplicate policy remain open.
 
 ### Exit criteria
 - [ ] Routes match the agreed contract.

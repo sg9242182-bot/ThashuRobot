@@ -63,6 +63,9 @@ class FakeRobotManager:
             self.mode = main.ControlMode.AUTO if command == "stop" else main.ControlMode.MANUAL
         return sequence
 
+    def safety_stop(self):
+        return self.motor.stop()
+
 
 class ApiTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -135,6 +138,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_safety_ack_is_published_as_command_result_event(self):
         manager = await main.services.robot_manager()
         manager.motor.gpio.ack_result = "ERROR|OBSTACLE"
+        manager.mode = main.ControlMode.MANUAL
         subscriber = main.services.subscribe_command_results()
         try:
             main.services.register_command("command-2", "forward", "MANUAL")
@@ -145,23 +149,48 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(event["status"], "safety_error")
             self.assertEqual(event["error_code"], "OBSTACLE")
             self.assertTrue(event["timestamp"])
+            self.assertEqual(manager.motor.commands, [("stop", None)])
+            self.assertEqual(manager.mode, main.ControlMode.MANUAL)
         finally:
             main.services.unsubscribe_command_results(subscriber)
 
     async def test_missing_ack_becomes_timeout(self):
         manager = await main.services.robot_manager()
         manager.motor.gpio.ack_result = None
-        main.services.register_command("command-3", "stop", "AUTO")
+        main.services.register_command("command-3", "forward", "MANUAL")
         await main.services.track_command_ack("command-3", 3)
         result = main.services.command_result("command-3")
         self.assertEqual(result["status"], "timed_out")
         self.assertEqual(result["error_code"], "ACK_TIMEOUT")
+        self.assertEqual(manager.motor.commands, [("stop", None)])
+        self.assertEqual(manager.mode, main.ControlMode.AUTO)
+
+    async def test_failed_stop_ack_does_not_trigger_another_stop(self):
+        manager = await main.services.robot_manager()
+        manager.motor.gpio.ack_result = None
+        main.services.register_command("command-stop", "stop", "AUTO")
+        await main.services.track_command_ack("command-stop", 5)
+        self.assertEqual(manager.motor.commands, [])
+        result = main.services.command_result("command-stop")
+        self.assertEqual(result["status"], "timed_out")
 
     def test_move_request_rejects_unknown_direction_and_out_of_range_speed(self):
         with self.assertRaises(Exception):
             main.MoveRequest(direction="spin", speed=100)
         with self.assertRaises(Exception):
             main.MoveRequest(direction="forward", speed=256)
+
+    def test_openapi_documents_command_body_limit(self):
+        schema = main.app.openapi()
+        for path in ("/api/v1/robot/move", "/api/v1/robot/stop"):
+            with self.subTest(path=path):
+                operation = schema["paths"][path]["post"]
+                self.assertIn("413", operation["responses"])
+                content = operation["responses"]["413"]["content"]["application/json"]
+                self.assertEqual(
+                    content["example"],
+                    {"detail": {"error": "request_body_too_large"}},
+                )
 
     async def test_bearer_auth_accepts_configured_token(self):
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials="test-token")
@@ -207,6 +236,61 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             "type": "esp32_line",
             "line": "EVENT|0|READY",
         }])
+
+    async def test_command_body_limit_rejects_oversized_request_before_route(self):
+        reached_route = False
+        sent = []
+
+        async def app(scope, receive, send):
+            nonlocal reached_route
+            reached_route = True
+
+        async def receive():
+            return {
+                "type": "http.request",
+                "body": b"x" * 4097,
+                "more_body": False,
+            }
+
+        async def send(message):
+            sent.append(message)
+
+        middleware = main.CommandBodySizeLimitMiddleware(app)
+        await middleware(
+            {"type": "http", "method": "POST", "path": "/api/v1/robot/move"},
+            receive,
+            send,
+        )
+
+        self.assertFalse(reached_route)
+        self.assertEqual(sent[0]["status"], 413)
+        self.assertIn(b"request_body_too_large", sent[1]["body"])
+
+    async def test_command_body_at_limit_reaches_route_unchanged(self):
+        received = bytearray()
+
+        async def app(scope, receive, send):
+            message = await receive()
+            received.extend(message["body"])
+
+        async def receive():
+            return {
+                "type": "http.request",
+                "body": b"x" * 4096,
+                "more_body": False,
+            }
+
+        async def send(_message):
+            pass
+
+        middleware = main.CommandBodySizeLimitMiddleware(app)
+        await middleware(
+            {"type": "http", "method": "POST", "path": "/api/v1/robot/move"},
+            receive,
+            send,
+        )
+
+        self.assertEqual(len(received), 4096)
 
 
 if __name__ == "__main__":

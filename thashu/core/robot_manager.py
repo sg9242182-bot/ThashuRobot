@@ -19,6 +19,21 @@ class ControlMode(str, Enum):
     MANUAL = "MANUAL"
 
 
+def stop_and_wait_for_ack(motor, timeout=0.75):
+    """Send dedicated STOP and require its protocol-v0 OK ACK before continuing."""
+    sequence = motor.stop()
+    if sequence is None:
+        return False
+    transport = getattr(motor, "gpio", None)
+    wait_for_ack = getattr(transport, "wait_for_ack", None)
+    if not callable(wait_for_ack):
+        return False
+    try:
+        return wait_for_ack(sequence, timeout=timeout) == "OK"
+    except Exception:
+        return False
+
+
 class RobotCommandManager:
     """Validate and serialize manual motor commands through MotorController."""
 
@@ -86,3 +101,11 @@ class RobotCommandManager:
                 raise RobotUnavailableError("motor transport is unavailable")
             self._mode = next_mode
         return sequence
+
+    def safety_stop(self):
+        """Send a fail-safe STOP without selecting or changing the control mode."""
+        with self._command_lock:
+            sequence = self.motor.stop()
+            if sequence is None:
+                raise RobotUnavailableError("motor transport is unavailable")
+            return sequence

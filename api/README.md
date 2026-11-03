@@ -149,6 +149,10 @@ Robot command endpoints can return these responses:
   {"detail":{"error":"unauthorized"}}
   ```
 - **422 Unprocessable Content** when the move body is invalid. FastAPI returns its standard validation format, with a `detail` list describing the invalid field. For example, an unsupported direction such as `spin` is rejected before any motor command is sent.
+- **413 Payload Too Large** when a move or stop request body exceeds 4 KiB:
+  ```json
+  {"detail":{"error":"request_body_too_large"}}
+  ```
 - **503 Service Unavailable** when no API token is configured:
   ```json
   {"detail":{"error":"authentication_not_configured"}}
