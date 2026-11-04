@@ -108,7 +108,7 @@ class PeopleMemory:
             raise
         return True
 
-    def recall(self, name: str, limit=DEFAULT_RECALL_LIMIT, *, kind=None, contains=None):
+    def recall(self, name: str, limit=DEFAULT_RECALL_LIMIT, *, kind=None, contains=None, location=None):
         """Return a bounded newest-first set, optionally filtered by kind or text."""
         if not self._confirmed_name(name):
             return []
@@ -116,6 +116,12 @@ class PeopleMemory:
             raise ValueError("Memory kind must be 'fact' or 'event'")
         if contains is not None and not isinstance(contains, str):
             raise ValueError("Memory search text must be plain text")
+        if location is not None:
+            if not isinstance(location, str) or not location.strip():
+                raise ValueError("Place search text must be a non-empty string")
+            if kind not in (None, "event"):
+                raise ValueError("Place filtering is available only for event recall")
+        place_key = " ".join((location or "").casefold().split())
         needle = " ".join((contains or "").casefold().split())
         limit = max(1, min(self.DEFAULT_RECALL_LIMIT, int(limit)))
         people = self.data.get(self.MEMORY_KEY, {})
@@ -137,6 +143,12 @@ class PeopleMemory:
                 location = record.get("location")
                 if not isinstance(location, str):
                     location = None
+                if place_key and (
+                    item_kind != "event"
+                    or not location
+                    or " ".join(location.casefold().split()) != place_key
+                ):
+                    continue
                 searchable = record["text"].casefold()
                 if location:
                     searchable += " " + location.casefold()
