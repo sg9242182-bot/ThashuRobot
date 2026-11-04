@@ -999,6 +999,8 @@ Status: IN PROGRESS — architecture review for linking confirmed people and exp
 
 Initial architecture audit (2026-11-04): `thashu/memory/people.py` stores event records under one confirmed person and keeps an optional user-supplied location as event text; it already rejects exact duplicate event/location pairs. `thashu/memory/storage.py` provides atomic machine-local JSON writes and refuses to overwrite an unreadable store. `thashu/memory/long_term.py` is generic key/value storage, while `thashu/core/decision.py` and `thashu/main.py` provide the explicit event capture/recall path. Phase 8 removed camera place recognition. There is no canonical place record or cross-record relationship index yet. Phase 9 must first define explicit user-labeled place identity and relationship/recall rules, then extend the existing data model; no new module has been shown necessary.
 
+Phase 9 first implementation (2026-11-05): Added explicit place-based event recall for the currently recognized person. `thashu/core/decision.py` parses bounded “what happened at/in <place>” queries; `thashu/main.py` routes them through the existing person-scoped memory path; `thashu/memory/people.py` filters event locations by normalized exact label and retains the existing five-record recall bound. This uses only spoken/saved place labels, creates no camera place recognition, adds no storage module, and leaves existing records unchanged. Labels do not resolve aliases. Tests and Raspberry Pi validation have not been run; acceptance items remain open.
+
 Phase boundary: Phase 8 does not build a place-recognition system or a generalized person/place/event relationship graph. Phase 9 remains future work for broader cross-record relationships and retrieval.
 
 Tasks:
