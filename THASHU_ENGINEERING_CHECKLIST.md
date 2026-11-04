@@ -995,7 +995,7 @@ Acceptance:
 
 Phase 9 — Unified Person + Place + Episodic Memory
 
-Status: NOT STARTED — generalized cross-record memory work; Phase 8 stores only a single event’s user-provided encounter context.
+Status: IN PROGRESS — architecture review for linking confirmed people and explicitly user-named places to important events across records. Place names must be user-provided; camera-based place recognition and SLAM remain out of scope. Implementation follows the existing-memory audit.
 
 Phase boundary: Phase 8 does not build a place-recognition system or a generalized person/place/event relationship graph. Phase 9 remains future work for broader cross-record relationships and retrieval.
 
