@@ -925,7 +925,7 @@ Audit and implementation record (2026-11-01):
 
 Phase 8 — Episodic Event & Encounter Memory
 
-Status: IN PROGRESS — remember significant events and, when explicitly supplied, where a recognized person was met. Camera-based place recognition is out of scope and has been removed. This phase does not implement SLAM, visual localization, maps, or generalized place identity.
+Status: COMPLETE — implementation and Raspberry Pi acceptance are reported passed by the user (2026-11-04). Phase 8 stores explicit events and user-stated encounter locations; camera-based place recognition, SLAM, and visual localization remain out of scope.
 
 Scope and behavior:
 - Store only an event the user explicitly asks Thashu to remember; ordinary conversation remains temporary.
@@ -966,30 +966,30 @@ Tasks:
 
 \[x] Recall bounded, relevant event records and report unknown fields honestly.
 
-\[ ] Verify persistence, deletion/cancellation behavior, duplicate handling, and failure-safe storage on the Raspberry Pi.
+\[x] Verify persistence, deletion/cancellation behavior, duplicate handling, and failure-safe storage on the Raspberry Pi.
 
 Implementation note (2026-11-03; Raspberry Pi acceptance remains open):
 - Restored `thashu/main.py`, `thashu/core/decision.py`, and `thashu/vision/vision_core.py` to their Phase 7 versions to remove visual place teaching/matching; deleted Phase 8-only `thashu/memory/places.py` and `thashu/vision/place_recognition.py`.
 - Extended `thashu/memory/people.py` to store an optional explicitly supplied location on event records, retain the existing machine-local timestamp/store, reject malformed nested records, and support bounded event-only/topic recall. Existing fact/event records remain readable.
 - Extended `thashu/core/decision.py` with deterministic event/location extraction from explicit “remember this event … at/in [place]” phrasing and event-recall phrases. A location is never inferred from camera imagery.
 - Extended `thashu/main.py` to bind a pending event to the single recently confirmed identity, read back the event and location (or “no location recorded”), require the existing explicit confirm/cancel, and include locations in bounded recall. Recall can target events mentioning a named person.
-- Acceptance boxes remain open until the user tests event saving, cancellation, location recall, unknown identity behavior, and reboot persistence on the Pi. No Phase 8 tests were run in this implementation pass.
+- User reports Phase 8 acceptance complete on the Raspberry Pi (2026-11-04). The open verification items, including event persistence, cancellation/deletion behavior, duplicate handling, location recall, unknown identity, and safe handling of malformed/storage-error cases, are recorded as passed from the user's report; no independent tests were run in this checklist update.
 
 Acceptance:
 
-\[ ] An explicitly requested event can be read back, confirmed, cancelled, and saved.
+\[x] An explicitly requested event can be read back, confirmed, cancelled, and saved.
 
-\[ ] When one confirmed person is recognized, the event uses that person’s canonical saved identity.
+\[x] When one confirmed person is recognized, the event uses that person’s canonical saved identity.
 
-\[ ] A user-stated encounter location is attached to the event; unstated locations remain unknown.
+\[x] A user-stated encounter location is attached to the event; unstated locations remain unknown.
 
-\[ ] Camera images never cause Thashu to claim a place identity or event location.
+\[x] Camera images never cause Thashu to claim a place identity or event location.
 
-\[ ] Recalled events are bounded, relevant, and do not fabricate person, place, or time details.
+\[x] Recalled events are bounded, relevant, and do not fabricate person, place, or time details.
 
-\[ ] Saved event data survives restart and stays outside Git-managed code/model files.
+\[x] Saved event data survives restart and stays outside Git-managed code/model files.
 
-\[ ] Unknown/ambiguous identity, cancellation, malformed data, and storage errors cannot create a false person-event association.
+\[x] Unknown/ambiguous identity, cancellation, malformed data, and storage errors cannot create a false person-event association.
 
 \---
 
