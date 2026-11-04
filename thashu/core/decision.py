@@ -474,6 +474,30 @@ def get_person_event_query(user_input: str):
     return target or None
 
 
+def get_place_event_query(user_input: str):
+    """Return an explicitly spoken place label for event recall, or None."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", (user_input or "").lower()).strip()
+    prefixes = (
+        "what do you remember happening at ",
+        "what do you remember happening in ",
+        "tell me what happened at ",
+        "tell me what happened in ",
+        "what events happened at ",
+        "what events happened in ",
+        "what event happened at ",
+        "what event happened in ",
+        "what happened at ",
+        "what happened in ",
+    )
+    for prefix in prefixes:
+        if not normalized.startswith(prefix):
+            continue
+        place = " ".join(normalized[len(prefix):].split())
+        if place and len(place) <= 80 and len(place.split()) <= 8:
+            return place
+    return None
+
+
 def get_person_memory_request(user_input: str):
     """Parse only explicit permanent-memory save phrases.
 
@@ -529,7 +553,11 @@ def get_person_memory_delete_command(user_input: str):
 def is_person_memory_query(user_input: str) -> bool:
     """Recognize bounded recall requests without passing them to the LLM."""
     normalized = re.sub(r"[^a-z0-9]+", " ", (user_input or "").lower()).strip()
-    return normalized in _MEMORY_SAVE_QUERY or get_person_event_query(user_input) is not None
+    return (
+        normalized in _MEMORY_SAVE_QUERY
+        or get_person_event_query(user_input) is not None
+        or get_place_event_query(user_input) is not None
+    )
 
 
 def is_forward_command(user_input: str) -> bool:
