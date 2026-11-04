@@ -21,7 +21,7 @@ from vision.follow_logic   import FollowLogic
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
 from hardware.servo_tracking import ServoTracker
-from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, get_enrollment_spelling, is_recognition_query, get_person_memory_request, get_event_memory_request, get_person_event_query, get_person_memory_save_confirmation, is_person_memory_query, get_person_memory_delete_command
+from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, get_enrollment_spelling, is_recognition_query, get_person_memory_request, get_event_memory_request, get_person_event_query, get_place_event_query, get_person_memory_save_confirmation, is_person_memory_query, get_person_memory_delete_command
 from core.model_paths import model_path, project_path
 from memory.people import PeopleMemory
 
@@ -1410,12 +1410,20 @@ def main():
                         )
                     else:
                         event_query = get_person_event_query(text)
+                        place_query = get_place_event_query(text)
                         if event_query is not None:
                             records = person_memory.recall(
                                 confirmed_person,
                                 limit=5,
                                 kind="event",
                                 contains=event_query or None,
+                            )
+                        elif place_query is not None:
+                            records = person_memory.recall(
+                                confirmed_person,
+                                limit=5,
+                                kind="event",
+                                location=place_query,
                             )
                         else:
                             records = person_memory.recall(confirmed_person, limit=5)
@@ -1425,6 +1433,11 @@ def main():
                                     f"I don't have a saved event"
                                     f"{' about ' + event_query if event_query else ''} "
                                     f"for {confirmed_person}."
+                                )
+                            elif place_query is not None:
+                                response = (
+                                    f"I don't have saved events for {confirmed_person} "
+                                    f"at {place_query}."
                                 )
                             else:
                                 response = (
