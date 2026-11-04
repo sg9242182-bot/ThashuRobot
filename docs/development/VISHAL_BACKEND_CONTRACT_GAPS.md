@@ -23,10 +23,10 @@ new endpoints or change the runtime contract.
 
 | Item | Current code | Follow-up / owner |
 |---|---|---|
-| Sensor safety | ESP32 `SafetyManager` remains the final authority for motor safety. Pi `GPIOControl` parses timestamped sensor telemetry and distinguishes `FAR` from missing `NA`. The autonomous follow path uses fresh sensor data (maximum age 750 ms), treats missing/stale values as not clear, treats `FAR` as clear, and uses a 300 mm threshold. The mobile API move path does not run that follow-only sensor pre-check; the ESP32 still checks and can reject movement. | Tharun: verify the firmware safety behavior on the robot. Vishal: change manual pre-check behavior only after the owners agree its contract. |
+| Sensor safety | ESP32 `SafetyManager` remains the final authority for motor safety. Pi `GPIOControl` parses timestamped sensor telemetry and distinguishes `FAR` from missing `NA`. Both autonomous follow and the shared command manager require a snapshot no older than 750 ms, treat missing/stale values as unsafe, treat `FAR` as clear, and require numeric readings above 300 mm. Forward/turning checks all front ToF sensors; backward checks rear. | Tharun: verify the firmware safety behavior on the robot. |
 | ESP32 connection and safety reports | The Pi transport tracks connection state, ACK results, sensor snapshots, and EVENT/FAULT messages. The API status route currently reports connection state but keeps controller readiness `unknown` because it does not track the ESP32 READY event. | Vishal: expose readiness only from observed READY state. Agree any response changes with Niteshvar. |
 | ACK handling | Voice movement waits up to 750 ms; follow pulses wait 200 ms. API move/stop returns `dispatched` immediately, tracks the matching ACK asynchronously for up to 750 ms, publishes `acknowledged`, `safety_error`, or `timed_out` as a WebSocket `command_result`, and exposes the current result at `GET /api/v1/robot/commands/{command_id}`. Results are retained in process memory for 24 hours (maximum 1,000), so a process restart clears them. | Vishal and Niteshvar: integrate Flutter with these agreed field names and statuses. |
-| STOP latch and mode | Firmware STOP stops the motors and sets active motion to STOPPED, but the checked-in ESP32 code has no persistent latch that blocks a later movement command. The Pi API reports STOP as dispatched and changes its tracked mode to AUTO; follow remains stopped until explicitly started. | Tharun: confirm/implement the hardware STOP-latch policy. Vishal and Niteshvar: agree selected/paused mode and resume behavior before changing API semantics. |
+| STOP latch and mode | Pi exposes `POST /api/v1/robot/mode` with `{"mode":"MANUAL"}` or `{"mode":"AUTO"}`. It cancels Pi motion/follow timers, sends STOP, and switches only after `ACK|sequence|OK`. On failure, the previous mode remains selected, motion is inhibited, and a second best-effort STOP is sent. AUTO selection is paused; existing follow starts only through its explicit start action. Normal STOP cancels Pi motion/follow and returns selected mode to AUTO paused. ESP32 STOP itself is not latched against later commands. | Tharun: verify firmware stop behavior. Emergency Stop remains open pending an ESP32 protocol/firmware latch and explicit reset contract. Niteshvar: integrate and review the mode route and response. |
 | Telemetry WebSocket | The API sends raw ESP32 lines and broadcasts `command_result` events to connected WebSocket clients. Raw serial telemetry remains a single-consumer queue. | Vishal and Niteshvar: integrate the event schema and reconnect behavior in Flutter. |
 | Network and credentials | The API binds to localhost by default. Devices in different homes cannot reach one another using `127.0.0.1` or the Pi's home-only LAN address. | Tharun: prepare a private encrypted connection and firewall access when the Pi is available. Vishal: provide a fresh test token securely. Only then set `THASHU_API_HOST=0.0.0.0` for access over that private connection. |
 
@@ -88,13 +88,16 @@ tests, and integrated firmware on this branch use this format.
   frames, oversized-frame discard, and recovery after an oversized frame.
   Unsupported-version testing was not applicable to v0. The branch-aligned
   source still requires compile/upload and Pi integration verification.
-- STOP latch and selected/paused mode behavior still need the owners' decision
-  before changing API semantics.
+- A latched Emergency Stop and reset are not present in the deployed protocol.
+  Tharun must propose and verify the ESP32 protocol/firmware change before the
+  Pi claims or exposes that feature.
 
 ## Scope notes
 
-- Do not implement resume, mode, or emergency-stop routes until their
-  mobile-facing contract is agreed with Niteshvar.
+- The proposed mode route is implemented as `POST /api/v1/robot/mode`; Niteshvar
+  must review its request/response contract before integrating the Flutter app.
+- Do not expose a latched Emergency Stop route until the ESP32 command/event and
+  explicit reset behavior are implemented and verified.
 - Do not weaken ESP32 safety or treat stale/missing sensor values as clear.
 - Physical robot verification belongs to Tharun. Backend software and API
   integration belong to Vishal.

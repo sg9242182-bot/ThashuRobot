@@ -26,7 +26,12 @@ THASHU_ROOT = REPO_ROOT / "thashu"
 if str(THASHU_ROOT) not in sys.path:
     sys.path.insert(0, str(THASHU_ROOT))
 
-from core.robot_manager import ControlMode
+from core.robot_manager import (
+    ControlMode,
+    ControlModeError,
+    ModeSwitchError,
+    RobotSafetyError,
+)
 
 
 def _default_robot_manager_factory():
@@ -48,6 +53,17 @@ class CommandResponse(BaseModel):
     command: str
     status: Literal["dispatched"]
     control_mode: Literal["AUTO", "MANUAL"]
+
+
+class ModeSwitchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["AUTO", "MANUAL"]
+
+
+class ModeSwitchResponse(BaseModel):
+    mode: Literal["AUTO", "MANUAL"]
+    status: Literal["switched"]
 
 
 class ApiServices:
@@ -81,6 +97,25 @@ class ApiServices:
     async def dispatch(self, command: str, speed: int | None = None):
         manager = await self.robot_manager()
         return await asyncio.to_thread(manager.dispatch, command, speed)
+
+    async def dispatch_in_selected_mode(self, command: str, speed: int | None = None):
+        manager = await self.robot_manager()
+        state_version = manager.state_version
+        return await asyncio.to_thread(
+            manager.dispatch,
+            command,
+            speed,
+            require_current_mode=True,
+            expected_state_version=state_version,
+        )
+
+    async def switch_mode(self, mode: str):
+        manager = await self.robot_manager()
+        return await asyncio.to_thread(manager.switch_mode, mode)
+
+    async def stop_all(self):
+        manager = await self.robot_manager()
+        return await asyncio.to_thread(manager.stop_all)
 
     async def safety_stop(self):
         manager = await self.robot_manager()
@@ -247,6 +282,7 @@ class CommandBodySizeLimitMiddleware:
     _COMMAND_PATHS = frozenset({
         "/api/v1/robot/move",
         "/api/v1/robot/stop",
+        "/api/v1/robot/mode",
     })
 
     def __init__(self, app, max_bytes=4096):
@@ -322,6 +358,63 @@ def _log_command_outcome(
 
 
 ROBOT_COMMAND_ERROR_RESPONSES = {
+    409: {
+        "description": "The selected control mode or a Pi-side sensor interlock blocks movement.",
+        "content": {
+            "application/json": {
+                "examples": {
+                    "manual_mode_required": {
+                        "value": {
+                            "detail": {
+                                "error": "control_mode_conflict",
+                                "error_code": "MANUAL_MODE_REQUIRED",
+                            }
+                        }
+                    },
+                    "auto_not_started": {
+                        "value": {
+                            "detail": {
+                                "error": "control_mode_conflict",
+                                "error_code": "AUTO_NOT_STARTED",
+                            }
+                        }
+                    },
+                    "stop_confirmation_required": {
+                        "value": {
+                            "detail": {
+                                "error": "control_mode_conflict",
+                                "error_code": "STOP_CONFIRMATION_REQUIRED",
+                            }
+                        }
+                    },
+                    "control_state_changed": {
+                        "value": {
+                            "detail": {
+                                "error": "control_mode_conflict",
+                                "error_code": "CONTROL_STATE_CHANGED",
+                            }
+                        }
+                    },
+                    "sensor_not_ready": {
+                        "value": {
+                            "detail": {
+                                "error": "safety_blocked",
+                                "error_code": "SENSOR_NOT_READY",
+                            }
+                        }
+                    },
+                    "obstacle_blocked": {
+                        "value": {
+                            "detail": {
+                                "error": "safety_blocked",
+                                "error_code": "OBSTACLE_BLOCKED",
+                            }
+                        }
+                    },
+                }
+            }
+        },
+    },
     413: {
         "description": "The request body exceeds the 4 KiB command limit.",
         "content": {
@@ -339,7 +432,7 @@ ROBOT_COMMAND_ERROR_RESPONSES = {
         },
     },
     503: {
-        "description": "Authentication is not configured, or the Pi cannot dispatch the command.",
+        "description": "Authentication is not configured, the robot is unavailable, or STOP was not acknowledged during a mode switch.",
         "content": {
             "application/json": {
                 "examples": {
@@ -353,6 +446,16 @@ ROBOT_COMMAND_ERROR_RESPONSES = {
                             "detail": {
                                 "error": "robot_unavailable",
                                 "command_id": "<uuid>",
+                            }
+                        },
+                    },
+                    "mode_switch_failed": {
+                        "summary": "The ESP32 did not confirm STOP",
+                        "value": {
+                            "detail": {
+                                "error": "mode_switch_failed",
+                                "error_code": "STOP_ACK_TIMEOUT",
+                                "control_mode": "AUTO",
                             }
                         },
                     },
@@ -430,6 +533,60 @@ async def get_command_result(command_id: str):
 
 
 @app.post(
+    "/api/v1/robot/mode",
+    response_model=ModeSwitchResponse,
+    tags=["robot"],
+    dependencies=[Depends(require_api_token)],
+    responses=ROBOT_COMMAND_ERROR_RESPONSES,
+)
+async def switch_control_mode(request: ModeSwitchRequest):
+    """Stop and confirm before selecting Manual or Auto; never starts motion."""
+    request_id = str(uuid4())
+    try:
+        await services.switch_mode(request.mode)
+    except ModeSwitchError as exc:
+        manager = await services.robot_manager()
+        _log_command_outcome(
+            command_id=request_id,
+            command=f"mode:{request.mode}",
+            outcome="failed",
+            http_status=503,
+            error_code=exc.error_code,
+            control_mode=manager.mode.value,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "mode_switch_failed",
+                "error_code": exc.error_code,
+                "control_mode": manager.mode.value,
+            },
+        ) from exc
+    except Exception as exc:
+        _log_command_outcome(
+            command_id=request_id,
+            command=f"mode:{request.mode}",
+            outcome="failed",
+            http_status=503,
+            error_code="robot_unavailable",
+        )
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "robot_unavailable"},
+        ) from exc
+
+    manager = await services.robot_manager()
+    _log_command_outcome(
+        command_id=request_id,
+        command=f"mode:{request.mode}",
+        outcome="switched",
+        http_status=200,
+        control_mode=manager.mode.value,
+    )
+    return ModeSwitchResponse(mode=manager.mode.value, status="switched")
+
+
+@app.post(
     "/api/v1/robot/move",
     response_model=CommandResponse,
     status_code=202,
@@ -441,7 +598,46 @@ async def move(request: MoveRequest):
     """Dispatch a movement command and report its later ESP32 result asynchronously."""
     command_id = str(uuid4())
     try:
-        sequence = await services.dispatch(request.direction, request.speed)
+        sequence = await services.dispatch_in_selected_mode(
+            request.direction,
+            request.speed,
+        )
+    except ControlModeError as exc:
+        manager = await services.robot_manager()
+        _log_command_outcome(
+            command_id=command_id,
+            command=request.direction,
+            outcome="rejected",
+            http_status=409,
+            error_code=str(exc),
+            control_mode=manager.mode.value,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "control_mode_conflict",
+                "error_code": str(exc),
+                "command_id": command_id,
+            },
+        ) from exc
+    except RobotSafetyError as exc:
+        manager = await services.robot_manager()
+        _log_command_outcome(
+            command_id=command_id,
+            command=request.direction,
+            outcome="rejected",
+            http_status=409,
+            error_code=exc.error_code,
+            control_mode=manager.mode.value,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "safety_blocked",
+                "error_code": exc.error_code,
+                "command_id": command_id,
+            },
+        ) from exc
     except ValueError as exc:
         _log_command_outcome(
             command_id=command_id,
@@ -508,7 +704,7 @@ async def stop():
     """Dispatch STOP and report its later ESP32 result asynchronously."""
     command_id = str(uuid4())
     try:
-        sequence = await services.dispatch("stop")
+        sequence = await services.stop_all()
     except Exception as exc:
         _log_command_outcome(
             command_id=command_id,

@@ -3,6 +3,7 @@ import os
 from unittest.mock import patch
 
 from api import main
+from core.robot_manager import ControlModeError, ModeSwitchError
 from fastapi.security import HTTPAuthorizationCredentials
 
 
@@ -11,9 +12,18 @@ class FakeTransport:
         self.connected = connected
         self.messages = list(messages)
         self.ack_result = ack_result
+        self.sensor_snapshot = {
+            "tof_left_mm": 500,
+            "tof_center_mm": 500,
+            "tof_right_mm": 500,
+            "rear_mm": 500,
+        }
 
-    def wait_for_ack(self, _sequence, _timeout=0.75):
+    def wait_for_ack(self, _sequence, timeout=0.75):
         return self.ack_result
+
+    def get_sensor_snapshot(self, max_age=0.75):
+        return self.sensor_snapshot
 
     def is_connected(self):
         return self.connected
@@ -55,8 +65,29 @@ class FakeRobotManager:
     def __init__(self, motor):
         self.motor = motor
         self.mode = main.ControlMode.AUTO
+        self.auto_active = False
+        self.motion_inhibited = False
+        self.state_version = 0
 
-    def dispatch(self, command, speed=None):
+    def dispatch(
+        self,
+        command,
+        speed=None,
+        require_current_mode=False,
+        expected_state_version=None,
+    ):
+        if (
+            expected_state_version is not None
+            and expected_state_version != self.state_version
+        ):
+            raise ControlModeError("CONTROL_STATE_CHANGED")
+        if command in {"forward", "backward", "left", "right"}:
+            if require_current_mode and self.mode != main.ControlMode.MANUAL:
+                raise ControlModeError("MANUAL_MODE_REQUIRED")
+            if self.motion_inhibited:
+                raise ControlModeError("STOP_CONFIRMATION_REQUIRED")
+            if self.mode == main.ControlMode.AUTO:
+                raise ControlModeError("MANUAL_MODE_REQUIRED")
         action = getattr(self.motor, command)
         sequence = action() if speed is None else action(speed)
         if sequence is not None:
@@ -65,6 +96,31 @@ class FakeRobotManager:
 
     def safety_stop(self):
         return self.motor.stop()
+
+    def switch_mode(self, mode):
+        sequence = self.motor.stop()
+        ack = self.motor.gpio.wait_for_ack(sequence)
+        if ack != "OK":
+            self.motor.stop()
+            self.motion_inhibited = True
+            raise ModeSwitchError("STOP_ACK_TIMEOUT" if ack is None else "STOP_REJECTED")
+        self.mode = main.ControlMode(mode)
+        self.auto_active = False
+        self.motion_inhibited = False
+        self.state_version += 1
+        return sequence
+
+    def stop_all(self):
+        sequence = self.motor.stop()
+        self.mode = main.ControlMode.AUTO
+        self.auto_active = False
+        self.state_version += 1
+        return sequence
+
+    def start_auto(self):
+        if self.mode != main.ControlMode.AUTO:
+            raise ControlModeError("AUTO_MODE_REQUIRED")
+        self.auto_active = True
 
 
 class ApiTests(unittest.IsolatedAsyncioTestCase):
@@ -104,6 +160,10 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             main.services = old
 
     async def test_move_dispatches_through_motor_service(self):
+        mode = await self.endpoint("/api/v1/robot/mode")(
+            main.ModeSwitchRequest(mode="MANUAL")
+        )
+        self.assertEqual(mode.status, "switched")
         response = await self.endpoint("/api/v1/robot/move")(main.MoveRequest(direction="forward", speed=120))
         self.assertTrue(response.command_id)
         self.assertEqual(response.command, "forward")
@@ -111,16 +171,80 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.control_mode, "MANUAL")
         manager = await main.services.robot_manager()
         motor = manager.motor
-        self.assertEqual(motor.commands, [("forward", 120)])
+        self.assertEqual(motor.commands, [
+            ("stop", None),
+            ("forward", 120),
+        ])
+
+    async def test_move_requires_explicit_manual_mode(self):
+        from fastapi import HTTPException
+
+        with self.assertRaises(HTTPException) as failure:
+            await self.endpoint("/api/v1/robot/move")(
+                main.MoveRequest(direction="forward", speed=120)
+            )
+        self.assertEqual(failure.exception.status_code, 409)
 
     async def test_stop_dispatches_dedicated_stop(self):
+        manager = await main.services.robot_manager()
+        await main.services.switch_mode("MANUAL")
         response = await self.endpoint("/api/v1/robot/stop")()
         self.assertEqual(response.command, "stop")
         self.assertEqual(response.status, "dispatched")
         self.assertEqual(response.control_mode, "AUTO")
         manager = await main.services.robot_manager()
         motor = manager.motor
-        self.assertEqual(motor.commands, [("stop", None)])
+        self.assertEqual(motor.commands, [
+            ("stop", None),
+            ("stop", None),
+        ])
+
+    async def test_auto_mode_switch_stops_without_starting_follow(self):
+        response = await self.endpoint("/api/v1/robot/mode")(
+            main.ModeSwitchRequest(mode="AUTO")
+        )
+        manager = await main.services.robot_manager()
+        self.assertEqual(response.mode, "AUTO")
+        self.assertEqual(response.status, "switched")
+        self.assertEqual(manager.mode, main.ControlMode.AUTO)
+        self.assertEqual(manager.motor.commands, [("stop", None)])
+
+    async def test_mode_switch_timeout_keeps_previous_mode_and_reports_failure(self):
+        from fastapi import HTTPException
+
+        manager = await main.services.robot_manager()
+        manager.motor.gpio.ack_result = None
+        with self.assertRaises(HTTPException) as failure:
+            await self.endpoint("/api/v1/robot/mode")(
+                main.ModeSwitchRequest(mode="MANUAL")
+            )
+        self.assertEqual(failure.exception.status_code, 503)
+        self.assertEqual(failure.exception.detail["error_code"], "STOP_ACK_TIMEOUT")
+        self.assertEqual(manager.mode, main.ControlMode.AUTO)
+        self.assertEqual(manager.motor.commands, [
+            ("stop", None),
+            ("stop", None),
+        ])
+
+    async def test_mode_switch_rejection_inhibits_motion_until_confirmed_switch(self):
+        from fastapi import HTTPException
+
+        manager = await main.services.robot_manager()
+        manager.mode = main.ControlMode.MANUAL
+        manager.motor.gpio.ack_result = "ERROR|SAFETY_STOP"
+        with self.assertRaises(HTTPException):
+            await self.endpoint("/api/v1/robot/mode")(
+                main.ModeSwitchRequest(mode="AUTO")
+            )
+        with self.assertRaises(HTTPException) as blocked:
+            await self.endpoint("/api/v1/robot/move")(
+                main.MoveRequest(direction="forward", speed=100)
+            )
+        self.assertEqual(blocked.exception.status_code, 409)
+        self.assertEqual(manager.motor.commands, [
+            ("stop", None),
+            ("stop", None),
+        ])
 
     async def test_acknowledged_command_result_can_be_looked_up(self):
         services = main.services
@@ -182,7 +306,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
 
     def test_openapi_documents_command_body_limit(self):
         schema = main.app.openapi()
-        for path in ("/api/v1/robot/move", "/api/v1/robot/stop"):
+        for path in ("/api/v1/robot/move", "/api/v1/robot/stop", "/api/v1/robot/mode"):
             with self.subTest(path=path):
                 operation = schema["paths"][path]["post"]
                 self.assertIn("413", operation["responses"])

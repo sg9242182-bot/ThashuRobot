@@ -22,7 +22,14 @@ from vision.vision_core   import VisionCore
 from vision.follow_logic   import FollowLogic
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
-from core.robot_manager   import ControlMode, RobotCommandManager, stop_and_wait_for_ack
+from core.robot_manager   import (
+    ControlMode,
+    ModeSwitchError,
+    RobotCommandManager,
+    RobotSafetyError,
+    RobotUnavailableError,
+    stop_and_wait_for_ack,
+)
 from hardware.servo_tracking import ServoTracker
 from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, is_recognition_query
 from core.model_paths import model_path, project_path
@@ -73,21 +80,27 @@ motors = MotorController()
 _motion_lock = threading.RLock()
 
 
-def _prepare_manual_command():
-    """Pause automatic follow and send STOP before accepting manual movement."""
+def _cancel_motion_sources():
+    """Cancel pending app/voice motion and automatic follow output."""
     global _follow_start_pending, _follow_region_pending, _follow_motion_active
     global _motion_timer, _motion_generation
 
-    _follow_start_pending = False
-    _follow_region_pending = None
-    follow_logic.stop()
-    servo_tracker.stop_search()
+    with _motion_lock:
+        _follow_start_pending = False
+        _follow_region_pending = None
+        follow_logic.stop()
+        servo_tracker.stop_search()
 
-    _motion_generation += 1
-    if _motion_timer is not None:
-        _motion_timer.cancel()
-        _motion_timer = None
-    _follow_motion_active = False
+        _motion_generation += 1
+        if _motion_timer is not None:
+            _motion_timer.cancel()
+            _motion_timer = None
+        _follow_motion_active = False
+
+
+def _prepare_manual_command():
+    """Pause automatic output and confirm STOP before voice manual movement."""
+    _cancel_motion_sources()
     return stop_and_wait_for_ack(motors, timeout=0.75)
 
 
@@ -95,6 +108,8 @@ robot_manager = RobotCommandManager(
     motor=motors,
     command_lock=_motion_lock,
     before_manual_command=_prepare_manual_command,
+    before_mode_switch=_cancel_motion_sources,
+    before_external_stop=_cancel_motion_sources,
 )
 audio  = AudioManager(sample_rate=SAMPLE_RATE, blocksize=BLOCK_SIZE)
 
@@ -338,6 +353,7 @@ def transition_runtime(target_state):
 
     if current == RuntimeState.IDLE and _follow_start_pending:
         _auto_face_track_id = None
+        robot_manager.start_auto()
         follow_logic.start()
         # The camera is beginning its target search; mute servo noise from the
         # initial tilt and sweep until a target is acquired or search stops.
@@ -366,7 +382,7 @@ def _auto_stop_motion(generation):
         _motion_timer = None
         follow_pulse = _follow_motion_active
         _follow_motion_active = False
-        sequence = robot_manager.dispatch("stop")
+        sequence = robot_manager.stop_pulse()
 
     if sequence is None:
         print("[COMMAND] Timed motor STOP could not be sent; ESP32 watchdog remains the fallback")
@@ -378,8 +394,14 @@ def _auto_stop_motion(generation):
 
 def queue_follow_start(region=None):
     global _follow_start_pending, _follow_region_pending
+    try:
+        robot_manager.switch_mode(ControlMode.AUTO)
+    except (ModeSwitchError, RobotUnavailableError) as exc:
+        print(f"[FOLLOW] Could not confirm STOP before Auto start: {exc}")
+        return False
     _follow_start_pending = True
     _follow_region_pending = region
+    return True
 
 
 def start_bounded_motion(
@@ -401,6 +423,17 @@ def start_bounded_motion(
         return None
 
     with _motion_lock:
+        try:
+            sequence = robot_manager.dispatch(command, speed, control_mode=control_mode)
+        except RobotSafetyError as exc:
+            print(f"[COMMAND] {direction} blocked by Pi sensor check: {exc.error_code}")
+            return None
+        except RobotUnavailableError as exc:
+            print(f"[COMMAND] {direction} could not be sent: {exc}")
+            return None
+        if sequence is None:
+            return None
+
         if _motion_timer is not None:
             _motion_timer.cancel()
             _motion_timer = None
@@ -408,9 +441,6 @@ def start_bounded_motion(
         _motion_generation += 1
         generation = _motion_generation
         _follow_motion_active = False
-        sequence = robot_manager.dispatch(command, speed, control_mode=control_mode)
-        if sequence is None:
-            return None
 
         if duration_override is not None:
             duration = max(0.05, float(duration_override))
@@ -443,7 +473,7 @@ def stop_motion():
         if _motion_timer is not None:
             _motion_timer.cancel()
             _motion_timer = None
-        return robot_manager.dispatch("stop")
+        return robot_manager.stop_all()
 
 
 def confirm_motion_command(sequence, direction):
@@ -1194,11 +1224,15 @@ def main():
                     print(f"[FOLLOW] Explicit follow cancel; STOP sequence {stop_sequence}")
                     response = "I stopped following."
                 elif follow_command == "START":
-                    queue_follow_start()
-                    response = "Follow mode is on."
+                    if queue_follow_start():
+                        response = "Follow mode is on."
+                    else:
+                        response = "I couldn't confirm STOP, so I didn't start follow mode."
                 elif follow_command in ("LEFT", "CENTER", "RIGHT"):
-                    queue_follow_start(follow_command)
-                    response = f"I'll select the unique person on your {follow_command.lower()} after the camera resumes."
+                    if queue_follow_start(follow_command):
+                        response = f"I'll select the unique person on your {follow_command.lower()} after the camera resumes."
+                    else:
+                        response = "I couldn't confirm STOP, so I didn't start follow mode."
                 elif (look_direction := get_look_command(text)) is not None:
                     look_sequence = servo_tracker.look(look_direction)
                     if look_sequence is None:
@@ -1236,8 +1270,7 @@ def main():
                     )
                     move_sequence = start_bounded_motion("FORWARD", pwm)
                     if move_sequence is None:
-                        print("[COMMAND] FORWARD could not be sent; ESP32 link is unavailable")
-                        response = "I couldn't reach the motor controller, so I can't move."
+                        response = "I couldn't confirm it was safe or connected, so I didn't move."
                     else:
                         accepted, failure = confirm_motion_command(move_sequence, "FORWARD")
                         if accepted:
@@ -1263,8 +1296,7 @@ def main():
                     )
                     move_sequence = start_bounded_motion(direction, 200)
                     if move_sequence is None:
-                        print(f"[COMMAND] {direction_name.upper()} could not be sent; ESP32 link is unavailable")
-                        response = "I couldn't reach the motor controller."
+                        response = "I couldn't confirm it was safe or connected, so I didn't move."
                     else:
                         accepted, failure = confirm_motion_command(move_sequence, direction)
                         if accepted:

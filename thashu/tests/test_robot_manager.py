@@ -10,20 +10,32 @@ if str(THASHU_ROOT) not in sys.path:
 
 from core.robot_manager import (
     ControlMode,
+    ControlModeError,
+    ModeSwitchError,
     RobotCommandManager,
+    RobotSafetyError,
     RobotUnavailableError,
     stop_and_wait_for_ack,
 )
 
 
 class FakeTransport:
-    def __init__(self, ack="OK"):
+    def __init__(self, ack="OK", snapshot=None):
         self.ack = ack
         self.waited_for = []
+        self.snapshot = snapshot or {
+            "tof_left_mm": 500,
+            "tof_center_mm": 500,
+            "tof_right_mm": 500,
+            "rear_mm": 500,
+        }
 
     def wait_for_ack(self, sequence, timeout=0.75):
         self.waited_for.append((sequence, timeout))
         return self.ack
+
+    def get_sensor_snapshot(self, max_age=0.75):
+        return self.snapshot
 
 
 class FakeMotor:
@@ -78,6 +90,77 @@ class RobotCommandManagerTests(unittest.TestCase):
         self.manager.dispatch("forward", 100)
         self.assertEqual(self.manager.mode, ControlMode.MANUAL)
 
+    def test_explicit_mode_switch_waits_for_stop_ack_and_only_selects_mode(self):
+        self.manager.switch_mode(ControlMode.MANUAL)
+        self.assertEqual(self.motor.commands, [("stop", None)])
+        self.assertEqual(self.motor.gpio.waited_for, [(17, 0.75)])
+        self.assertEqual(self.manager.mode, ControlMode.MANUAL)
+
+    def test_mode_switch_invalidates_a_move_waiting_on_an_older_state(self):
+        pending_version = self.manager.state_version
+        self.manager.switch_mode(ControlMode.MANUAL)
+        with self.assertRaises(ControlModeError) as failure:
+            self.manager.dispatch(
+                "forward",
+                100,
+                require_current_mode=True,
+                expected_state_version=pending_version,
+            )
+        self.assertEqual(failure.exception.error_code, "CONTROL_STATE_CHANGED")
+        self.assertEqual(self.motor.commands, [("stop", None)])
+
+    def test_mode_switch_failure_keeps_old_mode_and_retries_stop(self):
+        self.motor.gpio.ack = "ERROR|SAFETY_STOP"
+        with self.assertRaises(ModeSwitchError) as failure:
+            self.manager.switch_mode(ControlMode.MANUAL)
+        self.assertEqual(failure.exception.error_code, "STOP_REJECTED")
+        self.assertEqual(self.manager.mode, ControlMode.AUTO)
+        self.assertEqual(self.motor.commands, [
+            ("stop", None),
+            ("stop", None),
+        ])
+        self.assertTrue(self.manager.motion_inhibited)
+        with self.assertRaises(ControlModeError) as blocked:
+            self.manager.dispatch("forward", 100)
+        self.assertEqual(blocked.exception.error_code, "STOP_CONFIRMATION_REQUIRED")
+
+    def test_switching_to_auto_does_not_send_a_movement(self):
+        self.manager.switch_mode(ControlMode.AUTO)
+        self.assertEqual(self.manager.mode, ControlMode.AUTO)
+        self.assertEqual(self.motor.commands, [("stop", None)])
+        self.assertFalse(self.manager.auto_active)
+
+    def test_auto_movement_is_blocked_while_manual_is_selected(self):
+        self.manager.switch_mode(ControlMode.MANUAL)
+        with self.assertRaises(ControlModeError) as failure:
+            self.manager.dispatch("forward", 100, control_mode=ControlMode.AUTO)
+        self.assertEqual(failure.exception.error_code, "AUTO_MODE_REQUIRED")
+        self.assertEqual(self.motor.commands, [("stop", None)])
+
+    def test_auto_movement_requires_explicit_auto_start(self):
+        with self.assertRaises(ControlModeError) as failure:
+            self.manager.dispatch("forward", 100, control_mode=ControlMode.AUTO)
+        self.assertEqual(failure.exception.error_code, "AUTO_NOT_STARTED")
+        self.assertEqual(self.motor.commands, [])
+
+        self.manager.start_auto()
+        self.assertEqual(
+            self.manager.dispatch("forward", 100, control_mode=ControlMode.AUTO),
+            17,
+        )
+        self.assertEqual(self.motor.commands, [("forward", 100)])
+
+    def test_bounded_auto_pulse_stop_preserves_explicitly_started_auto(self):
+        self.manager.start_auto()
+        self.manager.dispatch("forward", 100, control_mode=ControlMode.AUTO)
+        self.manager.stop_pulse()
+        self.assertEqual(self.manager.mode, ControlMode.AUTO)
+        self.assertTrue(self.manager.auto_active)
+        self.assertEqual(self.motor.commands, [
+            ("forward", 100),
+            ("stop", None),
+        ])
+
     def test_manual_move_requires_successful_pre_move_stop(self):
         motor = FakeMotor(sequence=17)
         stop_results = []
@@ -93,7 +176,7 @@ class RobotCommandManagerTests(unittest.TestCase):
 
         self.assertIsNone(manager.dispatch("forward", 100))
         self.assertEqual(stop_results, ["stop"])
-        self.assertEqual(motor.commands, [])
+        self.assertEqual(motor.commands, [("stop", None)])
         self.assertEqual(manager.mode, ControlMode.AUTO)
 
     def test_successful_pre_move_stop_runs_only_when_entering_manual(self):
@@ -138,8 +221,44 @@ class RobotCommandManagerTests(unittest.TestCase):
         )
 
         self.assertIsNone(manager.dispatch("forward", 100))
-        self.assertEqual(motor.commands, [("stop", None)])
+        self.assertEqual(motor.commands, [
+            ("stop", None),
+            ("stop", None),
+        ])
         self.assertEqual(manager.mode, ControlMode.AUTO)
+
+    def test_move_rejects_missing_or_stale_sensor_snapshot(self):
+        motor = FakeMotor(sequence=17)
+        motor.gpio.snapshot = None
+        manager = RobotCommandManager(motor)
+        with self.assertRaises(RobotSafetyError) as failure:
+            manager.dispatch("forward", 100)
+        self.assertEqual(failure.exception.error_code, "SENSOR_NOT_READY")
+        self.assertEqual(motor.commands, [("stop", None)])
+
+    def test_move_rejects_sensor_reading_at_or_below_clearance(self):
+        motor = FakeMotor(sequence=17)
+        motor.gpio.snapshot["tof_center_mm"] = 300
+        manager = RobotCommandManager(motor)
+        with self.assertRaises(RobotSafetyError) as failure:
+            manager.dispatch("forward", 100)
+        self.assertEqual(failure.exception.error_code, "OBSTACLE_BLOCKED")
+        self.assertEqual(motor.commands, [("stop", None)])
+
+    def test_unavailable_sensor_reader_sends_stop_and_blocks_move(self):
+        motor = FakeMotor(sequence=17)
+        motor.gpio.get_sensor_snapshot = lambda **_kwargs: (_ for _ in ()).throw(OSError())
+        manager = RobotCommandManager(motor)
+        with self.assertRaises(RobotSafetyError) as failure:
+            manager.dispatch("forward", 100)
+        self.assertEqual(failure.exception.error_code, "SENSOR_NOT_READY")
+        self.assertEqual(motor.commands, [("stop", None)])
+
+    def test_far_sensor_value_counts_as_clear(self):
+        motor = FakeMotor(sequence=17)
+        motor.gpio.snapshot["tof_left_mm"] = "FAR"
+        manager = RobotCommandManager(motor)
+        self.assertEqual(manager.dispatch("forward", 100), 17)
 
     def test_stop_returns_manager_to_auto_mode(self):
         self.manager.dispatch("forward", 100)

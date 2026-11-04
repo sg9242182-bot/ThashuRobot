@@ -36,16 +36,17 @@ This is a guide, not a requirement to create empty folders now. Reuse the reposi
 The endpoints below form the first mobile-facing contract. Flutter sends
 requests to the Pi API. The API delegates commands to
 `thashu/core/robot_manager.py`, which validates and serializes calls to the
-existing motor service. The Pi motor service writes to the ESP32 serial
-transport. The API response reports dispatch from the Pi; it does not wait for
-a hardware acknowledgement or claim movement completed.
+existing motor service. Move and STOP responses report Pi dispatch while
+their ESP32 ACK arrives asynchronously. A mode switch waits for the STOP ACK
+before changing the selected mode.
 
 | Interface | Behavior |
 |---|---|
 | `GET /health` | Returns `{"status":"ok"}` when the API process responds. This is liveness only. |
 | `GET /api/v1/status` | Reports API liveness, serial transport (`connected`, `disconnected`, or `unavailable`), `controller_readiness: "unknown"`, and the Pi control mode (`AUTO`, `MANUAL`, or `unknown` if the manager cannot start). Opening a serial port does not prove the ESP32 emitted `EVENT|0|READY`. |
-| `POST /api/v1/robot/move` | Body: `{"direction":"forward","speed":200}`. Direction is `forward`, `backward`, `left`, or `right`; speed is an integer from 0 to 255 and defaults to 200. |
-| `POST /api/v1/robot/stop` | Empty body. Dispatches the dedicated stop command through the Pi motor service. |
+| `POST /api/v1/robot/mode` | Body: `{"mode":"MANUAL"}` or `{"mode":"AUTO"}`. Cancels motion/follow, sends STOP, waits up to 750 ms for `ACK|sequence|OK`, then selects the mode. A failed STOP leaves the prior mode selected. Selecting AUTO does not start follow. |
+| `POST /api/v1/robot/move` | Body: `{"direction":"forward","speed":200}`. Direction is `forward`, `backward`, `left`, or `right`; speed is an integer from 0 to 255 and defaults to 200. Requires MANUAL mode. |
+| `POST /api/v1/robot/stop` | Empty body. Cancels active movement/follow output, sends the dedicated STOP command, and selects AUTO paused. It does not restart follow. |
 | `GET /api/v1/robot/commands/{command_id}` | Returns the current result for a previously dispatched command. Requires the same Bearer token. Results are retained in memory for 24 hours (up to 1,000 commands) and are lost when the API process restarts. |
 | `WS /api/v1/telemetry` | Server-to-client stream of raw ESP32 lines and `command_result` events. Raw lines are not represented as command success. |
 
@@ -54,6 +55,16 @@ Successful movement and stop responses use:
 ```json
 {"command_id":"<uuid>","command":"forward","status":"dispatched","control_mode":"MANUAL"}
 ```
+
+A successful mode switch returns after the ESP32 acknowledges STOP:
+
+```json
+{"mode":"MANUAL","status":"switched"}
+```
+
+If STOP is rejected or times out, mode remains unchanged and the API returns
+HTTP 503 with `error: "mode_switch_failed"` and an `error_code` such as
+`STOP_REJECTED` or `STOP_ACK_TIMEOUT`.
 
 `status: "dispatched"` means the Pi wrote the command to serial. It does not
 mean the ESP32 acknowledged it or that the robot completed the movement. Move
@@ -78,27 +89,34 @@ process restarts. Invalid directions or speeds receive HTTP 422. If the Pi
 cannot write the command, the endpoint returns HTTP 503 with an error code and
 command ID. Requests are not queued for later delivery.
 
-The current implementation starts the manager in `AUTO`, changes the
-tracked mode to `MANUAL` on a dispatched move, and changes it to `AUTO` on a
-dispatched stop. This is current code behavior, not the confirmed STOP contract.
-Tharun's contract says STOP must latch motion as stopped and must not switch an
-active Manual session into active Auto; an already-selected Auto mode stays
-selected but paused until an explicit resume/Auto action and fresh safety
-checks. The API does not yet represent a paused state or expose that resume
-action. Do not interpret the current `AUTO` response as active autonomous
-movement.
+The manager starts in `AUTO` paused. App movement requires an explicit switch
+to `MANUAL`; a move request in another mode receives HTTP 409. Auto movement
+is enabled only when the existing autonomous follow behavior is explicitly
+started. A mode switch cancels pending movement and follow timers, sends STOP,
+and changes mode only after the ESP32 ACKs `OK`; choosing AUTO never starts
+autonomous movement. If STOP cannot be confirmed during a switch, the old mode
+remains selected, the Pi sends a best-effort second STOP, and all movement stays
+blocked until a later mode switch receives a STOP ACK.
 
-The manager serializes API motor commands, but Tharun's confirmed STOP,
-sensor-precheck, and acknowledgement behavior is not fully implemented in the
-current Pi backend. See
-`docs/development/VISHAL_BACKEND_CONTRACT_GAPS.md` before changing command or
-mode behavior. The telemetry stream consumes the raw inbound queue exposed by
-`GPIOControl`; it is a single-consumer feed. Run one telemetry WebSocket
+The Pi also requires a sensor snapshot no older than 750 ms. `FAR` is clear;
+`NA`, missing, or stale readings block movement and trigger a STOP. Forward, left, and right
+commands check all three front ToF sensors; backward checks the rear sensor.
+Numeric readings must be greater than 300 mm. The ESP32 retains final authority
+and may still reject a command. STOP cancels pending movement and follow output,
+returns the selected mode to AUTO paused, and does not restart follow.
+Moves that were waiting while a STOP or mode switch completed are rejected
+with HTTP 409 instead of being sent under the new state.
+
+The current protocol has no latched Emergency Stop command. Do not claim a
+latched Emergency Stop until the ESP32 protocol and firmware add and verify
+that behavior. See `docs/development/VISHAL_BACKEND_CONTRACT_GAPS.md` for the
+remaining hardware contract. The telemetry stream consumes the raw inbound
+queue exposed by `GPIOControl`; it is a single-consumer feed. Run one telemetry WebSocket
 consumer and do not add a second reader for that queue. The API must share the
 robot process's existing `RobotCommandManager` and serial connection; do not
 run a separate Uvicorn process beside `thashu/main.py` on the Pi.
 
-Movement, stop, and WebSocket telemetry require an HTTP Bearer token configured
+Mode, movement, stop, and WebSocket telemetry require an HTTP Bearer token configured
 in `THASHU_API_TOKEN`. Health and status remain unauthenticated. If the token is
 missing, control requests fail closed with HTTP 503; a missing or incorrect
 token receives HTTP 401. Configure a long random token in the same shell before

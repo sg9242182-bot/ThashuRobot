@@ -104,13 +104,16 @@ Provide one authoritative high-level component for robot state and command coord
 
 ### Checklist
 - [x] Verify the single Pi-side `RobotCommandManager` path for API and voice motor commands; tests cover validation, mode tracking, and transport failure.
-- [ ] Define legal mode transitions with Tharun and the team; Manual and Auto must not control the robot simultaneously.
+- [x] Implement explicit MANUAL/AUTO mode selection; switch only after STOP receives `ACK|sequence|OK`, cancel Pi movement/follow work first, and keep AUTO paused until the existing follow behavior is explicitly started.
+- [ ] Confirm the mode-transition behavior with Tharun on the integrated robot.
 - [x] Route movement commands through request validation, manager dispatch, ACK tracking, and command-result reporting.
 - [x] Require a STOP `ACK|sequence|OK` before the first Manual move; tests verify a rejected/missing ACK prevents the move and an already-Manual move does not repeat the transition STOP.
-- [ ] Agree safe-stop and resume behavior for all mode transitions before changing STOP semantics.
+- [x] Require fresh, relevant sensor readings for each movement: 750 ms maximum age, `FAR` is clear, missing/`NA`/stale values block and send STOP, front ToF for forward/turns, rear sensor for backward, and numeric clearance above 300 mm.
+- [x] Cancel timer/follow work on STOP or mode switch and reject app moves queued against an older control-state version.
+- [x] Implement STOP in either mode so it cancels Pi movement/follow work, sends dedicated STOP, selects AUTO paused, and never resumes autonomously.
 - [x] Handle ESP32 ACK rejection and timeout in the command-result flow.
 - [ ] Define duplicate-request handling, stale-state behavior, and uncertain dispatch recovery with Niteshvar and Tharun.
-- [ ] Make Emergency Stop priority and semantics consistent with the approved safety contract.
+- [ ] Add a latched Emergency Stop only after Tharun updates and verifies an ESP32 protocol command/event and explicit reset behavior; Pi-side latch must mirror and enforce it.
 - [x] Keep API routes from independently mutating low-level state; they dispatch through the robot manager.
 - [x] Keep motor actuation and hardware safety logic on the ESP32; the Pi sends semantic commands.
 
@@ -119,7 +122,7 @@ Provide one authoritative high-level component for robot state and command coord
 - [x] Conflicting commands are safely serialized through the shared manager lock; a concurrent move/STOP test verifies they do not overlap.
 - [x] API responses distinguish Pi dispatch from later ESP32 ACK, safety rejection, or timeout.
 
-**Phase 3 evidence (2026-11-03):** `RobotCommandManager` is the shared Pi dispatch path for API and voice movement. Vishal reports the combined robot-manager and API suites passed 31/31, including the pre-Manual STOP ACK guard, fail-safe STOP behavior, concurrent move/STOP serialization, request validation, command results, and oversized-body handling. A rejected or timed-out movement ACK triggers a dedicated fail-safe STOP while retaining the original result. The normal user-requested STOP still sets tracked mode to AUTO, but that behavior has not been approved as a complete mode/resume contract. Legal mode transitions, duplicate-request/stale-state recovery, and Emergency Stop semantics remain open for agreement with Tharun and the app owner.
+**Phase 3 evidence (2026-11-05):** The shared Pi manager now supports an explicit mode request, waits for `ACK|sequence|OK` before switching, inhibits movement after an unconfirmed mode STOP, and keeps AUTO paused until the existing follow-start action enables it. User-requested STOP cancels Pi movement/follow timers and returns to AUTO paused. Movement dispatch requires a fresh sensor snapshot (maximum 750 ms), treats `FAR` as clear, blocks `NA`/missing/stale readings and sends STOP, uses the existing 300 mm threshold, and leaves ESP32 safety interlocks authoritative. Control-state versions prevent a movement waiting across a STOP/mode change from being dispatched afterward. Bounded follow pulses stop without canceling the explicitly started Auto session. Vishal reports the combined robot-manager and API suites passed 46/46. Tharun must verify the integrated behavior. Duplicate-request/stale-result recovery remains open with Niteshvar; Emergency Stop remains open pending a latched ESP32 protocol/firmware change.
 
 ## Phase 4 — REST API
 
