@@ -144,7 +144,7 @@ The following routes are architectural candidates, not permission to invent thei
 ### Checklist
 - [x] Implement route handlers as thin adapters over the robot manager/services.
 - [x] Validate payload structure, command ranges, allowed enum values, and request size.
-- [ ] Explicitly validate and document supported request content types.
+- [x] Validate and document supported request content types: move/stop/mode require `application/json` (optional charset accepted); tests cover missing, non-JSON, and JSON content types.
 - [ ] Use consistent response/error envelopes and documented HTTP status codes.
 - [ ] Add request timeouts and avoid blocking the API event loop/thread with long-running hardware work.
 - [ ] Define authentication and authorization requirements with the team before exposing privileged operations.
@@ -154,7 +154,7 @@ The following routes are architectural candidates, not permission to invent thei
 - [x] Keep OpenAPI/schema documentation and tests synchronized with implementation.
 - [ ] Add tests for success, malformed input, unauthorized access, backend unavailable, hardware disconnected, and timeout.
 
-**Phase 4 evidence (2026-11-03):** Move/stop routes use the shared robot manager through `ApiServices`. Move schema validation rejects unknown fields/directions and invalid speeds; move/stop bodies are capped at 4 KiB with HTTP 413 for oversized requests. HTTP 413 is documented in OpenAPI and the API tests. Vishal reports the API suite passed 17/17. Full error-envelope agreement, bounded dispatch timeouts, and rate limiting remain open; duplicate move/STOP requests are protected by the persistent request-id store.
+**Phase 4 evidence (2026-11-05):** Move/stop routes use the shared robot manager through `ApiServices`. Move schema validation rejects unknown fields/directions and invalid speeds; move/stop bodies are capped at 4 KiB with HTTP 413 for oversized requests. Move/stop/mode requests require `application/json`; missing and non-JSON content types receive HTTP 415, with optional charset accepted. README/OpenAPI documentation and tests are synchronized. Vishal reports the API suite passed 41/41 after these changes. Full error-envelope agreement, bounded dispatch timeouts, and rate limiting remain open; duplicate move/STOP requests are protected by the persistent request-id store.
 
 ### Exit criteria
 - [ ] Routes match the agreed contract.

@@ -821,7 +821,10 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
 
         middleware = main.CommandBodySizeLimitMiddleware(app)
         await middleware(
-            {"type": "http", "method": "POST", "path": "/api/v1/robot/move"},
+            {
+                "type": "http", "method": "POST", "path": "/api/v1/robot/move",
+                "headers": [(b"content-type", b"application/json")],
+            },
             receive,
             send,
         )
@@ -849,12 +852,45 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
 
         middleware = main.CommandBodySizeLimitMiddleware(app)
         await middleware(
-            {"type": "http", "method": "POST", "path": "/api/v1/robot/move"},
+            {
+                "type": "http", "method": "POST", "path": "/api/v1/robot/move",
+                "headers": [(b"content-type", b"application/json; charset=utf-8")],
+            },
             receive,
             send,
         )
 
         self.assertEqual(len(received), 4096)
+
+    async def test_command_body_rejects_missing_or_non_json_content_type(self):
+        for headers in ([], [(b"content-type", b"text/plain")]):
+            with self.subTest(headers=headers):
+                reached_route = False
+                sent = []
+
+                async def app(_scope, _receive, _send):
+                    nonlocal reached_route
+                    reached_route = True
+
+                async def receive():
+                    return {"type": "http.request", "body": b"{}", "more_body": False}
+
+                async def send(message):
+                    sent.append(message)
+
+                middleware = main.CommandBodySizeLimitMiddleware(app)
+                await middleware(
+                    {
+                        "type": "http", "method": "POST", "path": "/api/v1/robot/move",
+                        "headers": headers,
+                    },
+                    receive,
+                    send,
+                )
+
+                self.assertFalse(reached_route)
+                self.assertEqual(sent[0]["status"], 415)
+                self.assertIn(b"unsupported_media_type", sent[1]["body"])
 
 
 if __name__ == "__main__":

@@ -196,6 +196,10 @@ verification.
 
 Robot command endpoints can return these responses:
 
+- **415 Unsupported Media Type** when a move, stop, or mode request does not use `application/json`. A `charset` parameter is allowed:
+  ```json
+  {"detail":{"error":"unsupported_media_type","supported":["application/json"]}}
+  ```
 - **401 Unauthorized** when the Bearer token is missing or incorrect:
   ```json
   {"detail":{"error":"unauthorized"}}

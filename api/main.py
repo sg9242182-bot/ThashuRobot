@@ -519,6 +519,25 @@ class CommandBodySizeLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
+        content_type = next(
+            (value.decode("latin-1") for key, value in scope.get("headers", [])
+             if key.lower() == b"content-type"),
+            "",
+        )
+        media_type = content_type.split(";", 1)[0].strip().lower()
+        if media_type != "application/json":
+            response = JSONResponse(
+                status_code=415,
+                content={
+                    "detail": {
+                        "error": "unsupported_media_type",
+                        "supported": ["application/json"],
+                    }
+                },
+            )
+            await response(scope, receive, send)
+            return
+
         messages = []
         size = 0
         while True:
@@ -579,6 +598,19 @@ def _log_command_outcome(
 
 
 ROBOT_COMMAND_ERROR_RESPONSES = {
+    415: {
+        "description": "Command bodies must use application/json.",
+        "content": {
+            "application/json": {
+                "example": {
+                    "detail": {
+                        "error": "unsupported_media_type",
+                        "supported": ["application/json"],
+                    }
+                },
+            }
+        },
+    },
     409: {
         "description": "The request conflicts with the control mode, safety interlocks, or an earlier action using the same request_id.",
         "content": {
