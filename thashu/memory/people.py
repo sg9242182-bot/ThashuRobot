@@ -21,6 +21,13 @@ class PeopleMemory:
         self.data.setdefault(self.MEMORY_KEY, {})
 
     @staticmethod
+    def _place_key(value):
+        """Normalize an explicitly supplied place label for exact identity matching."""
+        if not isinstance(value, str):
+            return ""
+        return " ".join(value.casefold().split())
+
+    @staticmethod
     def _confirmed_name(name):
         return (
             isinstance(name, str)
@@ -85,7 +92,7 @@ class PeopleMemory:
                 existing_location = record.get("location")
                 if not isinstance(existing_location, str):
                     existing_location = ""
-                return existing_location.casefold() == (location or "").casefold()
+                return self._place_key(existing_location) == self._place_key(location or "")
             return True
         if any(same_record(record) for record in records):
             return False
@@ -121,7 +128,7 @@ class PeopleMemory:
                 raise ValueError("Place search text must be a non-empty string")
             if kind not in (None, "event"):
                 raise ValueError("Place filtering is available only for event recall")
-        place_key = " ".join((location or "").casefold().split())
+        place_key = self._place_key(location or "")
         needle = " ".join((contains or "").casefold().split())
         limit = max(1, min(self.DEFAULT_RECALL_LIMIT, int(limit)))
         people = self.data.get(self.MEMORY_KEY, {})
@@ -164,6 +171,34 @@ class PeopleMemory:
                 records.append(recalled)
         records.sort(key=lambda record: record.get("saved_at") or "", reverse=True)
         return records[:limit]
+
+    def recall_at_place(self, location: str, limit=DEFAULT_RECALL_LIMIT, *, person=None):
+        """Recall bounded events for an explicit exact place label.
+
+        If person is supplied, only that confirmed identity is searched. Without a
+        person filter, results include their associated person names so callers can
+        present the event relationship without inventing an identity.
+        """
+        place_key = self._place_key(location)
+        if not place_key or len(location.strip()) > 80:
+            raise ValueError("Place search text must contain 1 to 80 characters")
+        if person is not None and not self._confirmed_name(person):
+            return []
+        limit = max(1, min(self.DEFAULT_RECALL_LIMIT, int(limit)))
+        people = self.data.get(self.MEMORY_KEY, {})
+        if not isinstance(people, dict):
+            return []
+        names = [person] if person is not None else list(people)
+        results = []
+        for name in names:
+            if not self._confirmed_name(name):
+                continue
+            for record in self.recall(name, limit=self.MAX_MEMORIES_PER_KIND,
+                                      kind="event", location=location):
+                record["person"] = name
+                results.append(record)
+        results.sort(key=lambda record: record.get("saved_at") or "", reverse=True)
+        return results[:limit]
 
     def forget(self, name: str, kind=None, text=None, *, confirmed=False):
         """Delete one person's memories; callers must require explicit confirmation."""
