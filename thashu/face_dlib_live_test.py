@@ -82,7 +82,7 @@ def main():
     try:
         while True:
             name = input(
-                "Identity to enroll (for example Tharun / Durai / Madeshwari), "
+                "Identity to enroll (for example Tharun / Durai / Mageswari), "
                 "or Enter when done: "
             ).strip()
             if not name:
