@@ -1037,7 +1037,12 @@ Acceptance:
 
 Phase 10 — Reliability \& Recovery
 
-Status: NOT STARTED
+Status: IN PROGRESS — baseline audit complete; cleanup and recovery hardening underway. Phase 9 remains separately open for its two Pi edge checks.
+
+Initial Phase 10 audit (2026-11-06):
+- Existing safe foundations: ESP32 watchdog stops motors after Pi-frame loss; Pi motion commands have bounded stop timers; GPIOControl reconnects and rejects stale sensor snapshots; camera reconnects after frame loss; AudioManager has a bounded five-attempt watchdog; Whisper catches inference errors and returns empty text; Piper cache generation has a 60-second timeout.
+- Gaps found: live Piper/aplay playback has no timeout; main has no orderly cleanup on interruption or unexpected exit; the shutdown button asks Linux to power off without first sending a motor STOP and closing subsystems; AudioManager.stop() and GPIOControl.close() signal their background threads but do not join them. Sensor and controller fail-safe paths exist, but physical fault/recovery acceptance remains unverified.
+- Preserve existing ESP32 safety/watchdogs and manager ownership. Phase 10 will harden lifecycle/recovery in existing files, add focused regression tests, then guide controlled Pi failure/recovery checks.
 
 Tasks:
 
