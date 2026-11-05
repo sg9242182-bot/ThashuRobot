@@ -58,6 +58,7 @@ class VisionCore:
         self.detector = detector
         self.person_detector = person_detector
         self.person_tracker = person_tracker
+        self.face_backend = face_backend
         self.recognizer = recognizer
         self.database = database
         self.tracker = tracker
