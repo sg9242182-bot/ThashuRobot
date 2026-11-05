@@ -31,12 +31,23 @@ class VisionCore:
             if person_detector is None:
                 from vision.person_detection import UpperBodyDetector
                 person_detector = UpperBodyDetector()
+        face_backend = os.environ.get("THASHU_FACE_BACKEND", "arcface").strip().casefold()
+        if face_backend not in {"arcface", "dlib"}:
+            raise ValueError("THASHU_FACE_BACKEND must be 'arcface' or 'dlib'")
         if recognizer is None:
-            from vision.face_recognition import FaceRecognizer
-            recognizer = FaceRecognizer(model_path("face", "w600k_r50.onnx"))
+            if face_backend == "dlib":
+                from vision.face_recognition import DlibFaceRecognizer
+                recognizer = DlibFaceRecognizer()
+            else:
+                from vision.face_recognition import FaceRecognizer
+                recognizer = FaceRecognizer(model_path("face", "w600k_r50.onnx"))
         if database is None:
-            from vision.face_database import FaceDatabase
-            database = FaceDatabase(data_path("people_faces.json"))
+            if face_backend == "dlib":
+                from vision.face_database import DlibFaceDatabase
+                database = DlibFaceDatabase(data_path("people_faces_dlib.json"))
+            else:
+                from vision.face_database import FaceDatabase
+                database = FaceDatabase(data_path("people_faces.json"))
         if tracker is None:
             from vision.tracker import CentroidTracker
             tracker = CentroidTracker(max_disappeared=20)
@@ -489,9 +500,13 @@ class VisionCore:
                 enrollment_active = bool(
                     enrollment and enrollment["status"] == "collecting"
                 )
-            recog_interval = (
-                enrollment_recog_interval if enrollment_active else 0.5
-            )
+            # Dlib descriptors are more CPU intensive. Run them at a lower
+            # cadence inside the dedicated vision worker; camera capture,
+            # audio, motor control, and safety loops remain independent.
+            if self.face_backend == "dlib":
+                recog_interval = 0.75 if enrollment_active else 0.75
+            else:
+                recog_interval = enrollment_recog_interval if enrollment_active else 0.5
             if now - last_recog > recog_interval and faces:
                 for face_index, (x1, y1, x2, y2) in enumerate(faces):
                     if not self._processing_enabled.is_set():
@@ -593,10 +608,15 @@ class VisionCore:
                                     else (None, -1.0)
                                 )
                                 other_name, overlap_score = overlap
-                                if (
-                                    other_name is not None
-                                    and overlap_score >= self.database.threshold
-                                ):
+                                overlap_check = getattr(
+                                    self.database, "is_overlap", None
+                                )
+                                overlaps = (
+                                    overlap_check(overlap_score)
+                                    if callable(overlap_check)
+                                    else overlap_score >= self.database.threshold
+                                )
+                                if other_name is not None and overlaps:
                                     enrollment["overlap_rejections"] = (
                                         enrollment.get("overlap_rejections", 0) + 1
                                     )
@@ -639,8 +659,13 @@ class VisionCore:
                             else "Unknown"
                         )
                         if debug_match and recognized is not None and votes < 3:
+                            gate_label = (
+                                "distance gates passed"
+                                if self.face_backend == "dlib"
+                                else "similarity gates passed"
+                            )
                             print(
-                                "[FACE MATCH TEST] similarity gates passed; "
+                                f"[FACE MATCH TEST] {gate_label}; "
                                 f"temporal confirmation {votes}/3 for {recognized}"
                             )
                         old_published_name = self.current_names.get(track_id, "Unknown")
