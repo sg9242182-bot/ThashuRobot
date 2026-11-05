@@ -31,14 +31,27 @@ class FaceRecognizer:
         self.input_name = model_input.name
         self.input_shape = model_input.shape
 
-    def is_valid_face(self, face_img):
+    @staticmethod
+    def _quality_failure_reason(face_img):
         if face_img is None or getattr(face_img, "size", 0) == 0:
-            return False
-        h, w = face_img.shape[:2]
+            return "empty_face_crop"
+        try:
+            h, w = face_img.shape[:2]
+        except (AttributeError, TypeError, ValueError):
+            return "invalid_face_crop"
         if h < 50 or w < 50:
-            return False
-        gray = cv2.cvtColor(face_img, cv2.COLOR_BGR2GRAY)
-        return cv2.Laplacian(gray, cv2.CV_64F).var() >= 50
+            return f"face_crop_too_small={w}x{h}"
+        try:
+            gray = cv2.cvtColor(face_img, cv2.COLOR_BGR2GRAY)
+            sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+        except (cv2.error, TypeError, ValueError):
+            return "face_quality_measure_failed"
+        if sharpness < 50:
+            return f"face_crop_blurry={sharpness:.1f}<50"
+        return None
+
+    def is_valid_face(self, face_img):
+        return self._quality_failure_reason(face_img) is None
 
     @staticmethod
     def align(face_img, landmarks):
@@ -69,24 +82,40 @@ class FaceRecognizer:
 
         landmarks must be YuNet's five points in the full camera-frame
         coordinates. An unaligned Haar crop is deliberately not embedded.
+        On failure, last_failure_reason provides a non-image diagnostic for the
+        optional Pi face-match debug log.
         """
-        if not self.is_valid_face(face_img) or landmarks is None:
+        self.last_failure_reason = None
+        quality_failure = self._quality_failure_reason(face_img)
+        if quality_failure is not None:
+            self.last_failure_reason = quality_failure
             return None
-        points = np.asarray(landmarks, dtype=np.float32).reshape(-1, 2)
-        if points.shape != (5, 2):
+        if landmarks is None:
+            self.last_failure_reason = "missing_yunet_landmarks"
+            return None
+        try:
+            points = np.asarray(landmarks, dtype=np.float32).reshape(-1, 2)
+        except (TypeError, ValueError):
+            self.last_failure_reason = "invalid_yunet_landmarks"
+            return None
+        if points.shape != (5, 2) or not np.isfinite(points).all():
+            self.last_failure_reason = "invalid_yunet_landmarks"
             return None
         ox, oy = bbox_origin
         points = points - np.asarray([ox, oy], dtype=np.float32)
         aligned = self.align(face_img, points)
         if aligned is None:
+            self.last_failure_reason = "face_alignment_failed"
             return None
         try:
             output = self.session.run(None, {self.input_name: self.preprocess(aligned)})[0]
             embedding = np.asarray(output, dtype=np.float32).reshape(-1)
             norm = float(np.linalg.norm(embedding))
             if not np.isfinite(norm) or norm <= 1e-12 or not np.isfinite(embedding).all():
+                self.last_failure_reason = "invalid_model_embedding"
                 return None
             return embedding / norm
         except Exception as exc:
+            self.last_failure_reason = f"onnx_inference_failed={type(exc).__name__}"
             print(f"[RECOGNIZER ERROR] {exc}")
             return None
