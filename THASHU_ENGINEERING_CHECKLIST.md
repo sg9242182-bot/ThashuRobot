@@ -997,33 +997,38 @@ Acceptance:
 
 Phase 9 — Unified Person + Place + Episodic Memory
 
-Status: IN PROGRESS — architecture review for linking confirmed people and explicitly user-named places to important events across records. Place names must be user-provided; camera-based place recognition and SLAM remain out of scope. Implementation follows the existing-memory audit.
+Status: IMPLEMENTATION AND ISOLATED UNIT TESTS COMPLETE; Raspberry Pi voice acceptance pending.
 
-Initial architecture audit (2026-11-04): `thashu/memory/people.py` stores event records under one confirmed person and keeps an optional user-supplied location as event text; it already rejects exact duplicate event/location pairs. `thashu/memory/storage.py` provides atomic machine-local JSON writes and refuses to overwrite an unreadable store. `thashu/memory/long_term.py` is generic key/value storage, while `thashu/core/decision.py` and `thashu/main.py` provide the explicit event capture/recall path. Phase 8 removed camera place recognition. There is no canonical place record or cross-record relationship index yet. Phase 9 must first define explicit user-labeled place identity and relationship/recall rules, then extend the existing data model; no new module has been shown necessary.
+Architecture:
+- Reuse the existing confirmed-person event store; do not add a second memory database or place-recognition subsystem.
+- A place identity is the exact place label explicitly spoken by the user, normalized only for case and repeated whitespace. Labels do not resolve aliases or imply camera-based recognition.
+- Each saved event links its confirmed person, event text, explicit place label (if supplied), and UTC saved timestamp in one existing record.
+- Place recall is bounded to five newest matching events and can be scoped to the currently confirmed person. Runtime place recall always uses that person scope.
+- Missing place remains unknown; identity must be confirmed at wake time before a personal event can be saved or recalled.
+- Duplicate detection treats case/spacing variants of the same event and place as the same record. Existing atomic storage and unreadable-store protection remain in use.
 
-Phase 9 first implementation (2026-11-05): Added explicit place-based event recall for the currently recognized person. `thashu/core/decision.py` parses bounded “what happened at/in <place>” queries; `thashu/main.py` routes them through the existing person-scoped memory path; `thashu/memory/people.py` filters event locations by normalized exact label and retains the existing five-record recall bound. This uses only spoken/saved place labels, creates no camera place recognition, adds no storage module, and leaves existing records unchanged. Labels do not resolve aliases. Tests and Raspberry Pi validation have not been run; acceptance items remain open.
-
-Phase boundary: Phase 8 does not build a place-recognition system or a generalized person/place/event relationship graph. Phase 9 remains future work for broader cross-record relationships and retrieval.
+Implementation (2026-11-05):
+- Updated `thashu/memory/people.py` with normalized exact place-label matching and bounded `recall_at_place()`, returning person, event, place, and saved time together. No schema migration or new module was introduced.
+- Updated `thashu/main.py` to use place-indexed recall while retaining the recognized-person scope.
+- Added `thashu/tests/test_unified_memory.py` for explicit place parsing, person/place/time linkage, exact label matching, identity scoping, duplicate handling, and the five-result bound.
+- Isolated tests passed: 7/7; Python syntax compilation passed for changed memory/test/parser sources. Tests ran against an isolated scratch copy with mocked storage; this does not replace Raspberry Pi integration acceptance.
 
 Tasks:
 
-\[ ] Connect person identity with important events.
-
-\[ ] Connect place identity with important events.
-
-\[ ] Connect person + place + event + time when relevant.
-
-\[ ] Ensure memory retrieval remains bounded and useful.
-
-\[ ] Avoid duplicate/conflicting records.
+\[x] Connect confirmed person identity with important events.
+\[x] Connect explicitly user-named place identity with important events.
+\[x] Keep person + place + event + saved time together when relevant.
+\[x] Keep retrieval bounded and relevant (maximum five newest records; exact place label).
+\[x] Avoid duplicate records caused by case/spacing differences; preserve atomic storage and unreadable-store protection.
+\[x] Do not infer a place from camera imagery or substitute an unconfirmed identity.
+\[ ] Verify integrated voice save, cancellation, restart persistence, and person/place recall on the Raspberry Pi.
 
 Acceptance:
 
-\[ ] Thashu can associate significant interactions with people.
-
-\[ ] Thashu can associate significant events with places.
-
-\[ ] Person/place context can be retrieved together when useful.
+\[x] Event records associate significant interactions with the confirmed person, optional explicit place label, and saved timestamp.
+\[x] Place-based lookup returns only exact normalized labels, bounded to five results.
+\[x] A place query in the runtime is scoped to the currently recognized person; unknown or stale identity cannot create or expose person-specific links.
+\[ ] Raspberry Pi voice acceptance: save a read-back-confirmed event with a place, restart and recall it by person and place, verify an unstated location stays unknown, and verify cancellation writes nothing.
 
 \---
 
