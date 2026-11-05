@@ -244,6 +244,35 @@ class FaceDatabase:
             raise
         return True
 
+    def compare_sample_and_prototype_scores(self, embedding):
+        """Compare legacy max-sample scoring with one count-neutral centroid score.
+
+        Diagnostic only: this method never changes the active match decision or
+        stored embeddings. It is intended to evaluate a prototype scorer against
+        the existing identity database before any threshold recalibration.
+        """
+        if not self.data:
+            return []
+        try:
+            query = self._normalize(embedding)
+        except (TypeError, ValueError):
+            return []
+
+        comparisons = []
+        for name, embeddings in self.data.items():
+            if not embeddings:
+                continue
+            matrix = np.stack([
+                self._normalize(stored) for stored in embeddings
+            ])
+            legacy_score = float(np.max(matrix @ query))
+            prototype = self._normalize(np.mean(matrix, axis=0))
+            prototype_score = float(np.dot(query, prototype))
+            comparisons.append(
+                (name, len(embeddings), legacy_score, prototype_score)
+            )
+        return sorted(comparisons, key=lambda item: item[2], reverse=True)
+
     def match_details(self, embedding):
         """Return the top identity, its score, and its gap over the runner-up."""
         if not self.data:
