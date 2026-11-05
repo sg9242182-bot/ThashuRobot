@@ -105,14 +105,15 @@ Provide one authoritative high-level component for robot state and command coord
 ### Checklist
 - [x] Verify the single Pi-side `RobotCommandManager` path for API and voice motor commands; tests cover validation, mode tracking, and transport failure.
 - [x] Implement explicit MANUAL/AUTO mode selection; switch only after STOP receives `ACK|sequence|OK`, cancel Pi movement/follow work first, and keep AUTO paused until the existing follow behavior is explicitly started.
-- [ ] Confirm the mode-transition behavior with Tharun on the integrated robot.
+- [ ] Confirm the mode-transition behavior with Tharun on the integrated robot. Pi code and unit tests cover the stop-before-switch and no-auto-restart rules; physical robot verification is still pending.
 - [x] Route movement commands through request validation, manager dispatch, ACK tracking, and command-result reporting.
 - [x] Require a STOP `ACK|sequence|OK` before the first Manual move; tests verify a rejected/missing ACK prevents the move and an already-Manual move does not repeat the transition STOP.
 - [x] Require fresh, relevant sensor readings for each movement: 750 ms maximum age, `FAR` is clear, missing/`NA`/stale values block and send STOP, front ToF for forward/turns, rear sensor for backward, and numeric clearance above 300 mm.
 - [x] Cancel timer/follow work on STOP or mode switch and reject app moves queued against an older control-state version.
 - [x] Implement STOP in either mode so it cancels Pi movement/follow work, sends dedicated STOP, selects AUTO paused, and never resumes autonomously.
 - [x] Handle ESP32 ACK rejection and timeout in the command-result flow.
-- [ ] Define duplicate-request handling, stale-state behavior, and uncertain dispatch recovery with Niteshvar and Tharun.
+- [x] Require UUID `request_id` values for move and STOP. Persist request ID, action, command ID, and latest result in SQLite for 24 hours; matching retries reuse the command, mismatched actions return 409, and interrupted dispatches become unknown without replay. Tests cover move/STOP retries, process restarts, ACK results, and action conflicts.
+- [x] Define stale-state and uncertain-dispatch recovery: an in-flight request found after restart returns `unknown` with its original command ID and is never resent. Expired records can be treated as new requests after 24 hours.
 - [ ] Add a latched Emergency Stop only after Tharun updates and verifies an ESP32 protocol command/event and explicit reset behavior; Pi-side latch must mirror and enforce it.
 - [x] Keep API routes from independently mutating low-level state; they dispatch through the robot manager.
 - [x] Keep motor actuation and hardware safety logic on the ESP32; the Pi sends semantic commands.
@@ -122,7 +123,7 @@ Provide one authoritative high-level component for robot state and command coord
 - [x] Conflicting commands are safely serialized through the shared manager lock; a concurrent move/STOP test verifies they do not overlap.
 - [x] API responses distinguish Pi dispatch from later ESP32 ACK, safety rejection, or timeout.
 
-**Phase 3 evidence (2026-11-05):** The shared Pi manager now supports an explicit mode request, waits for `ACK|sequence|OK` before switching, inhibits movement after an unconfirmed mode STOP, and keeps AUTO paused until the existing follow-start action enables it. User-requested STOP cancels Pi movement/follow timers and returns to AUTO paused. Movement dispatch requires a fresh sensor snapshot (maximum 750 ms), treats `FAR` as clear, blocks `NA`/missing/stale readings and sends STOP, uses the existing 300 mm threshold, and leaves ESP32 safety interlocks authoritative. Control-state versions prevent a movement waiting across a STOP/mode change from being dispatched afterward. Bounded follow pulses stop without canceling the explicitly started Auto session. Vishal reports the combined robot-manager and API suites passed 46/46. Tharun must verify the integrated behavior. Duplicate-request/stale-result recovery remains open with Niteshvar; Emergency Stop remains open pending a latched ESP32 protocol/firmware change.
+**Phase 3 evidence (2026-11-05):** The shared Pi manager now supports an explicit mode request, waits for `ACK|sequence|OK` before switching, inhibits movement after an unconfirmed mode STOP, and keeps AUTO paused until the existing follow-start action enables it. User-requested STOP cancels Pi movement/follow timers and returns to AUTO paused. Movement dispatch requires a fresh sensor snapshot (maximum 750 ms), treats `FAR` as clear, blocks `NA`/missing/stale readings and sends STOP, uses the existing 300 mm threshold, and leaves ESP32 safety interlocks authoritative. Control-state versions prevent a movement waiting across a STOP/mode change from being dispatched afterward. Bounded follow pulses stop without canceling the explicitly started Auto session. After persistent request ID idempotency was added for move and STOP, the combined API and robot-manager suites passed 61/61. In-flight records found after restart return unknown and are never replayed. Tharun must still verify mode transitions on the integrated robot. Emergency Stop remains open pending a latched ESP32 protocol/firmware change.
 
 ## Phase 4 — REST API
 
@@ -147,12 +148,13 @@ The following routes are architectural candidates, not permission to invent thei
 - [ ] Use consistent response/error envelopes and documented HTTP status codes.
 - [ ] Add request timeouts and avoid blocking the API event loop/thread with long-running hardware work.
 - [ ] Define authentication and authorization requirements with the team before exposing privileged operations.
-- [ ] Apply rate limiting or duplicate-command protection where required by the threat model and command semantics.
+- [x] Protect move and STOP retries from duplicate dispatch using persistent request IDs and a 24-hour SQLite store.
+- [ ] Apply rate limiting where required by the threat model and command semantics.
 - [ ] Do not expose arbitrary shell execution, unrestricted filesystem access, or unrestricted hardware control.
 - [x] Keep OpenAPI/schema documentation and tests synchronized with implementation.
 - [ ] Add tests for success, malformed input, unauthorized access, backend unavailable, hardware disconnected, and timeout.
 
-**Phase 4 evidence (2026-11-03):** Move/stop routes use the shared robot manager through `ApiServices`. Move schema validation rejects unknown fields/directions and invalid speeds; move/stop bodies are capped at 4 KiB with HTTP 413 for oversized requests. HTTP 413 is documented in OpenAPI and the API tests. Vishal reports the API suite passed 17/17. Full error-envelope agreement, bounded dispatch timeouts, and rate/duplicate policy remain open.
+**Phase 4 evidence (2026-11-03):** Move/stop routes use the shared robot manager through `ApiServices`. Move schema validation rejects unknown fields/directions and invalid speeds; move/stop bodies are capped at 4 KiB with HTTP 413 for oversized requests. HTTP 413 is documented in OpenAPI and the API tests. Vishal reports the API suite passed 17/17. Full error-envelope agreement, bounded dispatch timeouts, and rate limiting remain open; duplicate move/STOP requests are protected by the persistent request-id store.
 
 ### Exit criteria
 - [ ] Routes match the agreed contract.

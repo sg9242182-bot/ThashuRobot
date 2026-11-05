@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import secrets
+import sqlite3
 import sys
 import threading
 import time
@@ -16,9 +17,9 @@ from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconn
 from starlette.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from api.config import get_api_token
+from api.config import get_api_state_db_path, get_api_token
 from pydantic import BaseModel, ConfigDict, Field
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -44,15 +45,46 @@ def _default_robot_manager_factory():
 class MoveRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    request_id: UUID
     direction: Literal["forward", "backward", "left", "right"]
     speed: int = Field(default=200, ge=0, le=255, strict=True)
 
 
 class CommandResponse(BaseModel):
+    request_id: str | None = None
     command_id: str
     command: str
-    status: Literal["dispatched"]
+    status: Literal[
+        "dispatching", "dispatched", "acknowledged", "safety_error",
+        "timed_out", "rejected", "unknown",
+    ]
     control_mode: Literal["AUTO", "MANUAL"]
+    error_code: str | None = None
+    timestamp: str | None = None
+
+
+class StopRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: UUID
+
+
+def _replay_command_request(record, action, request_id):
+    if record["action"] != action:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "request_id_conflict",
+                "error_code": "REQUEST_ID_REUSED",
+                "request_id": request_id,
+            },
+        )
+    if record["error"] is not None and record["status"] != "unknown":
+        raise HTTPException(
+            status_code=record["http_status"],
+            detail=record["error"],
+        )
+    return CommandResponse(**record["result"])
 
 
 class ModeSwitchRequest(BaseModel):
@@ -69,17 +101,22 @@ class ModeSwitchResponse(BaseModel):
 class ApiServices:
     """Small adapter around existing services; injectable for API tests."""
 
-    def __init__(self, robot_manager_factory: Callable = _default_robot_manager_factory):
+    def __init__(
+        self,
+        robot_manager_factory: Callable = _default_robot_manager_factory,
+        state_db_path=None,
+    ):
         self._robot_manager_factory = robot_manager_factory
         self._robot_manager = None
         self._owns_robot_manager = True
         self._lock = asyncio.Lock()
         self._command_lock = threading.RLock()
-        self._command_results = {}
+        self._request_lock = asyncio.Lock()
+        self._state_db_path = str(state_db_path or get_api_state_db_path())
+        self._db_connection = None
         self._command_subscribers = set()
         self._command_tasks = set()
         self._result_retention_seconds = 24 * 60 * 60
-        self._max_command_results = 1000
 
     def attach_robot_manager(self, manager):
         """Use the robot process's existing manager and serial connection."""
@@ -121,44 +158,226 @@ class ApiServices:
         manager = await self.robot_manager()
         return await asyncio.to_thread(manager.safety_stop)
 
-    def _prune_command_results(self):
-        now = time.monotonic()
-        expired = [
-            command_id
-            for command_id, record in self._command_results.items()
-            if now - record["_created_monotonic"] > self._result_retention_seconds
-        ]
-        for command_id in expired:
-            self._command_results.pop(command_id, None)
-        while len(self._command_results) > self._max_command_results:
-            oldest = next(iter(self._command_results))
-            self._command_results.pop(oldest, None)
-
-    def register_command(self, command_id, command, control_mode):
-        now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+    def _database(self):
         with self._command_lock:
-            self._prune_command_results()
-            self._command_results[command_id] = {
-                "command_id": command_id,
-                "command": command,
-                "status": "dispatched",
-                "error_code": None,
-                "timestamp": now,
-                "control_mode": control_mode,
-                "_created_monotonic": time.monotonic(),
-            }
-            self._prune_command_results()
+            if self._db_connection is not None:
+                return self._db_connection
+            if self._state_db_path != ":memory:":
+                db_path = Path(self._state_db_path).expanduser()
+                db_path.parent.mkdir(parents=True, exist_ok=True)
+                target = str(db_path)
+            else:
+                target = ":memory:"
+            connection = sqlite3.connect(
+                target,
+                timeout=10,
+                check_same_thread=False,
+                isolation_level=None,
+            )
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA busy_timeout = 10000")
+            connection.execute("PRAGMA journal_mode = WAL")
+            connection.execute("PRAGMA synchronous = FULL")
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS command_requests (
+                    request_id TEXT PRIMARY KEY,
+                    action_json TEXT NOT NULL,
+                    command_id TEXT NOT NULL UNIQUE,
+                    result_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    http_status INTEGER,
+                    error_json TEXT,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                )"""
+            )
+            now = time.time()
+            connection.execute(
+                "DELETE FROM command_requests WHERE created_at < ?",
+                (now - self._result_retention_seconds,),
+            )
+            # A dispatch marker or an outstanding ACK wait means the process
+            # may have stopped before saving the outcome. Never replay the
+            # command: expose its outcome as unknown instead.
+            inflight = connection.execute(
+                "SELECT request_id, result_json FROM command_requests "
+                "WHERE status IN ('dispatching', 'awaiting_ack')"
+            ).fetchall()
+            for row in inflight:
+                result = json.loads(row["result_json"])
+                result.update(
+                    status="unknown",
+                    error_code="PROCESS_RESTARTED_DURING_DISPATCH",
+                    timestamp=datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+                )
+                connection.execute(
+                    """UPDATE command_requests
+                       SET status = 'unknown', result_json = ?, updated_at = ?
+                       WHERE request_id = ?""",
+                    (json.dumps(result, separators=(",", ":")), now, row["request_id"]),
+                )
+            self._db_connection = connection
+            return connection
+
+    def initialize_command_store(self):
+        """Open and recover durable request records during API startup."""
+        self._database()
+
+    def close_command_store(self):
+        with self._command_lock:
+            if self._db_connection is not None:
+                self._db_connection.close()
+                self._db_connection = None
+
+    @staticmethod
+    def _request_row(row):
+        if row is None:
+            return None
+        return {
+            "request_id": row["request_id"],
+            "action": json.loads(row["action_json"]),
+            "command_id": row["command_id"],
+            "result": json.loads(row["result_json"]),
+            "status": row["status"],
+            "http_status": row["http_status"],
+            "error": json.loads(row["error_json"]) if row["error_json"] else None,
+        }
+
+    def request_record(self, request_id):
+        with self._command_lock:
+            connection = self._database()
+            now = time.time()
+            connection.execute(
+                "DELETE FROM command_requests WHERE created_at < ?",
+                (now - self._result_retention_seconds,),
+            )
+            row = connection.execute(
+                "SELECT * FROM command_requests WHERE request_id = ?",
+                (request_id,),
+            ).fetchone()
+            return self._request_row(row)
+
+    def reserve_command_request(
+        self, request_id, action, command, control_mode, command_id=None
+    ):
+        """Persist the action and command ID before any serial dispatch."""
+        with self._command_lock:
+            connection = self._database()
+            now = time.time()
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                connection.execute(
+                    "DELETE FROM command_requests WHERE created_at < ?",
+                    (now - self._result_retention_seconds,),
+                )
+                row = connection.execute(
+                    "SELECT * FROM command_requests WHERE request_id = ?",
+                    (request_id,),
+                ).fetchone()
+                if row is not None:
+                    connection.execute("COMMIT")
+                    return self._request_row(row), False
+
+                command_id = command_id or str(uuid4())
+                timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+                result = {
+                    "request_id": request_id,
+                    "command_id": command_id,
+                    "command": command,
+                    "status": "dispatching",
+                    "error_code": None,
+                    "timestamp": timestamp,
+                    "control_mode": control_mode,
+                }
+                connection.execute(
+                    """INSERT INTO command_requests
+                       (request_id, action_json, command_id, result_json, status,
+                        created_at, updated_at)
+                       VALUES (?, ?, ?, ?, 'dispatching', ?, ?)""",
+                    (
+                        request_id,
+                        json.dumps(action, separators=(",", ":"), sort_keys=True),
+                        command_id,
+                        json.dumps(result, separators=(",", ":")),
+                        now,
+                        now,
+                    ),
+                )
+                connection.execute("COMMIT")
+                return self.request_record(request_id), True
+            except BaseException:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+
+    def update_command_request(
+        self,
+        request_id,
+        status,
+        error_code=None,
+        http_status=None,
+        error=None,
+        control_mode=None,
+        persist_status=None,
+    ):
+        with self._command_lock:
+            connection = self._database()
+            row = connection.execute(
+                "SELECT result_json FROM command_requests WHERE request_id = ?",
+                (request_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            result = json.loads(row["result_json"])
+            result.update(
+                status=status,
+                error_code=error_code,
+                timestamp=datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+            )
+            if control_mode is not None:
+                result["control_mode"] = control_mode
+            connection.execute(
+                """UPDATE command_requests
+                   SET result_json = ?, status = ?, http_status = ?, error_json = ?, updated_at = ?
+                   WHERE request_id = ?""",
+                (
+                    json.dumps(result, separators=(",", ":")),
+                    persist_status or status,
+                    http_status,
+                    json.dumps(error, separators=(",", ":")) if error is not None else None,
+                    time.time(),
+                    request_id,
+                ),
+            )
+            return result
+
+    def register_command(self, command_id, command, control_mode, request_id=None):
+        request_id = request_id or f"internal:{command_id}"
+        action = {"command": command}
+        record, created = self.reserve_command_request(
+            request_id, action, command, control_mode, command_id=command_id
+        )
+        if not created and record["command_id"] != command_id:
+            return record["result"]
+        return self.update_command_request(
+            request_id,
+            "dispatched",
+            control_mode=control_mode,
+            persist_status="awaiting_ack",
+        )
 
     def command_result(self, command_id):
         with self._command_lock:
-            self._prune_command_results()
-            record = self._command_results.get(command_id)
-            if record is None:
-                return None
-            return {
-                key: record[key]
-                for key in ("command_id", "command", "status", "error_code", "timestamp")
-            }
+            connection = self._database()
+            connection.execute(
+                "DELETE FROM command_requests WHERE created_at < ?",
+                (time.time() - self._result_retention_seconds,),
+            )
+            row = connection.execute(
+                "SELECT result_json FROM command_requests WHERE command_id = ?",
+                (command_id,),
+            ).fetchone()
+            return json.loads(row["result_json"]) if row is not None else None
 
     def subscribe_command_results(self):
         subscriber = asyncio.Queue(maxsize=64)
@@ -169,19 +388,22 @@ class ApiServices:
         self._command_subscribers.discard(subscriber)
 
     async def _publish_command_result(self, command_id, status, error_code):
-        timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
-        with self._command_lock:
-            record = self._command_results.get(command_id)
-            if record is None:
-                return
-            record.update(status=status, error_code=error_code, timestamp=timestamp)
-            event = {
-                "type": "command_result",
-                "command_id": command_id,
-                "status": status,
-                "error_code": error_code,
-                "timestamp": timestamp,
-            }
+        result = self.command_result(command_id)
+        if result is None or result.get("request_id") is None:
+            return
+        result = self.update_command_request(
+            result["request_id"], status, error_code=error_code
+        )
+        if result is None:
+            return
+        event = {
+            "type": "command_result",
+            "command_id": command_id,
+            "request_id": result["request_id"],
+            "status": status,
+            "error_code": error_code,
+            "timestamp": result["timestamp"],
+        }
         for subscriber in tuple(self._command_subscribers):
             if subscriber.full():
                 try:
@@ -216,9 +438,8 @@ class ApiServices:
         # preserve the original command's result for the app. STOP failures do
         # not recursively trigger another STOP.
         if status in {"timed_out", "safety_error"}:
-            with self._command_lock:
-                record = self._command_results.get(command_id)
-                command = record["command"] if record is not None else None
+            record = self.command_result(command_id)
+            command = record["command"] if record is not None else None
             if command in {"forward", "backward", "left", "right"}:
                 try:
                     await self.safety_stop()
@@ -359,7 +580,7 @@ def _log_command_outcome(
 
 ROBOT_COMMAND_ERROR_RESPONSES = {
     409: {
-        "description": "The selected control mode or a Pi-side sensor interlock blocks movement.",
+        "description": "The request conflicts with the control mode, safety interlocks, or an earlier action using the same request_id.",
         "content": {
             "application/json": {
                 "examples": {
@@ -408,6 +629,14 @@ ROBOT_COMMAND_ERROR_RESPONSES = {
                             "detail": {
                                 "error": "safety_blocked",
                                 "error_code": "OBSTACLE_BLOCKED",
+                            }
+                        }
+                    },
+                    "request_id_reused": {
+                        "value": {
+                            "detail": {
+                                "error": "request_id_conflict",
+                                "error_code": "REQUEST_ID_REUSED",
                             }
                         }
                     },
@@ -489,10 +718,17 @@ async def require_api_token(
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    yield
-    manager = services._robot_manager
-    if manager is not None and services._owns_robot_manager:
-        await asyncio.to_thread(manager.motor.gpio.close)
+    await asyncio.to_thread(services.initialize_command_store)
+    try:
+        yield
+    finally:
+        pending_commands = tuple(services._command_tasks)
+        if pending_commands:
+            await asyncio.gather(*pending_commands, return_exceptions=True)
+        manager = services._robot_manager
+        if manager is not None and services._owns_robot_manager:
+            await asyncio.to_thread(manager.motor.gpio.close)
+        await asyncio.to_thread(services.close_command_store)
 
 
 app = FastAPI(
@@ -596,100 +832,129 @@ async def switch_control_mode(request: ModeSwitchRequest):
 )
 async def move(request: MoveRequest):
     """Dispatch a movement command and report its later ESP32 result asynchronously."""
-    command_id = str(uuid4())
-    try:
-        sequence = await services.dispatch_in_selected_mode(
+    request_id = str(request.request_id)
+    action = {
+        "type": "move",
+        "direction": request.direction,
+        "speed": request.speed,
+    }
+
+    async with services._request_lock:
+        existing = services.request_record(request_id)
+        if existing is not None:
+            response = _replay_command_request(existing, action, request_id)
+            _log_command_outcome(
+                command_id=response.command_id,
+                command=request.direction,
+                outcome="duplicate_replay",
+                http_status=202,
+                control_mode=response.control_mode,
+            )
+            return response
+
+        manager = await services.robot_manager()
+        record, created = services.reserve_command_request(
+            request_id, action, request.direction, manager.mode.value
+        )
+        if not created:
+            return _replay_command_request(record, action, request_id)
+        command_id = record["command_id"]
+
+        def fail(status_code, detail, *, outcome, error_code, state, control_mode=None):
+            services.update_command_request(
+                request_id,
+                state,
+                error_code=error_code,
+                http_status=status_code,
+                error=detail,
+                control_mode=control_mode,
+            )
+            _log_command_outcome(
+                command_id=command_id,
+                command=request.direction,
+                outcome=outcome,
+                http_status=status_code,
+                error_code=error_code,
+                control_mode=control_mode,
+            )
+            raise HTTPException(status_code=status_code, detail=detail)
+
+        try:
+            sequence = await services.dispatch_in_selected_mode(
+                request.direction,
+                request.speed,
+            )
+        except ControlModeError as exc:
+            manager = await services.robot_manager()
+            fail(
+                409,
+                {
+                    "error": "control_mode_conflict",
+                    "error_code": str(exc),
+                    "command_id": command_id,
+                },
+                outcome="rejected",
+                error_code=str(exc),
+                state="rejected",
+                control_mode=manager.mode.value,
+            )
+        except RobotSafetyError as exc:
+            manager = await services.robot_manager()
+            fail(
+                409,
+                {
+                    "error": "safety_blocked",
+                    "error_code": exc.error_code,
+                    "command_id": command_id,
+                },
+                outcome="rejected",
+                error_code=exc.error_code,
+                state="rejected",
+                control_mode=manager.mode.value,
+            )
+        except ValueError:
+            fail(
+                422,
+                {"error": "invalid_command", "command_id": command_id},
+                outcome="rejected",
+                error_code="invalid_command",
+                state="rejected",
+            )
+        except Exception as exc:
+            fail(
+                503,
+                {"error": "robot_unavailable", "command_id": command_id},
+                outcome="failed",
+                error_code="COMMAND_OUTCOME_UNKNOWN",
+                state="unknown",
+                control_mode=manager.mode.value,
+            )
+        if sequence is None:
+            fail(
+                503,
+                {"error": "robot_unavailable", "command_id": command_id},
+                outcome="failed",
+                error_code="COMMAND_OUTCOME_UNKNOWN",
+                state="unknown",
+                control_mode=manager.mode.value,
+            )
+
+        manager = await services.robot_manager()
+        services.register_command(
+            command_id,
             request.direction,
-            request.speed,
+            manager.mode.value,
+            request_id=request_id,
         )
-    except ControlModeError as exc:
-        manager = await services.robot_manager()
+        services.start_ack_tracking(command_id, sequence)
         _log_command_outcome(
             command_id=command_id,
             command=request.direction,
-            outcome="rejected",
-            http_status=409,
-            error_code=str(exc),
+            outcome="dispatched",
+            http_status=202,
             control_mode=manager.mode.value,
         )
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error": "control_mode_conflict",
-                "error_code": str(exc),
-                "command_id": command_id,
-            },
-        ) from exc
-    except RobotSafetyError as exc:
-        manager = await services.robot_manager()
-        _log_command_outcome(
-            command_id=command_id,
-            command=request.direction,
-            outcome="rejected",
-            http_status=409,
-            error_code=exc.error_code,
-            control_mode=manager.mode.value,
-        )
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error": "safety_blocked",
-                "error_code": exc.error_code,
-                "command_id": command_id,
-            },
-        ) from exc
-    except ValueError as exc:
-        _log_command_outcome(
-            command_id=command_id,
-            command=request.direction,
-            outcome="rejected",
-            http_status=422,
-            error_code="invalid_command",
-        )
-        raise HTTPException(
-            status_code=422,
-            detail={"error": "invalid_command", "command_id": command_id},
-        ) from exc
-    except Exception as exc:
-        _log_command_outcome(
-            command_id=command_id,
-            command=request.direction,
-            outcome="failed",
-            http_status=503,
-            error_code="robot_unavailable",
-        )
-        raise HTTPException(
-            status_code=503,
-            detail={"error": "robot_unavailable", "command_id": command_id},
-        ) from exc
-    if sequence is None:
-        _log_command_outcome(
-            command_id=command_id,
-            command=request.direction,
-            outcome="failed",
-            http_status=503,
-            error_code="robot_unavailable",
-        )
-        raise HTTPException(
-            status_code=503,
-            detail={"error": "robot_unavailable", "command_id": command_id},
-        )
-    manager = await services.robot_manager()
-    services.register_command(command_id, request.direction, manager.mode.value)
-    services.start_ack_tracking(command_id, sequence)
-    _log_command_outcome(
-        command_id=command_id,
-        command=request.direction,
-        outcome="dispatched",
-        http_status=202,
-        control_mode=manager.mode.value,
-    )
-    return CommandResponse(
-        command_id=command_id,
-        command=request.direction,
-        status="dispatched",
-        control_mode=manager.mode.value,
-    )
+        return CommandResponse(**services.command_result(command_id))
 
 
 @app.post(
@@ -700,51 +965,81 @@ async def move(request: MoveRequest):
     dependencies=[Depends(require_api_token)],
     responses=ROBOT_COMMAND_ERROR_RESPONSES,
 )
-async def stop():
+async def stop(request: StopRequest):
     """Dispatch STOP and report its later ESP32 result asynchronously."""
-    command_id = str(uuid4())
-    try:
-        sequence = await services.stop_all()
-    except Exception as exc:
+    request_id = str(request.request_id)
+    action = {"type": "stop"}
+
+    async with services._request_lock:
+        existing = services.request_record(request_id)
+        if existing is not None:
+            response = _replay_command_request(existing, action, request_id)
+            _log_command_outcome(
+                command_id=response.command_id,
+                command="stop",
+                outcome="duplicate_replay",
+                http_status=202,
+                control_mode=response.control_mode,
+            )
+            return response
+
+        manager = await services.robot_manager()
+        record, created = services.reserve_command_request(
+            request_id, action, "stop", manager.mode.value
+        )
+        if not created:
+            return _replay_command_request(record, action, request_id)
+        command_id = record["command_id"]
+
+        try:
+            sequence = await services.stop_all()
+        except Exception as exc:
+            detail = {"error": "robot_unavailable", "command_id": command_id}
+            services.update_command_request(
+                request_id,
+                "unknown",
+                error_code="COMMAND_OUTCOME_UNKNOWN",
+                http_status=503,
+                error=detail,
+                control_mode=manager.mode.value,
+            )
+            _log_command_outcome(
+                command_id=command_id,
+                command="stop",
+                outcome="failed",
+                http_status=503,
+                error_code="COMMAND_OUTCOME_UNKNOWN",
+                control_mode=manager.mode.value,
+            )
+            raise HTTPException(status_code=503, detail=detail) from exc
+        if sequence is None:
+            detail = {"error": "robot_unavailable", "command_id": command_id}
+            services.update_command_request(
+                request_id,
+                "unknown",
+                error_code="COMMAND_OUTCOME_UNKNOWN",
+                http_status=503,
+                error=detail,
+                control_mode=manager.mode.value,
+            )
+            raise HTTPException(status_code=503, detail=detail)
+
+        manager = await services.robot_manager()
+        services.register_command(
+            command_id,
+            "stop",
+            manager.mode.value,
+            request_id=request_id,
+        )
+        services.start_ack_tracking(command_id, sequence)
         _log_command_outcome(
             command_id=command_id,
             command="stop",
-            outcome="failed",
-            http_status=503,
-            error_code="robot_unavailable",
+            outcome="dispatched",
+            http_status=202,
+            control_mode=manager.mode.value,
         )
-        raise HTTPException(
-            status_code=503,
-            detail={"error": "robot_unavailable", "command_id": command_id},
-        ) from exc
-    if sequence is None:
-        _log_command_outcome(
-            command_id=command_id,
-            command="stop",
-            outcome="failed",
-            http_status=503,
-            error_code="robot_unavailable",
-        )
-        raise HTTPException(
-            status_code=503,
-            detail={"error": "robot_unavailable", "command_id": command_id},
-        )
-    manager = await services.robot_manager()
-    services.register_command(command_id, "stop", manager.mode.value)
-    services.start_ack_tracking(command_id, sequence)
-    _log_command_outcome(
-        command_id=command_id,
-        command="stop",
-        outcome="dispatched",
-        http_status=202,
-        control_mode=manager.mode.value,
-    )
-    return CommandResponse(
-        command_id=command_id,
-        command="stop",
-        status="dispatched",
-        control_mode=manager.mode.value,
-    )
+        return CommandResponse(**services.command_result(command_id))
 
 
 @app.websocket("/api/v1/telemetry")

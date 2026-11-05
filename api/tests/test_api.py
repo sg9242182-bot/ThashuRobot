@@ -1,5 +1,8 @@
 import unittest
 import os
+import asyncio
+import tempfile
+from uuid import UUID
 from unittest.mock import patch
 
 from api import main
@@ -126,12 +129,31 @@ class FakeRobotManager:
 class ApiTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.old_services = main.services
-        main.services = main.ApiServices(lambda: FakeRobotManager(FakeMotor(messages=["EVENT|0|READY"])))
+        self.state_directory = tempfile.TemporaryDirectory()
+        self.services_for_cleanup = []
+        main.services = self.make_services(
+            lambda: FakeRobotManager(FakeMotor(messages=["EVENT|0|READY"])),
+            ":memory:",
+        )
         self.token_env = patch.dict(os.environ, {"THASHU_API_TOKEN": "test-token"})
         self.token_env.start()
 
+    def make_services(self, factory, db_path):
+        service = main.ApiServices(factory, state_db_path=db_path)
+        self.services_for_cleanup.append(service)
+        return service
+
+    async def asyncTearDown(self):
+        for service in self.services_for_cleanup:
+            pending = tuple(service._command_tasks)
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+
     def tearDown(self):
         self.token_env.stop()
+        for service in self.services_for_cleanup:
+            service.close_command_store()
+        self.state_directory.cleanup()
         main.services = self.old_services
 
     def endpoint(self, path):
@@ -150,7 +172,9 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_status_reports_unavailable_transport_without_crashing(self):
         old = main.services
-        main.services = main.ApiServices(lambda: (_ for _ in ()).throw(OSError("offline")))
+        main.services = self.make_services(
+            lambda: (_ for _ in ()).throw(OSError("offline")), ":memory:"
+        )
         try:
             status = await self.endpoint("/api/v1/status")()
             self.assertEqual(status["esp32_transport"], "unavailable")
@@ -164,11 +188,19 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             main.ModeSwitchRequest(mode="MANUAL")
         )
         self.assertEqual(mode.status, "switched")
-        response = await self.endpoint("/api/v1/robot/move")(main.MoveRequest(direction="forward", speed=120))
+        response = await self.endpoint("/api/v1/robot/move")(
+            main.MoveRequest(
+                request_id=UUID("11111111-1111-4111-8111-111111111111"),
+                direction="forward",
+                speed=120,
+            )
+        )
+        self.assertEqual(response.request_id, "11111111-1111-4111-8111-111111111111")
         self.assertTrue(response.command_id)
         self.assertEqual(response.command, "forward")
         self.assertEqual(response.status, "dispatched")
         self.assertEqual(response.control_mode, "MANUAL")
+        self.assertTrue(response.timestamp)
         manager = await main.services.robot_manager()
         motor = manager.motor
         self.assertEqual(motor.commands, [
@@ -181,23 +213,355 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(HTTPException) as failure:
             await self.endpoint("/api/v1/robot/move")(
-                main.MoveRequest(direction="forward", speed=120)
+                main.MoveRequest(
+                    request_id=UUID("22222222-2222-4222-8222-222222222222"),
+                    direction="forward",
+                    speed=120,
+                )
             )
         self.assertEqual(failure.exception.status_code, 409)
+
+    async def test_move_retry_reuses_command_and_does_not_redispatch(self):
+        await main.services.switch_mode("MANUAL")
+        move = self.endpoint("/api/v1/robot/move")
+        request = main.MoveRequest(
+            request_id=UUID("33333333-3333-4333-8333-333333333333"),
+            direction="forward",
+            speed=120,
+        )
+
+        original = await move(request)
+        manager = await main.services.robot_manager()
+        count_after_first = len(manager.motor.commands)
+        retry = await move(request)
+
+        self.assertEqual(retry.command_id, original.command_id)
+        self.assertEqual(retry.request_id, original.request_id)
+        self.assertEqual(retry.status, "dispatched")
+        self.assertEqual(len(manager.motor.commands), count_after_first)
+
+    async def test_move_retry_returns_latest_acknowledged_result(self):
+        await main.services.switch_mode("MANUAL")
+        move = self.endpoint("/api/v1/robot/move")
+        request = main.MoveRequest(
+            request_id=UUID("44444444-4444-4444-8444-444444444444"),
+            direction="forward",
+            speed=100,
+        )
+        original = await move(request)
+        await main.services.track_command_ack(original.command_id, 1)
+
+        retry = await move(request)
+
+        self.assertEqual(retry.command_id, original.command_id)
+        self.assertEqual(retry.status, "acknowledged")
+        self.assertIsNone(retry.error_code)
+        self.assertTrue(retry.timestamp)
+
+    async def test_move_retry_survives_api_service_restart(self):
+        state_directory = tempfile.TemporaryDirectory()
+        db_path = os.path.join(state_directory.name, "commands.sqlite3")
+        base_services = main.services
+        original_services = self.make_services(
+            lambda: FakeRobotManager(FakeMotor()),
+            db_path,
+        )
+        main.services = original_services
+        try:
+            await original_services.switch_mode("MANUAL")
+            request = main.MoveRequest(
+                request_id=UUID("10101010-1010-4010-8010-101010101010"),
+                direction="forward",
+                speed=100,
+            )
+            original = await self.endpoint("/api/v1/robot/move")(request)
+            await original_services.track_command_ack(original.command_id, 1)
+            original_services.close_command_store()
+
+            restarted_services = self.make_services(
+                lambda: FakeRobotManager(FakeMotor()),
+                db_path,
+            )
+            main.services = restarted_services
+            retry = await self.endpoint("/api/v1/robot/move")(request)
+
+            self.assertEqual(retry.command_id, original.command_id)
+            self.assertEqual(retry.status, "acknowledged")
+            self.assertIsNone(restarted_services._robot_manager)
+        finally:
+            main.services.close_command_store()
+            original_services.close_command_store()
+            main.services = base_services
+            state_directory.cleanup()
+
+    async def test_interrupted_request_becomes_unknown_without_redispatch(self):
+        state_directory = tempfile.TemporaryDirectory()
+        db_path = os.path.join(state_directory.name, "commands.sqlite3")
+        request_id = "20202020-2020-4020-8020-202020202020"
+        base_services = main.services
+        original_services = self.make_services(
+            lambda: FakeRobotManager(FakeMotor()),
+            db_path,
+        )
+        main.services = original_services
+        try:
+            record, created = original_services.reserve_command_request(
+                request_id,
+                {"type": "move", "direction": "forward", "speed": 100},
+                "forward",
+                "MANUAL",
+            )
+            self.assertTrue(created)
+            original_command_id = record["command_id"]
+            original_services.register_command(
+                original_command_id,
+                "forward",
+                "MANUAL",
+                request_id=request_id,
+            )
+            original_services.close_command_store()
+
+            restarted_services = self.make_services(
+                lambda: FakeRobotManager(FakeMotor()),
+                db_path,
+            )
+            main.services = restarted_services
+            retry = await self.endpoint("/api/v1/robot/move")(
+                main.MoveRequest(
+                    request_id=UUID(request_id),
+                    direction="forward",
+                    speed=100,
+                )
+            )
+
+            self.assertEqual(retry.command_id, original_command_id)
+            self.assertEqual(retry.status, "unknown")
+            self.assertEqual(retry.error_code, "PROCESS_RESTARTED_DURING_DISPATCH")
+            self.assertIsNone(restarted_services._robot_manager)
+            result = await self.endpoint("/api/v1/robot/commands/{command_id}")(
+                original_command_id
+            )
+            self.assertEqual(result["status"], "unknown")
+        finally:
+            main.services.close_command_store()
+            original_services.close_command_store()
+            main.services = base_services
+            state_directory.cleanup()
+
+    def test_persisted_request_expires_after_24_hours(self):
+        request_id = "80808080-8080-4080-8080-808080808080"
+        record, created = main.services.reserve_command_request(
+            request_id,
+            {"type": "move", "direction": "forward", "speed": 100},
+            "forward",
+            "MANUAL",
+        )
+        self.assertTrue(created)
+        connection = main.services._database()
+        connection.execute(
+            "UPDATE command_requests SET created_at = 1 WHERE request_id = ?",
+            (request_id,),
+        )
+
+        self.assertIsNone(main.services.request_record(request_id))
+        self.assertIsNone(main.services.command_result(record["command_id"]))
+
+    async def test_simultaneous_move_retries_only_dispatch_once(self):
+        await main.services.switch_mode("MANUAL")
+        move = self.endpoint("/api/v1/robot/move")
+        request = main.MoveRequest(
+            request_id=UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            direction="left",
+            speed=90,
+        )
+
+        first, second = await asyncio.gather(move(request), move(request))
+
+        manager = await main.services.robot_manager()
+        self.assertEqual(first.command_id, second.command_id)
+        self.assertEqual(
+            manager.motor.commands,
+            [("stop", None), ("left", 90)],
+        )
+
+    async def test_reusing_request_id_for_different_action_is_rejected(self):
+        from fastapi import HTTPException
+
+        await main.services.switch_mode("MANUAL")
+        move = self.endpoint("/api/v1/robot/move")
+        request_id = UUID("55555555-5555-4555-8555-555555555555")
+        original = await move(main.MoveRequest(
+            request_id=request_id,
+            direction="forward",
+            speed=100,
+        ))
+        manager = await main.services.robot_manager()
+        command_count = len(manager.motor.commands)
+
+        with self.assertRaises(HTTPException) as failure:
+            await move(main.MoveRequest(
+                request_id=request_id,
+                direction="left",
+                speed=100,
+            ))
+
+        self.assertEqual(failure.exception.status_code, 409)
+        self.assertEqual(failure.exception.detail["error_code"], "REQUEST_ID_REUSED")
+        self.assertEqual(len(manager.motor.commands), command_count)
+        self.assertEqual(original.command, "forward")
+
+    async def test_duplicate_rejected_move_does_not_dispatch_on_retry(self):
+        from fastapi import HTTPException
+
+        move = self.endpoint("/api/v1/robot/move")
+        request = main.MoveRequest(
+            request_id=UUID("66666666-6666-4666-8666-666666666666"),
+            direction="forward",
+            speed=100,
+        )
+        with self.assertRaises(HTTPException) as first:
+            await move(request)
+        manager = await main.services.robot_manager()
+        count_after_first = len(manager.motor.commands)
+        with self.assertRaises(HTTPException) as retry:
+            await move(request)
+
+        self.assertEqual(retry.exception.status_code, first.exception.status_code)
+        self.assertEqual(retry.exception.detail, first.exception.detail)
+        self.assertEqual(len(manager.motor.commands), count_after_first)
 
     async def test_stop_dispatches_dedicated_stop(self):
         manager = await main.services.robot_manager()
         await main.services.switch_mode("MANUAL")
-        response = await self.endpoint("/api/v1/robot/stop")()
+        response = await self.endpoint("/api/v1/robot/stop")(
+            main.StopRequest(request_id=UUID("abababab-abab-4bab-8bab-abababababab"))
+        )
         self.assertEqual(response.command, "stop")
         self.assertEqual(response.status, "dispatched")
         self.assertEqual(response.control_mode, "AUTO")
+        self.assertEqual(response.request_id, "abababab-abab-4bab-8bab-abababababab")
+        self.assertTrue(response.timestamp)
         manager = await main.services.robot_manager()
         motor = manager.motor
         self.assertEqual(motor.commands, [
             ("stop", None),
             ("stop", None),
         ])
+
+    async def test_stop_retry_reuses_id_and_new_stop_id_reasserts_stop(self):
+        manager = await main.services.robot_manager()
+        await main.services.switch_mode("MANUAL")
+        stop = self.endpoint("/api/v1/robot/stop")
+        request = main.StopRequest(
+            request_id=UUID("30303030-3030-4030-8030-303030303030")
+        )
+
+        first = await stop(request)
+        command_count = len(manager.motor.commands)
+        retry = await stop(request)
+
+        self.assertEqual(retry.command_id, first.command_id)
+        self.assertEqual(len(manager.motor.commands), command_count)
+
+        reasserted = await stop(main.StopRequest(
+            request_id=UUID("40404040-4040-4040-8040-404040404040")
+        ))
+        self.assertNotEqual(reasserted.command_id, first.command_id)
+        self.assertEqual(len(manager.motor.commands), command_count + 1)
+
+    async def test_stop_retry_survives_api_service_restart(self):
+        state_directory = tempfile.TemporaryDirectory()
+        db_path = os.path.join(state_directory.name, "commands.sqlite3")
+        base_services = main.services
+        original_services = self.make_services(
+            lambda: FakeRobotManager(FakeMotor()),
+            db_path,
+        )
+        main.services = original_services
+        request = main.StopRequest(
+            request_id=UUID("60606060-6060-4060-8060-606060606060")
+        )
+        try:
+            original = await self.endpoint("/api/v1/robot/stop")(request)
+            await original_services.track_command_ack(original.command_id, 5)
+            original_services.close_command_store()
+
+            restarted_services = self.make_services(
+                lambda: FakeRobotManager(FakeMotor()),
+                db_path,
+            )
+            main.services = restarted_services
+            retry = await self.endpoint("/api/v1/robot/stop")(request)
+
+            self.assertEqual(retry.command_id, original.command_id)
+            self.assertEqual(retry.status, "acknowledged")
+            self.assertIsNone(restarted_services._robot_manager)
+        finally:
+            main.services.close_command_store()
+            original_services.close_command_store()
+            main.services = base_services
+            state_directory.cleanup()
+
+    async def test_interrupted_stop_becomes_unknown_without_redispatch(self):
+        state_directory = tempfile.TemporaryDirectory()
+        db_path = os.path.join(state_directory.name, "commands.sqlite3")
+        request_id = "70707070-7070-4070-8070-707070707070"
+        base_services = main.services
+        original_services = self.make_services(
+            lambda: FakeRobotManager(FakeMotor()),
+            db_path,
+        )
+        main.services = original_services
+        try:
+            record, created = original_services.reserve_command_request(
+                request_id,
+                {"type": "stop"},
+                "stop",
+                "MANUAL",
+            )
+            self.assertTrue(created)
+            command_id = record["command_id"]
+            original_services.register_command(
+                command_id,
+                "stop",
+                "MANUAL",
+                request_id=request_id,
+            )
+            original_services.close_command_store()
+
+            restarted_services = self.make_services(
+                lambda: FakeRobotManager(FakeMotor()),
+                db_path,
+            )
+            main.services = restarted_services
+            retry = await self.endpoint("/api/v1/robot/stop")(
+                main.StopRequest(request_id=UUID(request_id))
+            )
+
+            self.assertEqual(retry.command_id, command_id)
+            self.assertEqual(retry.status, "unknown")
+            self.assertEqual(retry.error_code, "PROCESS_RESTARTED_DURING_DISPATCH")
+            self.assertIsNone(restarted_services._robot_manager)
+        finally:
+            main.services.close_command_store()
+            original_services.close_command_store()
+            main.services = base_services
+            state_directory.cleanup()
+
+    async def test_request_id_cannot_be_reused_between_move_and_stop(self):
+        from fastapi import HTTPException
+
+        await main.services.switch_mode("MANUAL")
+        request_id = UUID("50505050-5050-4050-8050-505050505050")
+        await self.endpoint("/api/v1/robot/move")(
+            main.MoveRequest(request_id=request_id, direction="forward", speed=100)
+        )
+        with self.assertRaises(HTTPException) as conflict:
+            await self.endpoint("/api/v1/robot/stop")(
+                main.StopRequest(request_id=request_id)
+            )
+        self.assertEqual(conflict.exception.status_code, 409)
+        self.assertEqual(conflict.exception.detail["error_code"], "REQUEST_ID_REUSED")
 
     async def test_auto_mode_switch_stops_without_starting_follow(self):
         response = await self.endpoint("/api/v1/robot/mode")(
@@ -238,7 +602,11 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             )
         with self.assertRaises(HTTPException) as blocked:
             await self.endpoint("/api/v1/robot/move")(
-                main.MoveRequest(direction="forward", speed=100)
+                main.MoveRequest(
+                    request_id=UUID("77777777-7777-4777-8777-777777777777"),
+                    direction="forward",
+                    speed=100,
+                )
             )
         self.assertEqual(blocked.exception.status_code, 409)
         self.assertEqual(manager.motor.commands, [
@@ -300,9 +668,46 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
 
     def test_move_request_rejects_unknown_direction_and_out_of_range_speed(self):
         with self.assertRaises(Exception):
-            main.MoveRequest(direction="spin", speed=100)
+            main.MoveRequest(
+                request_id=UUID("88888888-8888-4888-8888-888888888888"),
+                direction="spin",
+                speed=100,
+            )
         with self.assertRaises(Exception):
-            main.MoveRequest(direction="forward", speed=256)
+            main.MoveRequest(
+                request_id=UUID("99999999-9999-4999-8999-999999999999"),
+                direction="forward",
+                speed=256,
+            )
+
+    def test_move_request_requires_uuid_request_id(self):
+        with self.assertRaises(Exception):
+            main.MoveRequest(direction="forward", speed=100)
+        with self.assertRaises(Exception):
+            main.MoveRequest(
+                request_id="not-a-uuid",
+                direction="forward",
+                speed=100,
+            )
+
+    def test_stop_request_requires_uuid_request_id(self):
+        with self.assertRaises(Exception):
+            main.StopRequest()
+        with self.assertRaises(Exception):
+            main.StopRequest(request_id="invalid")
+
+    def test_openapi_marks_move_request_id_required(self):
+        schema = main.app.openapi()
+        move_schema = schema["paths"]["/api/v1/robot/move"]["post"]
+        request_ref = move_schema["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+        model_name = request_ref.rsplit("/", 1)[-1]
+        model_schema = schema["components"]["schemas"][model_name]
+        self.assertIn("request_id", model_schema["required"])
+        self.assertEqual(model_schema["properties"]["request_id"]["format"], "uuid")
+
+        stop_schema_ref = schema["paths"]["/api/v1/robot/stop"]["post"]["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+        stop_model = schema["components"]["schemas"][stop_schema_ref.rsplit("/", 1)[-1]]
+        self.assertIn("request_id", stop_model["required"])
 
     def test_openapi_documents_command_body_limit(self):
         schema = main.app.openapi()

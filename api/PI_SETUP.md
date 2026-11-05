@@ -54,6 +54,11 @@ python main.py
 
 The API listens on `127.0.0.1:8000` by default. In another terminal on the Pi, open `http://127.0.0.1:8000/docs`. The health route checks only that the API process is responding. Do not send movement requests as part of setup; Tharun handles robot verification.
 
+Command IDs and retry records are stored in SQLite for 24 hours at
+`~/.local/state/thashu/api_state.sqlite3`. Keep this file on writable,
+persistent storage. To choose another location, set `THASHU_API_STATE_DB` in
+the robot process environment before starting it.
+
 Stop the robot and API together with `Ctrl+C`.
 
 ## 5. Prepare app access later

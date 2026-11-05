@@ -45,15 +45,38 @@ before changing the selected mode.
 | `GET /health` | Returns `{"status":"ok"}` when the API process responds. This is liveness only. |
 | `GET /api/v1/status` | Reports API liveness, serial transport (`connected`, `disconnected`, or `unavailable`), `controller_readiness: "unknown"`, and the Pi control mode (`AUTO`, `MANUAL`, or `unknown` if the manager cannot start). Opening a serial port does not prove the ESP32 emitted `EVENT|0|READY`. |
 | `POST /api/v1/robot/mode` | Body: `{"mode":"MANUAL"}` or `{"mode":"AUTO"}`. Cancels motion/follow, sends STOP, waits up to 750 ms for `ACK|sequence|OK`, then selects the mode. A failed STOP leaves the prior mode selected. Selecting AUTO does not start follow. |
-| `POST /api/v1/robot/move` | Body: `{"direction":"forward","speed":200}`. Direction is `forward`, `backward`, `left`, or `right`; speed is an integer from 0 to 255 and defaults to 200. Requires MANUAL mode. |
-| `POST /api/v1/robot/stop` | Empty body. Cancels active movement/follow output, sends the dedicated STOP command, and selects AUTO paused. It does not restart follow. |
-| `GET /api/v1/robot/commands/{command_id}` | Returns the current result for a previously dispatched command. Requires the same Bearer token. Results are retained in memory for 24 hours (up to 1,000 commands) and are lost when the API process restarts. |
+| `POST /api/v1/robot/move` | Body: `{"request_id":"<UUID>","direction":"forward","speed":200}`. `request_id` is required; direction is `forward`, `backward`, `left`, or `right`; speed is an integer from 0 to 255 and defaults to 200. Requires MANUAL mode. |
+| `POST /api/v1/robot/stop` | Body: `{"request_id":"<UUID>"}`. Cancels active movement/follow output, sends the dedicated STOP command, and selects AUTO paused. It does not restart follow. |
+| `GET /api/v1/robot/commands/{command_id}` | Returns the current result for a command. Requires the same Bearer token. Results and request IDs are stored in SQLite for 24 hours and survive API restarts. |
 | `WS /api/v1/telemetry` | Server-to-client stream of raw ESP32 lines and `command_result` events. Raw lines are not represented as command success. |
 
-Successful movement and stop responses use:
+Successful move and STOP responses use:
 
 ```json
-{"command_id":"<uuid>","command":"forward","status":"dispatched","control_mode":"MANUAL"}
+{"request_id":"<uuid>","command_id":"<uuid>","command":"forward","status":"dispatched","control_mode":"MANUAL","error_code":null,"timestamp":"<UTC ISO 8601>"}
+```
+
+Move and STOP requests require a UUID `request_id`, created once per logical
+action. If the app retries the same action with that ID, the API returns the
+original `command_id` and latest known result without sending the command
+again. Reusing an ID for a different action returns HTTP 409
+(`REQUEST_ID_REUSED`). A new STOP press must use a new ID to send a fresh STOP.
+The Pi persists request IDs, action payloads, command IDs, and latest results in
+SQLite for 24 hours. If the Pi/API restarts while a command is marked
+`dispatching` or is awaiting its ESP32 ACK, its result is changed to `unknown` with
+`PROCESS_RESTARTED_DURING_DISPATCH`; the Pi does not resend it. Expired IDs can
+be used as new requests after the 24-hour retry window.
+
+Example move request:
+
+```json
+{"request_id":"b1234567-89ab-4cde-8f01-23456789abcd","direction":"forward","speed":200}
+```
+
+Example STOP request:
+
+```json
+{"request_id":"c1234567-89ab-4cde-8f01-23456789abcd"}
 ```
 
 A successful mode switch returns after the ESP32 acknowledges STOP:
@@ -68,24 +91,28 @@ HTTP 503 with `error: "mode_switch_failed"` and an `error_code` such as
 
 `status: "dispatched"` means the Pi wrote the command to serial. It does not
 mean the ESP32 acknowledged it or that the robot completed the movement. Move
-and stop return HTTP 202 with a unique `command_id`. The API asynchronously
+and stop return HTTP 202 with a `command_id`. A retry with the same request ID
+returns the existing ID rather than creating another. The API asynchronously
 waits up to 750 ms for the matching ACK. The WebSocket sends a final event:
 
 ```json
-{"type":"command_result","command_id":"<uuid>","status":"acknowledged","error_code":null,"timestamp":"<UTC ISO 8601>"}
+{"type":"command_result","request_id":"<uuid>","command_id":"<uuid>","status":"acknowledged","error_code":null,"timestamp":"<UTC ISO 8601>"}
 ```
 
 Final status values are `acknowledged`, `safety_error`, and `timed_out`.
+`dispatching` may be returned while dispatch is still underway; `unknown` means
+the process restarted or dispatch otherwise could not be confirmed. Replaying
+the same request ID in either state never resends the command.
 Safety errors include the ESP32 reason as `error_code`; timeouts use
 `ACK_TIMEOUT`; acknowledged results have `error_code: null`. An ACK means
 the ESP32 acknowledged handling the command, not that movement completed.
 
 If Flutter misses the WebSocket event, it can call
 `GET /api/v1/robot/commands/{command_id}` with the same Bearer token. The
-response contains `command_id`, `command`, `status`, `error_code`, and
-`timestamp`. While pending, the status is `dispatched`. Results are held in
-process memory for 24 hours, up to 1,000 commands, and are lost if the API
-process restarts. Invalid directions or speeds receive HTTP 422. If the Pi
+response contains `request_id`, `command_id`, `command`,
+`status`, `error_code`, `timestamp`, and `control_mode`. While pending, the
+status is `dispatched`. Results are held in
+SQLite for 24 hours and survive API restarts. Invalid directions or speeds receive HTTP 422. If the Pi
 cannot write the command, the endpoint returns HTTP 503 with an error code and
 command ID. Requests are not queued for later delivery.
 
@@ -127,6 +154,13 @@ $env:THASHU_API_TOKEN = "paste-a-long-random-token-here"
 python -m uvicorn api.main:app --host 127.0.0.1 --port 8000
 ```
 
+Command retry records are stored by default at
+`~/.local/state/thashu/api_state.sqlite3` on Linux and under
+`%LOCALAPPDATA%\ThashuRobot\api_state.sqlite3` on Windows. Set
+`THASHU_API_STATE_DB` to override the database path. Keep the database on
+persistent local storage and do not delete it during an active 24-hour retry
+window.
+
 Use Swagger's **Authorize** button with the token before trying the protected
 routes. Keep the server bound to localhost during development. For mobile
 access, set `THASHU_API_HOST=0.0.0.0` in the robot process environment only
@@ -166,7 +200,11 @@ Robot command endpoints can return these responses:
   ```json
   {"detail":{"error":"unauthorized"}}
   ```
-- **422 Unprocessable Content** when the move body is invalid. FastAPI returns its standard validation format, with a `detail` list describing the invalid field. For example, an unsupported direction such as `spin` is rejected before any motor command is sent.
+- **409 Conflict** when a move or STOP request ID is reused for a different action:
+  ```json
+  {"detail":{"error":"request_id_conflict","error_code":"REQUEST_ID_REUSED","request_id":"<uuid>"}}
+  ```
+- **422 Unprocessable Content** when the move or STOP body is invalid. FastAPI returns its standard validation format, with a `detail` list describing the invalid field. For example, an unsupported direction such as `spin` is rejected before any motor command is sent.
 - **413 Payload Too Large** when a move or stop request body exceeds 4 KiB:
   ```json
   {"detail":{"error":"request_body_too_large"}}
