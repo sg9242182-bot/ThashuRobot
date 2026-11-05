@@ -130,24 +130,36 @@ def main():
             ranked = distances_to_gallery(query, gallery)
             best_distance, best_name = ranked[0]
             second_distance = ranked[1][0] if len(ranked) > 1 else float("inf")
-            accepted = best_distance <= DEFAULT_TOLERANCE
+            threshold_matches = [
+                name for distance, name in ranked if distance <= DEFAULT_TOLERANCE
+            ]
+            if not threshold_matches:
+                threshold_result = "REJECT"
+            elif len(threshold_matches) == 1:
+                threshold_result = f"UNIQUE:{threshold_matches[0]}"
+            else:
+                threshold_result = "AMBIGUOUS:" + ",".join(threshold_matches)
 
             print("Distances: " + ", ".join(f"{name}={distance:.3f}" for distance, name in ranked))
             print(
                 f"Nearest={best_name} ({best_distance:.3f}); "
                 f"next gap={second_distance - best_distance:.3f}; "
-                f"threshold result={'ACCEPT' if accepted else 'REJECT'}"
+                f"threshold result={threshold_result}"
             )
 
             if is_unknown:
                 totals["unknown"] += 1
-                totals["unknown_rejected"] += int(not accepted)
-                print(f"Expected UNKNOWN: {'PASS' if not accepted else 'FALSE ACCEPT'}\n")
+                rejected = not threshold_matches
+                totals["unknown_rejected"] += int(rejected)
+                print(f"Expected UNKNOWN: {'PASS' if rejected else 'FALSE ACCEPT'}\\n")
             else:
                 totals["known"] += 1
-                correct = accepted and best_name.casefold() == expected.casefold()
+                correct = (
+                    len(threshold_matches) == 1
+                    and threshold_matches[0].casefold() == expected.casefold()
+                )
                 totals["known_top1_correct"] += int(correct)
-                print(f"Expected {expected}: {'PASS' if correct else 'MISMATCH'}\n")
+                print(f"Expected {expected}: {'PASS' if correct else 'MISMATCH / AMBIGUOUS'}\\n")
 
         print("SUMMARY")
         print(
