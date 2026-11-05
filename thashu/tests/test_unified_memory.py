@@ -27,7 +27,7 @@ class UnifiedMemoryTests(unittest.TestCase):
         self.assertEqual(event["person"], "Tharun")
         self.assertEqual(event["location"], "Science Hall")
         self.assertEqual(event["text"], "Met the team")
-        self.assertRegex(event["saved_at"], r"^\\d{4}-\\d{2}-\\d{2}T")
+        self.assertRegex(event["saved_at"], r"^\d{4}-\d{2}-\d{2}T")
 
     def test_place_lookup_is_exact_after_case_and_whitespace_normalization(self):
         self.save_event("Tharun", "Met the team", "Science Hall")
