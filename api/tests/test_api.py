@@ -827,6 +827,27 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertIn("422", operation["responses"])
 
+    def test_api_exposes_only_the_approved_control_route_surface(self):
+        http_routes = {
+            (method, route.path)
+            for route in main.app.routes
+            if route.path.startswith("/api/")
+            for method in (getattr(route, "methods", None) or set())
+        }
+        self.assertEqual(http_routes, {
+            ("GET", "/api/v1/status"),
+            ("GET", "/api/v1/robot/commands/{command_id}"),
+            ("POST", "/api/v1/robot/mode"),
+            ("POST", "/api/v1/robot/move"),
+            ("POST", "/api/v1/robot/stop"),
+        })
+        websocket_paths = {
+            route.path
+            for route in main.app.routes
+            if route.path.startswith("/api/") and not getattr(route, "methods", None)
+        }
+        self.assertEqual(websocket_paths, {"/api/v1/telemetry"})
+
     async def test_bearer_auth_accepts_configured_token(self):
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials="test-token")
         self.assertIsNone(await main.require_api_token(credentials))
