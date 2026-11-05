@@ -106,7 +106,7 @@ Dlib's five-point predictor and 128-D recognition model are supplied by `face_re
 
 Dlib descriptors are not compatible with legacy ArcFace embeddings. The dlib database is `~/.local/share/thashu/data/people_faces_dlib.json`. Existing `people_faces.json` and `w600k_r50.onnx` files are left untouched; enroll identities again through the confirmed enrollment flow before expecting recognition.
 
-### Face landmarks for recognition
+### Optional YuNet face detector
 
 Dlib estimates five facial landmarks inside each detected face crop. YuNet accelerates face-box detection when installed; the existing Haar fallback can also provide boxes to dlib.
 

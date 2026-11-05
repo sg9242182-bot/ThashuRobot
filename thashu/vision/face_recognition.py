@@ -24,7 +24,7 @@ def _quality_failure_reason(face_img):
 
 
 class DlibFaceRecognizer:
-    """CPU dlib descriptors for YuNet-detected faces.
+    """CPU dlib descriptors for detected face crops.
 
     YuNet remains the face detector. This class deliberately does not run
     dlib's HOG detector, avoiding a second full-frame detection pass.
