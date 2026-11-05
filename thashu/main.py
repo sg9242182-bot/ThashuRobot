@@ -1231,6 +1231,10 @@ def main():
                             _identity_pending_name, samples, confirmed=True
                         )
                         response = f"I will remember {_identity_pending_name}."
+                        # Re-enrollment is a fresh explicit confirmation. Allow
+                        # this identity's next stable recognition to announce again
+                        # even if the same person was announced earlier this run.
+                        _announced_recognition_names.pop(_identity_pending_name, None)
                         print(f"[VISION] Confirmed face identity enrolled: {_identity_pending_name}")
                     except (ValueError, OSError, PermissionError) as exc:
                         print(f"[VISION] Enrollment rejected: {exc}")
