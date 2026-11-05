@@ -60,6 +60,7 @@ class VisionCore:
         self._tracker_reset_pending = False
         self.current_faces = []
         self.current_names = {}
+        self._recognition_events = []
         self.current_tracks = []
         self.current_people = []
         self.latest_frame_at = None
@@ -185,6 +186,13 @@ class VisionCore:
                 "observed_at": self.latest_frame_at,
                 "frame_size": self.frame_size,
             }
+
+    def drain_recognition_events(self):
+        """Return confirmed, unambiguous recognition transitions since last drain."""
+        with self._lock:
+            events = self._recognition_events
+            self._recognition_events = []
+            return events
 
     def begin_enrollment(
         self, required_samples=5, timeout=180.0, *,
@@ -637,6 +645,17 @@ class VisionCore:
                             )
                         old_published_name = self.current_names.get(track_id, "Unknown")
                         self.current_names[track_id] = published_name
+                        if (
+                            published_name != "Unknown"
+                            and published_name != old_published_name
+                            and len(faces) == 1
+                            and track_id not in ambiguous_ids
+                            and getattr(self, "_enrollment", None) is None
+                        ):
+                            self._recognition_events.append({
+                                "name": published_name,
+                                "observed_at": time.monotonic(),
+                            })
                         adapt_identity = None
                         if (
                             published_name != old_published_name
