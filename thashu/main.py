@@ -879,7 +879,7 @@ def main():
 
 
 
-    while True:
+    while not _shutdown_event.is_set():
         process_safety_events()
 
         if runtime.current == RuntimeState.IDLE and _identity_enrollment_state == "capturing":
