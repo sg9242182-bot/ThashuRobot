@@ -45,14 +45,16 @@ class RuntimeCleanupTests(unittest.TestCase):
         gpio = GPIOControl.__new__(GPIOControl)
         gpio._stop_event = threading.Event()
         gpio._state_lock = threading.Lock()
-        gpio._serial = FakeSerial()
+        serial_connection = FakeSerial()
+        gpio._serial = serial_connection
         gpio._reader_thread = FakeThread("reader")
         gpio._transport_thread = FakeThread("transport")
 
         gpio.close()
 
         self.assertTrue(gpio._stop_event.is_set())
-        self.assertTrue(gpio._serial is None)
+        self.assertIsNone(gpio._serial)
+        self.assertTrue(serial_connection.closed)
         self.assertTrue(gpio._reader_thread.joined)
         self.assertTrue(gpio._transport_thread.joined)
 
