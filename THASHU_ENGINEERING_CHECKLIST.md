@@ -1044,9 +1044,16 @@ Initial Phase 10 audit (2026-11-06):
 - Gaps found: live Piper/aplay playback has no timeout; main has no orderly cleanup on interruption or unexpected exit; the shutdown button asks Linux to power off without first sending a motor STOP and closing subsystems; AudioManager.stop() and GPIOControl.close() signal their background threads but do not join them. Sensor and controller fail-safe paths exist, but physical fault/recovery acceptance remains unverified.
 - Preserve existing ESP32 safety/watchdogs and manager ownership. Phase 10 will harden lifecycle/recovery in existing files, add focused regression tests, then guide controlled Pi failure/recovery checks.
 
+Phase 10 first hardening pass (2026-11-06):
+- `thashu/voice/text_to_speech.py`: bounded streaming Piper+aplay playback to 30 seconds total, terminate/kill/reap child processes on timeout/failure, and fall back to Piper when cached WAV playback fails.
+- `thashu/voice/audio_manager.py`: make watchdog backoff interruptible and join its thread during stop.
+- `thashu/hardware/gpio_control.py`: prevent reconnect after close and join reader/transport threads.
+- `thashu/main.py`: button shutdown and process exit send STOP first, wait briefly for its ACK, stop follow/vision/audio, close serial transport and GPIO, and exit the main loop cleanly. Shutdown cleanup is idempotent and also runs on KeyboardInterrupt and normal interpreter exit.
+- Added `thashu/tests/test_runtime_cleanup.py` and `thashu/tests/test_tts_recovery.py`. Isolated cleanup/TTS tests passed (5/5); existing Phase 9 and recognition tests also passed (12/12). Python syntax compilation passed for the changed runtime files. Checks ran against an isolated scratch copy with mocked devices; Pi fault-injection and physical shutdown tests remain open.
+
 Tasks:
 
-\[ ] Piper timeout/recovery.
+\[x] Piper timeout/recovery.
 
 \[ ] Whisper failure recovery.
 
@@ -1058,9 +1065,9 @@ Tasks:
 
 \[ ] Motor stale-command protection.
 
-\[ ] Process/thread cleanup.
+\[x] Process/thread cleanup.
 
-\[ ] Graceful shutdown.
+\[x] Graceful shutdown.
 
 \[ ] Restart/recovery behavior.
 
