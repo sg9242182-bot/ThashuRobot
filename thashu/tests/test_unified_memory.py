@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from memory.people import PeopleMemory
+from core.decision import get_event_memory_request, get_place_event_query
 
 
 class UnifiedMemoryTests(unittest.TestCase):
@@ -18,6 +19,23 @@ class UnifiedMemoryTests(unittest.TestCase):
         return self.memory.remember(
             person, "event", text, confirmed_identity=True, location=location
         )
+
+    def test_event_parser_keeps_only_explicit_user_named_place(self):
+        self.assertEqual(
+            get_event_memory_request("Remember this event: we met at the library yesterday"),
+            ("we met yesterday", "the library"),
+        )
+        self.assertEqual(
+            get_event_memory_request("Remember this event: we had a good conversation"),
+            ("we had a good conversation", None),
+        )
+
+    def test_place_recall_parser_requires_an_explicit_place_label(self):
+        self.assertEqual(
+            get_place_event_query("What happened at the library?"),
+            "the library",
+        )
+        self.assertIsNone(get_place_event_query("What do you remember about yesterday?"))
 
     def test_event_links_confirmed_person_place_and_timestamp(self):
         self.assertTrue(self.save_event("Tharun", "Met the team", "Science Hall"))
