@@ -2,6 +2,7 @@ import hashlib
 import os
 import subprocess
 import threading
+import time
 
 from core.model_paths import model_path
 from core.quick_responses import QuickResponses
@@ -12,6 +13,7 @@ PIPER_PATH = os.environ.get(
 )
 MODEL_PATH = model_path("piper", "en_US-lessac-low.onnx")
 DEVICE     = "default"
+TTS_PROCESS_TIMEOUT_SECONDS = 30.0
 VOICE_CACHE_DIR = os.path.expanduser(os.environ.get(
     "THASHU_VOICE_CACHE_DIR",
     os.path.join(os.environ.get("XDG_DATA_HOME", "~/.local/share"),
@@ -155,6 +157,23 @@ def prepare_command_voice_cache(names=None):
             print(f"[PIPER] Could not generate {name}: {exc}")
 
 
+def _terminate_process(process):
+    """Terminate a child process and reap it, escalating to kill if necessary."""
+    if process is None:
+        return
+    try:
+        if process.poll() is not None:
+            return
+        process.terminate()
+        try:
+            process.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=1.0)
+    except Exception as exc:
+        print(f"[TTS] Could not stop child process: {exc}")
+
+
 def speak(text: str):
     if not text or not text.strip():
         return
@@ -163,43 +182,77 @@ def speak(text: str):
     if voice_name:
         voice_path = _voice_path(voice_name)
         if os.path.isfile(voice_path):
-            play(voice_path)
-            return
+            try:
+                play(voice_path)
+                return
+            except Exception as exc:
+                print(f"[TTS] Cached WAV playback failed; trying Piper: {exc}")
 
     with _lock:
+        piper = None
+        aplay = None
         try:
             piper = subprocess.Popen(
                 [
                     PIPER_PATH,
-                    "--model",        MODEL_PATH,
+                    "--model", MODEL_PATH,
                     "--output-raw",
-                    "--length_scale", "1.1"
+                    "--length_scale", "1.1",
                 ],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
             )
-
             aplay = subprocess.Popen(
                 [
                     "aplay",
-                    "-D",            DEVICE,
-                    "--rate",        "16000",
-                    "--format",      "S16_LE",
-                    "--channels",    "1",
-                    "--buffer-size", "4096"
+                    "-D", DEVICE,
+                    "--rate", "16000",
+                    "--format", "S16_LE",
+                    "--channels", "1",
+                    "--buffer-size", "4096",
                 ],
                 stdin=piper.stdout,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
             )
 
-            piper.stdout.close()
-            piper.communicate(input=text.encode())
-            aplay.wait()
+            # aplay owns the read end. Close the parent's duplicate so either
+            # child can observe EOF/SIGPIPE correctly if the other exits.
+            if piper.stdout is not None:
+                piper.stdout.close()
+            if piper.stdin is not None:
+                piper.stdin.write(text.encode("utf-8"))
+                piper.stdin.close()
 
-        except Exception as e:
-            print(f"[TTS ERROR]: {e}")
+            deadline = time.monotonic() + TTS_PROCESS_TIMEOUT_SECONDS
+            piper.wait(timeout=max(0.0, deadline - time.monotonic()))
+            aplay.wait(timeout=max(0.0, deadline - time.monotonic()))
+            if piper.returncode != 0 or aplay.returncode != 0:
+                print(
+                    f"[TTS] Playback process failed "
+                    f"(Piper={piper.returncode}, aplay={aplay.returncode})"
+                )
+        except subprocess.TimeoutExpired:
+            print(
+                f"[TTS] Piper/audio playback exceeded "
+                f"{TTS_PROCESS_TIMEOUT_SECONDS:.0f}s; terminating it"
+            )
+        except Exception as exc:
+            print(f"[TTS ERROR]: {exc}")
+        finally:
+            # Stop downstream playback first, then Piper, so no child or pipe
+            # can keep the voice loop blocked after an error or timeout.
+            _terminate_process(aplay)
+            _terminate_process(piper)
+            for process in (aplay, piper):
+                for stream_name in ("stdin", "stdout", "stderr"):
+                    stream = getattr(process, stream_name, None) if process else None
+                    if stream is not None and not stream.closed:
+                        try:
+                            stream.close()
+                        except OSError:
+                            pass
 
 if __name__ == "__main__":
     prepare_command_voice_cache()
