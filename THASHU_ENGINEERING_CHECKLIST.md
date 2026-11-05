@@ -1010,7 +1010,8 @@ Architecture:
 Implementation (2026-11-05):
 - Updated `thashu/memory/people.py` with normalized exact place-label matching and bounded `recall_at_place()`, returning person, event, place, and saved time together. No schema migration or new module was introduced.
 - Updated `thashu/main.py` to use place-indexed recall while retaining the recognized-person scope.
-- Added `thashu/tests/test_unified_memory.py` for explicit place parsing, person/place/time linkage, exact label matching, identity scoping, duplicate handling, and the five-result bound.
+- Updated `thashu/core/decision.py` to accept sentence punctuation after “remember this event” and “remember that”; Whisper may split the phrase as “Remember this event. Yesterday …”.
+- Added `thashu/tests/test_unified_memory.py` for explicit place parsing, person/place/time linkage, exact label matching, identity scoping, duplicate handling, and the five-result bound, including the punctuated Whisper transcript.
 - Isolated tests passed: 7/7; Python syntax compilation passed for changed memory/test/parser sources. Tests ran against an isolated scratch copy with mocked storage; this does not replace Raspberry Pi integration acceptance.
 
 Tasks:
