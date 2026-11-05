@@ -1,6 +1,7 @@
 import time
 import threading
 import os
+import atexit
 import statistics
 
 import numpy as np
@@ -100,6 +101,9 @@ _last_announced_recognition_name = None
 _motion_timer = None
 _motion_generation = 0
 _motion_lock = threading.Lock()
+_shutdown_event = threading.Event()
+_shutdown_lock = threading.Lock()
+_shutdown_complete = False
 event_bus.subscribe(
     "RUNTIME_STATE_CHANGED",
     vision.on_runtime_state_changed,
@@ -115,21 +119,13 @@ def monitor_shutdown_button():
 
     print("[SYSTEM] Shutdown button monitoring started")
 
-    while True:
+    while not _shutdown_event.wait(0.1):
         # Button pressed = LOW
         if GPIO.input(BUTTON_PIN) == GPIO.LOW:
             print("[SYSTEM] Shutdown button pressed")
-
-            # Optional: eyes expression before shutdown
-            eyes.thinking()
-
-            # Prevent accidental double trigger
-            time.sleep(1)
-
+            _shutdown_runtime("physical shutdown button")
             os.system("sudo shutdown now")
             break
-
-        time.sleep(0.1)
 
 
 # ── Collect spoken command ─────────────────────────────────────────────────────
@@ -412,6 +408,64 @@ def stop_motion():
             _motion_timer.cancel()
             _motion_timer = None
         return motors.stop()
+
+
+def _shutdown_runtime(reason="process exit"):
+    """Stop motion first, then close owned workers and device resources once."""
+    global _shutdown_complete
+    with _shutdown_lock:
+        if _shutdown_complete:
+            return
+        _shutdown_complete = True
+        _shutdown_event.set()
+
+    print(f"[SYSTEM] Shutting down cleanly ({reason})")
+    try:
+        follow_logic.stop()
+    except Exception as exc:
+        print(f"[SYSTEM] Follow shutdown warning: {exc}")
+
+    try:
+        servo_tracker.stop_search()
+    except Exception as exc:
+        print(f"[SYSTEM] Servo shutdown warning: {exc}")
+
+    try:
+        sequence = stop_motion()
+        if sequence is not None:
+            motors.gpio.wait_for_ack(sequence, timeout=0.75)
+    except Exception as exc:
+        print(f"[SYSTEM] Motor STOP during shutdown failed: {exc}")
+
+    try:
+        vision.stop()
+    except Exception as exc:
+        print(f"[SYSTEM] Vision shutdown warning: {exc}")
+
+    try:
+        audio.stop()
+    except Exception as exc:
+        print(f"[SYSTEM] Audio shutdown warning: {exc}")
+
+    try:
+        motors.gpio.close()
+    except Exception as exc:
+        print(f"[SYSTEM] ESP32 transport shutdown warning: {exc}")
+
+    current = threading.current_thread()
+    for thread in threading.enumerate():
+        if thread.name == "thashu-shutdown-button" and thread is not current:
+            thread.join(timeout=0.5)
+            if thread.is_alive():
+                print("[SYSTEM] Shutdown-button monitor is still stopping")
+
+    try:
+        GPIO.cleanup()
+    except Exception as exc:
+        print(f"[SYSTEM] GPIO cleanup warning: {exc}")
+
+
+atexit.register(_shutdown_runtime)
 
 
 def confirm_motion_command(sequence, direction):
@@ -795,7 +849,8 @@ def main():
     # ── Start shutdown button monitor ───────────────────────────────────────
     shutdown_thread = threading.Thread(
         target=monitor_shutdown_button,
-        daemon=True
+        name="thashu-shutdown-button",
+        daemon=True,
     )
 
     shutdown_thread.start()
@@ -1633,4 +1688,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("[SYSTEM] Keyboard interrupt received")
+    finally:
+        _shutdown_runtime("main exit")
