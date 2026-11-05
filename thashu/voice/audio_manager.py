@@ -259,6 +259,14 @@ class AudioManager:
                 print(f"[AUDIO] Error closing stream: {e}")
             self._stream = None
 
+        watchdog = self._watchdog_thread
+        if watchdog is not None and watchdog is not threading.current_thread():
+            watchdog.join(timeout=1.0)
+            if watchdog.is_alive():
+                print("[AUDIO] Watchdog thread is still stopping")
+            else:
+                self._watchdog_thread = None
+
         print("[AUDIO] Stream stopped")
 
     def pause(self):
@@ -338,10 +346,12 @@ class AudioManager:
             print("[AUDIO] Watchdog: stream not active — attempting restart")
             for attempt in range(5):
                 try:
-                    time.sleep(1.0 * (attempt + 1))   # back off between retries
+                    if self._stop_event.wait(1.0 * (attempt + 1)):
+                        print("[AUDIO] Watchdog: restart aborted (stopped)")
+                        break
 
-                    # Fix 3: re-check after sleep — pause/stop may have been
-                    # called during the backoff window.
+                    # Fix 3: re-check after backoff — pause/stop may have been
+                    # called while waiting.
                     if self._paused or not self._running:
                         print("[AUDIO] Watchdog: restart aborted (paused or stopped)")
                         break
