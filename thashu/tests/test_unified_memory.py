@@ -26,6 +26,12 @@ class UnifiedMemoryTests(unittest.TestCase):
             ("we met yesterday", "the library"),
         )
         self.assertEqual(
+            get_event_memory_request(
+                "Remember this event. Yesterday we met at the library."
+            ),
+            ("Yesterday we met", "the library"),
+        )
+        self.assertEqual(
             get_event_memory_request("Remember this event: we had a good conversation"),
             ("we had a good conversation", None),
         )
