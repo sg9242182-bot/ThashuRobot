@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Callable, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from starlette.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -531,6 +533,7 @@ class CommandBodySizeLimitMiddleware:
                 content={
                     "detail": {
                         "error": "unsupported_media_type",
+                        "error_code": "UNSUPPORTED_MEDIA_TYPE",
                         "supported": ["application/json"],
                     }
                 },
@@ -551,7 +554,12 @@ class CommandBodySizeLimitMiddleware:
             if size > self.max_bytes:
                 response = JSONResponse(
                     status_code=413,
-                    content={"detail": {"error": "request_body_too_large"}},
+                    content={
+                        "detail": {
+                            "error": "request_body_too_large",
+                            "error_code": "PAYLOAD_TOO_LARGE",
+                        }
+                    },
                 )
                 await response(scope, receive, send)
                 return
@@ -598,6 +606,43 @@ def _log_command_outcome(
 
 
 ROBOT_COMMAND_ERROR_RESPONSES = {
+    500: {
+        "description": "An unexpected server error occurred.",
+        "content": {
+            "application/json": {
+                "example": {"detail": {
+                    "error": "internal_error",
+                    "error_code": "INTERNAL_ERROR",
+                }},
+            }
+        },
+    },
+    404: {
+        "description": "The command result is not available.",
+        "content": {
+            "application/json": {
+                "example": {"detail": {
+                    "error": "command_not_found",
+                    "error_code": "COMMAND_NOT_FOUND",
+                    "command_id": "<command_id>",
+                }},
+            }
+        },
+    },
+    422: {
+        "description": "The request body is invalid.",
+        "content": {
+            "application/json": {
+                "example": {
+                    "detail": {
+                        "error": "validation_error",
+                        "error_code": "VALIDATION_ERROR",
+                        "issues": [{"loc": ["body", "direction"], "msg": "Input should be a valid direction"}],
+                    }
+                },
+            }
+        },
+    },
     415: {
         "description": "Command bodies must use application/json.",
         "content": {
@@ -605,6 +650,7 @@ ROBOT_COMMAND_ERROR_RESPONSES = {
                 "example": {
                     "detail": {
                         "error": "unsupported_media_type",
+                        "error_code": "UNSUPPORTED_MEDIA_TYPE",
                         "supported": ["application/json"],
                     }
                 },
@@ -680,7 +726,10 @@ ROBOT_COMMAND_ERROR_RESPONSES = {
         "description": "The request body exceeds the 4 KiB command limit.",
         "content": {
             "application/json": {
-                "example": {"detail": {"error": "request_body_too_large"}},
+                "example": {"detail": {
+                    "error": "request_body_too_large",
+                    "error_code": "PAYLOAD_TOO_LARGE",
+                }},
             }
         },
     },
@@ -688,7 +737,10 @@ ROBOT_COMMAND_ERROR_RESPONSES = {
         "description": "The Bearer token is missing or incorrect.",
         "content": {
             "application/json": {
-                "example": {"detail": {"error": "unauthorized"}},
+                "example": {"detail": {
+                    "error": "unauthorized",
+                    "error_code": "UNAUTHORIZED",
+                }},
             }
         },
     },
@@ -699,13 +751,17 @@ ROBOT_COMMAND_ERROR_RESPONSES = {
                 "examples": {
                     "authentication_not_configured": {
                         "summary": "The API token is not configured",
-                        "value": {"detail": {"error": "authentication_not_configured"}},
+                        "value": {"detail": {
+                            "error": "authentication_not_configured",
+                            "error_code": "AUTHENTICATION_NOT_CONFIGURED",
+                        }},
                     },
                     "robot_unavailable": {
                         "summary": "The Pi cannot dispatch the command",
                         "value": {
                             "detail": {
                                 "error": "robot_unavailable",
+                                "error_code": "ROBOT_UNAVAILABLE",
                                 "command_id": "<uuid>",
                             }
                         },
@@ -772,6 +828,99 @@ app = FastAPI(
 app.add_middleware(CommandBodySizeLimitMiddleware)
 
 
+_HTTP_STATUS_ERROR_CODES = {
+    400: "INVALID_ARGUMENT",
+    401: "UNAUTHORIZED",
+    404: "NOT_FOUND",
+    409: "CONFLICT",
+    413: "PAYLOAD_TOO_LARGE",
+    415: "UNSUPPORTED_MEDIA_TYPE",
+    422: "VALIDATION_ERROR",
+    429: "RATE_LIMITED",
+    500: "INTERNAL_ERROR",
+    503: "SERVICE_UNAVAILABLE",
+}
+
+_ERROR_NAME_CODES = {
+    "authentication_not_configured": "AUTHENTICATION_NOT_CONFIGURED",
+    "command_not_found": "COMMAND_NOT_FOUND",
+    "invalid_command": "INVALID_COMMAND",
+    "mode_switch_failed": "MODE_SWITCH_FAILED",
+    "request_body_too_large": "PAYLOAD_TOO_LARGE",
+    "request_id_conflict": "REQUEST_ID_REUSED",
+    "robot_unavailable": "ROBOT_UNAVAILABLE",
+    "safety_blocked": "SAFETY_BLOCKED",
+    "unauthorized": "UNAUTHORIZED",
+    "unsupported_media_type": "UNSUPPORTED_MEDIA_TYPE",
+}
+
+
+def _error_detail_with_code(status_code, detail):
+    """Keep FastAPI's detail envelope and attach a stable code when possible."""
+    if isinstance(detail, dict):
+        normalized = dict(detail)
+        if not normalized.get("error_code"):
+            error_name = normalized.get("error")
+            normalized["error_code"] = _ERROR_NAME_CODES.get(
+                error_name, _HTTP_STATUS_ERROR_CODES.get(status_code, "HTTP_ERROR")
+            )
+        return normalized
+    if isinstance(detail, str):
+        return {
+            "error": detail,
+            "error_code": _HTTP_STATUS_ERROR_CODES.get(status_code, "HTTP_ERROR"),
+        }
+    return detail
+
+
+@app.exception_handler(HTTPException)
+async def http_error_handler(_request, exc):
+    return JSONResponse(
+        status_code=exc.status_code,
+        headers=exc.headers,
+        content={"detail": _error_detail_with_code(exc.status_code, exc.detail)},
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(_request, exc):
+    issues = [
+        {
+            "loc": list(issue.get("loc", ())),
+            "msg": issue.get("msg", "Invalid request"),
+            "type": issue.get("type", "value_error"),
+        }
+        for issue in exc.errors()
+    ]
+    return JSONResponse(
+        status_code=422,
+        content=jsonable_encoder({
+            "detail": {
+                "error": "validation_error",
+                "error_code": "VALIDATION_ERROR",
+                "issues": issues,
+            }
+        }),
+    )
+
+
+@app.exception_handler(Exception)
+async def internal_error_handler(request, _exc):
+    logger.error("%s", json.dumps({
+        "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+        "component": "pi_api",
+        "event": "unhandled_exception",
+        "path": request.url.path,
+        "error_code": "INTERNAL_ERROR",
+    }, separators=(",", ":"), sort_keys=True))
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": {"error": "internal_error", "error_code": "INTERNAL_ERROR"}
+        },
+    )
+
+
 @app.middleware("http")
 async def log_api_request(request, call_next):
     """Log request completion without recording query strings or credentials."""
@@ -810,6 +959,7 @@ async def get_status():
     "/api/v1/robot/commands/{command_id}",
     tags=["robot"],
     dependencies=[Depends(require_api_token)],
+    responses=ROBOT_COMMAND_ERROR_RESPONSES,
 )
 async def get_command_result(command_id: str):
     """Return the latest known Pi/ESP32 result for a dispatched command."""

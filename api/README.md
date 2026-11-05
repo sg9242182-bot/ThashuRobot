@@ -198,29 +198,47 @@ Robot command endpoints can return these responses:
 
 - **415 Unsupported Media Type** when a move, stop, or mode request does not use `application/json`. A `charset` parameter is allowed:
   ```json
-  {"detail":{"error":"unsupported_media_type","supported":["application/json"]}}
+  {"detail":{"error":"unsupported_media_type","error_code":"UNSUPPORTED_MEDIA_TYPE","supported":["application/json"]}}
   ```
 - **401 Unauthorized** when the Bearer token is missing or incorrect:
   ```json
-  {"detail":{"error":"unauthorized"}}
+  {"detail":{"error":"unauthorized","error_code":"UNAUTHORIZED"}}
   ```
 - **409 Conflict** when a move or STOP request ID is reused for a different action:
   ```json
   {"detail":{"error":"request_id_conflict","error_code":"REQUEST_ID_REUSED","request_id":"<uuid>"}}
   ```
-- **422 Unprocessable Content** when the move or STOP body is invalid. FastAPI returns its standard validation format, with a `detail` list describing the invalid field. For example, an unsupported direction such as `spin` is rejected before any motor command is sent.
+- **422 Unprocessable Content** when a request body is invalid. The field-level FastAPI issues are kept under `detail.issues`:
+  ```json
+  {"detail":{"error":"validation_error","error_code":"VALIDATION_ERROR","issues":[{"loc":["body","direction"],"msg":"Input should be a valid direction"}]}}
+  ```
+  For example, an unsupported direction such as `spin` is rejected before any motor command is sent.
 - **413 Payload Too Large** when a move or stop request body exceeds 4 KiB:
   ```json
-  {"detail":{"error":"request_body_too_large"}}
+  {"detail":{"error":"request_body_too_large","error_code":"PAYLOAD_TOO_LARGE"}}
   ```
 - **503 Service Unavailable** when no API token is configured:
   ```json
-  {"detail":{"error":"authentication_not_configured"}}
+  {"detail":{"error":"authentication_not_configured","error_code":"AUTHENTICATION_NOT_CONFIGURED"}}
   ```
 - **503 Service Unavailable** when the Pi cannot dispatch a robot command:
   ```json
-  {"detail":{"error":"robot_unavailable","command_id":"<uuid>"}}
+  {"detail":{"error":"robot_unavailable","error_code":"ROBOT_UNAVAILABLE","command_id":"<uuid>"}}
   ```
+- **404 Not Found** when a command result is unknown or outside its retention window:
+  ```json
+  {"detail":{"error":"command_not_found","error_code":"COMMAND_NOT_FOUND","command_id":"<uuid>"}}
+  ```
+- **500 Internal Server Error** for an unexpected server failure. Exception details are not returned:
+  ```json
+  {"detail":{"error":"internal_error","error_code":"INTERNAL_ERROR"}}
+  ```
+
+All REST errors remain inside FastAPI's top-level `detail` field. Object details
+include `error_code`; request validation includes `detail.error_code` and
+field-specific `detail.issues`. `error_code` is the stable machine-readable
+backend reason, while `error` is a descriptive category. Internal failures
+return `detail.error_code: "INTERNAL_ERROR"` without exposing exception text.
 
 The app should treat `dispatched` as “the Pi wrote the command to its serial transport,” not as confirmation that the robot moved. Use the command result event or lookup route to show whether the ESP32 acknowledged, rejected, or timed out. A disconnected screen can be shown for `robot_unavailable` or when the server cannot be reached.
 

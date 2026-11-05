@@ -194,6 +194,73 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
     def endpoint(self, path):
         return next(route.endpoint for route in main.app.routes if getattr(route, "path", None) == path)
 
+    def test_error_details_get_stable_codes_without_losing_specific_fields(self):
+        self.assertEqual(
+            main._error_detail_with_code(503, {"error": "robot_unavailable", "command_id": "cmd-1"}),
+            {
+                "error": "robot_unavailable",
+                "error_code": "ROBOT_UNAVAILABLE",
+                "command_id": "cmd-1",
+            },
+        )
+        self.assertEqual(
+            main._error_detail_with_code(
+                409,
+                {"error": "control_mode_conflict", "error_code": "MANUAL_MODE_REQUIRED"},
+            ),
+            {"error": "control_mode_conflict", "error_code": "MANUAL_MODE_REQUIRED"},
+        )
+        self.assertEqual(
+            main._error_detail_with_code(401, "unauthorized"),
+            {"error": "unauthorized", "error_code": "UNAUTHORIZED"},
+        )
+
+    async def test_http_error_handler_keeps_codes_inside_detail(self):
+        from fastapi import HTTPException
+        import json
+
+        response = await main.http_error_handler(
+            None,
+            HTTPException(
+                status_code=503,
+                detail={"error": "robot_unavailable", "command_id": "cmd-1"},
+            ),
+        )
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(json.loads(response.body), {
+            "detail": {
+                "error": "robot_unavailable",
+                "error_code": "ROBOT_UNAVAILABLE",
+                "command_id": "cmd-1",
+            }
+        })
+
+    async def test_validation_error_handler_uses_sanitized_detail_issues(self):
+        import json
+        from unittest.mock import Mock
+
+        error = Mock()
+        error.errors.return_value = [{
+            "loc": ("body", "direction"),
+            "msg": "Invalid direction",
+            "type": "literal_error",
+            "input": "secret-value",
+        }]
+        response = await main.validation_error_handler(None, error)
+        body = json.loads(response.body)
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(body, {
+            "detail": {
+                "error": "validation_error",
+                "error_code": "VALIDATION_ERROR",
+                "issues": [{
+                    "loc": ["body", "direction"],
+                    "msg": "Invalid direction",
+                    "type": "literal_error",
+                }],
+            }
+        })
+
     async def test_health_is_api_liveness_only(self):
         self.assertEqual(await self.endpoint("/health")(), {"status": "ok"})
 
@@ -753,8 +820,12 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
                 content = operation["responses"]["413"]["content"]["application/json"]
                 self.assertEqual(
                     content["example"],
-                    {"detail": {"error": "request_body_too_large"}},
+                    {"detail": {
+                        "error": "request_body_too_large",
+                        "error_code": "PAYLOAD_TOO_LARGE",
+                    }},
                 )
+                self.assertIn("422", operation["responses"])
 
     async def test_bearer_auth_accepts_configured_token(self):
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials="test-token")
