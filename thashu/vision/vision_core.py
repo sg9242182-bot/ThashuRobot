@@ -540,6 +540,21 @@ class VisionCore:
                         recognized, _score = self.database.match(
                             embedding, diagnostics=True
                         )
+                        compare_scores = getattr(
+                            self.database, "compare_sample_and_prototype_scores", None
+                        )
+                        if callable(compare_scores):
+                            comparisons = compare_scores(embedding)
+                            if comparisons:
+                                summary = "; ".join(
+                                    f"{name}[{count}]: max={legacy:.3f}, "
+                                    f"centroid={prototype:.3f}"
+                                    for name, count, legacy, prototype in comparisons
+                                )
+                                print(
+                                    "[FACE MATCH TEST] scoring comparison "
+                                    "(centroid is diagnostic only): " + summary
+                                )
                     else:
                         recognized, _score = self.database.match(embedding)
                     with self._lock:
