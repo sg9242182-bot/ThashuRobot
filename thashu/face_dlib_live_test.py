@@ -151,7 +151,7 @@ def main():
                 totals["unknown"] += 1
                 rejected = not threshold_matches
                 totals["unknown_rejected"] += int(rejected)
-                print(f"Expected UNKNOWN: {'PASS' if rejected else 'FALSE ACCEPT'}\\n")
+                print(f"Expected UNKNOWN: {'PASS' if rejected else 'FALSE ACCEPT'}\n")
             else:
                 totals["known"] += 1
                 correct = (
@@ -159,7 +159,7 @@ def main():
                     and threshold_matches[0].casefold() == expected.casefold()
                 )
                 totals["known_top1_correct"] += int(correct)
-                print(f"Expected {expected}: {'PASS' if correct else 'MISMATCH / AMBIGUOUS'}\\n")
+                print(f"Expected {expected}: {'PASS' if correct else 'MISMATCH / AMBIGUOUS'}\n")
 
         print("SUMMARY")
         print(
