@@ -21,7 +21,7 @@ from vision.follow_logic   import FollowLogic
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
 from hardware.servo_tracking import ServoTracker
-from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, get_enrollment_spelling, is_recognition_query, get_person_memory_request, get_event_memory_request, get_person_event_query, get_place_event_query, get_person_memory_save_confirmation, is_person_memory_query, get_person_memory_delete_command
+from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, get_enrollment_spelling, is_recognition_query, get_person_memory_request, get_event_memory_request, get_person_event_query, get_place_event_query, get_person_memory_save_confirmation, is_person_memory_query, get_person_memory_delete_command, should_announce_recognized_person
 from core.model_paths import model_path, project_path
 from memory.people import PeopleMemory
 
@@ -96,7 +96,7 @@ _memory_delete_pending = None
 _memory_pending = None
 _last_idle_recognized_person = None
 _last_idle_recognized_at = 0.0
-_announced_recognition_names = {}
+_last_announced_recognition_name = None
 _motion_timer = None
 _motion_generation = 0
 _motion_lock = threading.Lock()
@@ -786,6 +786,7 @@ def main():
     global _identity_enrollment_state, _identity_pending_name
     global _memory_delete_pending, _memory_pending
     global _last_idle_recognized_person, _last_idle_recognized_at
+    global _last_announced_recognition_name
     print("[SYSTEM] Jarvis started")
 
     # Start systems
@@ -900,14 +901,6 @@ def main():
             isinstance(observed_at, (int, float))
             and 0.0 <= time.monotonic() - observed_at <= 0.75
         )
-        if runtime.current == RuntimeState.IDLE and frame_fresh:
-            now_monotonic = time.monotonic()
-            visible_names = {face["name"] for face in known_faces}
-            for announced_name in list(_announced_recognition_names):
-                if announced_name in visible_names:
-                    _announced_recognition_names[announced_name] = now_monotonic
-                elif now_monotonic - _announced_recognition_names[announced_name] >= 10.0:
-                    del _announced_recognition_names[announced_name]
         if len(faces) == 1 and len(known_faces) == 1 and frame_fresh:
             _last_idle_recognized_person = known_faces[0]["name"]
             _last_idle_recognized_at = time.monotonic()
@@ -1231,10 +1224,6 @@ def main():
                             _identity_pending_name, samples, confirmed=True
                         )
                         response = f"I will remember {_identity_pending_name}."
-                        # Re-enrollment is a fresh explicit confirmation. Allow
-                        # this identity's next stable recognition to announce again
-                        # even if the same person was announced earlier this run.
-                        _announced_recognition_names.pop(_identity_pending_name, None)
                         print(f"[VISION] Confirmed face identity enrolled: {_identity_pending_name}")
                     except (ValueError, OSError, PermissionError) as exc:
                         print(f"[VISION] Enrollment rejected: {exc}")
@@ -1619,33 +1608,27 @@ def main():
                 transition_runtime(RuntimeState.RETURN_TO_IDLE)
                 transition_runtime(RuntimeState.IDLE)
             elif not _follow_search_active:
-                # VisionCore retains confirmed recognition transitions until the
-                # main loop consumes them, so a brief identity-confidence flicker
-                # cannot make the announcement disappear between camera frames.
+                # Consume all queued transitions and compare the newest identity
+                # with the last one announced. Reacquiring the same face after a
+                # conversation or a brief confidence flicker must stay silent.
                 recognition_events = vision.drain_recognition_events()
-                recognition_announced = False
-                for recognition_event in recognition_events:
-                    recognized_name = recognition_event.get("name")
-                    if recognized_name and recognized_name not in _announced_recognition_names:
-                        _announced_recognition_names[recognized_name] = time.monotonic()
-                        print(f"[VISION] Announcing confirmed recognition: {recognized_name}")
-                        _announce_recognized_person()
-                        recognition_announced = True
-                        break
-
-                # Keep the live-state path as a fallback for recognition that was
-                # already present before event queuing became available.
-                if (
-                    not recognition_announced
-                    and len(faces) == 1
-                    and len(known_faces) == 1
-                    and frame_fresh
-                ):
+                recognized_name = next(
+                    (
+                        event.get("name")
+                        for event in reversed(recognition_events)
+                        if isinstance(event, dict) and event.get("name")
+                    ),
+                    None,
+                )
+                if recognized_name is None and len(faces) == 1 and len(known_faces) == 1 and frame_fresh:
                     recognized_name = known_faces[0]["name"]
-                    if recognized_name not in _announced_recognition_names:
-                        _announced_recognition_names[recognized_name] = time.monotonic()
-                        print(f"[VISION] Announcing confirmed recognition: {recognized_name}")
-                        _announce_recognized_person()
+
+                if should_announce_recognized_person(
+                    recognized_name, _last_announced_recognition_name
+                ):
+                    _last_announced_recognition_name = recognized_name
+                    print(f"[VISION] Announcing newly recognized person: {recognized_name}")
+                    _announce_recognized_person()
 
 
 
