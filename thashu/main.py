@@ -1423,11 +1423,10 @@ def main():
                                 contains=event_query or None,
                             )
                         elif place_query is not None:
-                            records = person_memory.recall(
-                                confirmed_person,
+                            records = person_memory.recall_at_place(
+                                place_query,
                                 limit=5,
-                                kind="event",
-                                location=place_query,
+                                person=confirmed_person,
                             )
                         else:
                             records = person_memory.recall(confirmed_person, limit=5)
