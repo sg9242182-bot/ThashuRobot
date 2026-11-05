@@ -999,6 +999,8 @@ Phase 9 — Unified Person + Place + Episodic Memory
 
 Status: IMPLEMENTATION AND ISOLATED UNIT TESTS COMPLETE; Raspberry Pi voice acceptance pending.
 
+Raspberry Pi follow-up (2026-11-06, user-reported): After the punctuation-tolerant parser update, asking “What happened at the library?” returned the saved event for Tharum. This confirms place-based recall for this run. Restart persistence, an event with no stated place, and cancellation-without-save still need explicit confirmation before Phase 9 can be marked complete.
+
 Architecture:
 - Reuse the existing confirmed-person event store; do not add a second memory database or place-recognition subsystem.
 - A place identity is the exact place label explicitly spoken by the user, normalized only for case and repeated whitespace. Labels do not resolve aliases or imply camera-based recognition.
