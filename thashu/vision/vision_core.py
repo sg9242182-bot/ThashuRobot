@@ -505,7 +505,7 @@ class VisionCore:
             # cadence inside the dedicated vision worker; camera capture,
             # audio, motor control, and safety loops remain independent.
             if self.face_backend == "dlib":
-                recog_interval = 0.75 if enrollment_active else 0.75
+                recog_interval = 0.75
             else:
                 recog_interval = enrollment_recog_interval if enrollment_active else 0.5
             if now - last_recog > recog_interval and faces:
