@@ -72,14 +72,15 @@ class RuntimeCleanupTests(unittest.TestCase):
         audio._paused = False
         audio._stop_event = threading.Event()
         audio._stream = FakeStream()
-        audio._watchdog_thread = FakeThread("audio-watchdog")
+        watchdog = FakeThread("audio-watchdog")
+        audio._watchdog_thread = watchdog
 
         audio.stop()
 
         self.assertFalse(audio._running)
         self.assertTrue(audio._stop_event.is_set())
         self.assertTrue(audio._stream is None)
-        self.assertTrue(audio._watchdog_thread.joined)
+        self.assertTrue(watchdog.joined)
 
 
 if __name__ == "__main__":
