@@ -31,23 +31,13 @@ class VisionCore:
             if person_detector is None:
                 from vision.person_detection import UpperBodyDetector
                 person_detector = UpperBodyDetector()
-        face_backend = os.environ.get("THASHU_FACE_BACKEND", "arcface").strip().casefold()
-        if face_backend not in {"arcface", "dlib"}:
-            raise ValueError("THASHU_FACE_BACKEND must be 'arcface' or 'dlib'")
         if recognizer is None:
-            if face_backend == "dlib":
-                from vision.face_recognition import DlibFaceRecognizer
-                recognizer = DlibFaceRecognizer()
-            else:
-                from vision.face_recognition import FaceRecognizer
-                recognizer = FaceRecognizer(model_path("face", "w600k_r50.onnx"))
+            from vision.face_recognition import DlibFaceRecognizer
+            recognizer = DlibFaceRecognizer()
         if database is None:
-            if face_backend == "dlib":
-                from vision.face_database import DlibFaceDatabase
-                database = DlibFaceDatabase(data_path("people_faces_dlib.json"))
-            else:
-                from vision.face_database import FaceDatabase
-                database = FaceDatabase(data_path("people_faces.json"))
+            from vision.face_database import DlibFaceDatabase
+            database = DlibFaceDatabase(data_path("people_faces_dlib.json"))
+        face_backend = "dlib"
         if tracker is None:
             from vision.tracker import CentroidTracker
             tracker = CentroidTracker(max_disappeared=20)
@@ -59,6 +49,7 @@ class VisionCore:
         self.person_detector = person_detector
         self.person_tracker = person_tracker
         self.face_backend = face_backend
+        print("[FACE RECOGNITION] Backend: dlib (128-D CPU descriptors)")
         self.recognizer = recognizer
         self.database = database
         self.tracker = tracker
@@ -383,7 +374,6 @@ class VisionCore:
 
     def _loop(self):
         recog_interval = 0.75
-        enrollment_recog_interval = 0.4
         debug_match = os.environ.get("THASHU_FACE_MATCH_DEBUG", "").strip() == "1"
         if debug_match:
             print(
@@ -433,12 +423,8 @@ class VisionCore:
             except (AttributeError, TypeError, ValueError):
                 frame_width, frame_height = self.frame_size
 
-            landmark_detections = []
-            if getattr(self.detector, "recognition_ready", False):
-                landmark_detections = self.detector.detect_with_landmarks(frame)
-                detections = [item["bbox"] for item in landmark_detections]
-            else:
-                detections = self.detector.detect(frame)
+            # Dlib computes its own five-point landmarks inside each detected crop.
+            detections = self.detector.detect(frame)
             if not self._processing_enabled.is_set():
                 continue
             faces = self._stabilize_detections(detections)
@@ -496,18 +482,10 @@ class VisionCore:
                     ):
                         enrollment["samples"].clear()
                         enrollment["track_id"] = None
-            with self._lock:
-                enrollment = getattr(self, "_enrollment", None)
-                enrollment_active = bool(
-                    enrollment and enrollment["status"] == "collecting"
-                )
             # Dlib descriptors are more CPU intensive. Run them at a lower
             # cadence inside the dedicated vision worker; camera capture,
             # audio, motor control, and safety loops remain independent.
-            if self.face_backend == "dlib":
-                recog_interval = 0.75
-            else:
-                recog_interval = enrollment_recog_interval if enrollment_active else 0.5
+            recog_interval = 0.75
             if now - last_recog > recog_interval and faces:
                 for face_index, (x1, y1, x2, y2) in enumerate(faces):
                     if not self._processing_enabled.is_set():
@@ -520,36 +498,8 @@ class VisionCore:
                             print("[FACE MATCH TEST] skipped: face has no stable track ID")
                         continue
 
-                    # Match the stabilized box to the closest current YuNet
-                    # observation. Haar-only detections have no landmarks and
-                    # therefore cannot claim an identity.
-                    landmark_item = None
-                    best_overlap = 0.0
-                    for item in landmark_detections:
-                        ax1, ay1, ax2, ay2 = item["bbox"]
-                        ix1, iy1 = max(x1, ax1), max(y1, ay1)
-                        ix2, iy2 = min(x2, ax2), min(y2, ay2)
-                        intersection = max(0, ix2 - ix1) * max(0, iy2 - iy1)
-                        union = ((x2 - x1) * (y2 - y1)
-                                 + (ax2 - ax1) * (ay2 - ay1) - intersection)
-                        overlap = intersection / union if union > 0 else 0.0
-                        if overlap > best_overlap:
-                            best_overlap, landmark_item = overlap, item
-                    if landmark_item is None or best_overlap < 0.30:
-                        if debug_match:
-                            print(
-                                "[FACE MATCH TEST] skipped: stabilized face has no "
-                                f"matching YuNet landmarks (overlap={best_overlap:.3f})"
-                            )
-                        continue
-
-                    ax1, ay1, ax2, ay2 = landmark_item["bbox"]
-                    face_img = frame[ay1:ay2, ax1:ax2]
-                    embedding = self.recognizer.get_embedding(
-                        face_img,
-                        landmark_item["landmarks"],
-                        bbox_origin=(ax1, ay1),
-                    )
+                    face_img = frame[y1:y2, x1:x2]
+                    embedding = self.recognizer.get_embedding(face_img)
                     if not self._processing_enabled.is_set():
                         break
 

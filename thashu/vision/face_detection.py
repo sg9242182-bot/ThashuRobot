@@ -1,8 +1,8 @@
-"""Face detection with five landmarks for ArcFace alignment.
+"""Face detection for dlib recognition.
 
-YuNet is loaded from the machine-local model directory when present. Haar
-remains a detection-only fallback for existing vision behavior; fallback boxes
-are never treated as recognition-ready observations.
+YuNet is used when its local model is available; OpenCV Haar is the fallback.
+The dlib recognizer estimates landmarks from each detected face crop, so both
+detectors can supply recognition candidates.
 """
 
 import cv2
@@ -17,7 +17,7 @@ class FaceDetector:
                 self._yunet = cv2.FaceDetectorYN_create(
                     model_path, "", (320, 320), self.conf_threshold, 0.3, 5000
                 )
-                print("[FACE DETECT] YuNet loaded with five-point landmarks")
+                print("[FACE DETECT] YuNet loaded")
             except (AttributeError, cv2.error, TypeError) as exc:
                 print(f"[FACE DETECT] YuNet unavailable; using Haar detection only: {exc}")
 
@@ -27,7 +27,7 @@ class FaceDetector:
             self.detector = cv2.CascadeClassifier(cascade_path)
             if self.detector.empty():
                 raise RuntimeError("[VISION] Haar cascade failed to load")
-            print("[FACE DETECT] Haar cascade loaded (recognition requires YuNet landmarks)")
+            print("[FACE DETECT] Haar cascade loaded")
 
     @property
     def recognition_ready(self):

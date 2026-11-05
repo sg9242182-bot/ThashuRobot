@@ -560,7 +560,7 @@ Two-person follow trial log review (2026-10-29): The pasted Pi log confirms `[VO
 
 Phase 6 — Person Recognition
 
-Status: COMPLETE — Phase 6 acceptance tests reported passed by the user on the Raspberry Pi.
+Status: REOPENED — active face-recognition backend changed from ArcFace to dlib; the previous Pi results do not validate the dlib pipeline.
 
 Existing files inspected:
 
@@ -606,16 +606,18 @@ Tasks:
 
 Acceptance:
 
-\[x] Known person is recognized reliably across repeated sessions and representative lighting/pose changes. (User-reported tests across distances/poses and after reboot.)
+\[ ] Known person is recognized reliably across repeated sessions and representative lighting/pose changes. (User-reported tests across distances/poses and after reboot.)
 
-\[x] Unknown person remains unknown until identity is explicitly confirmed.
+\[ ] Unknown person remains unknown until identity is explicitly confirmed.
 
-\[x] Confirmed name + face creates persistent identity outside the repository. (User-reported Pi verification: persistence after restart passed.)
+\[ ] Confirmed name + face creates persistent identity outside the repository. (User-reported Pi verification: persistence after restart passed.)
 
-\[x] False identity assignment is prevented by alignment, quality gates, calibrated threshold/margin, and temporal consensus. (User-reported calibration and unknown-face tests passed.)
+\[ ] False identity assignment is prevented by alignment, quality gates, calibrated threshold/margin, and temporal consensus. (User-reported calibration and unknown-face tests passed.)
 
-\[x] No raw face photos or unconfirmed identities are persisted; enrolled identities can be explicitly removed. (User-reported Pi verification: enrollment safeguards and identity deletion passed.)
+\[ ] No raw face photos or unconfirmed identities are persisted; enrolled identities can be explicitly removed. (User-reported Pi verification: enrollment safeguards and identity deletion passed.)
 
+
+Dlib backend acceptance remains pending until fresh identity enrollment, known/unknown/lookalike trials, cross-pose tests, persistence/deletion checks, Pi latency measurement, and recognition announcement behavior are tested on the Raspberry Pi.
 
 
 Implementation snapshot (2026-10-29; on phase-6):
@@ -1526,3 +1528,6 @@ Face enrollment replacement-timeout follow-up (2026-11-03; user-requested, imple
 Phase 7 user-reported Pi acceptance update (2026-11-02): The user reports successful event save and recall, draft cancellation, memory persistence through restart, explicit memory-deletion confirmation, correct Tharun fact/event recall, rejection of memory saving when no face is recognized, and relevant/bounded recall. The user also reports that face recognition remains intermittent: the latest diagnostic frames were rejected by the configured score/margin gates, so the 15-view enrollment update and recognition reliability remain a separate follow-up outside Phase 7 acceptance. Punctuation handling and unknown/ambiguous-person recall isolation are user-reported passed. No independent tests were run.
 
 Phase 6 recognition response delay follow-up (2026-11-03): Updated `thashu/vision/vision_core.py` on `phase-8` to run normal face-embedding comparisons every 0.5 seconds instead of every 2 seconds. The existing three-consistent-observation identity confirmation, score threshold, margin, and quality gates are unchanged. Expected recognition latency after a stable face appears is reduced; Raspberry Pi CPU impact and recognition speed/accuracy still require user validation. No tests were run.
+
+
+Phase 6 dlib-only backend migration (2026-11-05): Replaced the default ArcFace/ONNX embedding path with dlib descriptors, kept YuNet as an optional detector accelerator with Haar fallback, and moved recognition to the dlib Euclidean-distance database at `~/.local/share/thashu/data/people_faces_dlib.json`. Integrated dlib dependencies into `requirements.txt` and removed the optional `requirements-dlib.txt`; setup documentation now states that existing ArcFace embeddings/model files are left untouched and are not compatible, so identities must be enrolled again in dlib mode. Added isolated dlib database tests. Python syntax compilation and five dlib database tests passed in a host scratch copy; dlib inference, Pi performance, and physical recognition acceptance remain unverified. The old ArcFace database and model were not deleted.
