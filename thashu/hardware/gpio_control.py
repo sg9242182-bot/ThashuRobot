@@ -117,6 +117,8 @@ class GPIOControl:
         return device
 
     def _connect(self):
+        if self._stop_event.is_set():
+            return False
         port = self._resolve_port()
         if not port:
             return False
@@ -129,6 +131,9 @@ class GPIOControl:
                 write_timeout=self.SERIAL_TIMEOUT,
             )
             with self._state_lock:
+                if self._stop_event.is_set():
+                    serial_conn.close()
+                    return False
                 self._serial = serial_conn
                 self._port = port
                 self._last_heartbeat = 0.0
@@ -375,9 +380,16 @@ class GPIOControl:
             return self._serial is not None and self._serial.is_open
 
     def close(self):
-        """Stop background transport threads and close the serial connection."""
+        """Stop background transport threads, join them, and close serial."""
         self._stop_event.set()
         self._disconnect("transport closed")
+        current = threading.current_thread()
+        for thread in (self._reader_thread, self._transport_thread):
+            if thread is current or not thread.is_alive():
+                continue
+            thread.join(timeout=self.SERIAL_TIMEOUT + 0.5)
+            if thread.is_alive():
+                print(f"[GPIO] Background thread {thread.name} is still stopping")
 
     @classmethod
     def reset_singleton_for_tests(cls):
