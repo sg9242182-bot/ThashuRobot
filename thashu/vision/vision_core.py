@@ -532,9 +532,12 @@ class VisionCore:
                     if embedding is None:
                         recognized, _score = None, -1.0
                         if debug_match:
+                            reason = getattr(
+                                self.recognizer, "last_failure_reason", None
+                            ) or "unspecified_embedding_failure"
                             print(
                                 "[FACE MATCH TEST] rejected before database match: "
-                                "quality, landmarks, alignment, or embedding inference failed"
+                                + reason
                             )
                     elif debug_match:
                         recognized, _score = self.database.match(
