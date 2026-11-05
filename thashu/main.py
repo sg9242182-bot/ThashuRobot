@@ -1619,17 +1619,35 @@ def main():
 
                 transition_runtime(RuntimeState.RETURN_TO_IDLE)
                 transition_runtime(RuntimeState.IDLE)
-            elif (
-                not _follow_search_active
-                and len(faces) == 1
-                and len(known_faces) == 1
-                and frame_fresh
-            ):
-                recognized_name = known_faces[0]["name"]
-                if recognized_name not in _announced_recognition_names:
-                    _announced_recognition_names[recognized_name] = time.monotonic()
-                    print(f"[VISION] Announcing confirmed recognition: {recognized_name}")
-                    _announce_recognized_person()
+            elif not _follow_search_active:
+                # VisionCore retains confirmed recognition transitions until the
+                # main loop consumes them, so a brief identity-confidence flicker
+                # cannot make the announcement disappear between camera frames.
+                recognition_events = vision.drain_recognition_events()
+                recognition_announced = False
+                for recognition_event in recognition_events:
+                    recognized_name = recognition_event.get("name")
+                    if recognized_name and recognized_name not in _announced_recognition_names:
+                        _announced_recognition_names[recognized_name] = time.monotonic()
+                        print(f"[VISION] Announcing confirmed recognition: {recognized_name}")
+                        _announce_recognized_person()
+                        recognition_announced = True
+                        break
+
+                # Keep the live-state path as a fallback for recognition that was
+                # already present before event queuing became available.
+                if (
+                    not recognition_announced
+                    and len(faces) == 1
+                    and len(known_faces) == 1
+                    and frame_fresh
+                ):
+                    recognized_name = known_faces[0]["name"]
+                    if recognized_name not in _announced_recognition_names:
+                        _announced_recognition_names[recognized_name] = time.monotonic()
+                        print(f"[VISION] Announcing confirmed recognition: {recognized_name}")
+                        _announce_recognized_person()
+
 
 
 if __name__ == "__main__":
