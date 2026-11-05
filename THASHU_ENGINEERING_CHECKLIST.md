@@ -999,7 +999,7 @@ Phase 9 — Unified Person + Place + Episodic Memory
 
 Status: IMPLEMENTATION AND ISOLATED UNIT TESTS COMPLETE; Raspberry Pi voice acceptance pending.
 
-Raspberry Pi follow-up (2026-11-06, user-reported): After the punctuation-tolerant parser update, asking “What happened at the library?” returned the saved event for Tharum. This confirms place-based recall for this run. Restart persistence, an event with no stated place, and cancellation-without-save still need explicit confirmation before Phase 9 can be marked complete.
+Raspberry Pi follow-up (2026-11-06, user-reported): After the punctuation-tolerant parser update, asking “What happened at the library?” returned the saved event for Tharum. This confirms place-based recall for this run. The user also confirmed the event remained recallable after restarting Thashu, so place recall and persistence are passed. An event with no stated place and cancellation-without-save still need explicit confirmation before Phase 9 can be marked complete.
 
 Architecture:
 - Reuse the existing confirmed-person event store; do not add a second memory database or place-recognition subsystem.
@@ -1539,3 +1539,5 @@ Phase 6 recognition response delay follow-up (2026-11-03): Updated `thashu/visio
 
 
 Phase 6 dlib-only backend migration (2026-11-05): Replaced the default ArcFace/ONNX embedding path with dlib descriptors, kept YuNet as an optional detector accelerator with Haar fallback, and moved recognition to the dlib Euclidean-distance database at `~/.local/share/thashu/data/people_faces_dlib.json`. Integrated dlib dependencies into `requirements.txt` and removed the optional `requirements-dlib.txt`; setup documentation now states that existing ArcFace embeddings/model files are left untouched and are not compatible, so identities must be enrolled again in dlib mode. Added isolated dlib database tests. Python syntax compilation and five dlib database tests passed in a host scratch copy; dlib inference, Pi performance, and physical recognition acceptance remain unverified. The old ArcFace database and model were not deleted.
+
+Recognition announcement deduplication (2026-11-06): Updated `thashu/main.py` and `thashu/core/decision.py` so the recognition WAV plays on first confirmed identity and when the confirmed identity changes, but not when the same person is reacquired after a conversation or brief confidence loss. The comparison is case-insensitive and is held for the process lifetime; a return after another identity is announced counts as a change. Added five pure decision tests. The 12 isolated memory/recognition tests and Python syntax compilation passed on a host scratch copy; Pi WAV behavior still requires validation.
