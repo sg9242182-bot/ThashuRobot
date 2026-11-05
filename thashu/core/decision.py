@@ -506,8 +506,8 @@ def get_person_memory_request(user_input: str):
     """
     text = " ".join((user_input or "").strip().split())
     patterns = (
-        ("event", r"remember this event(?:\s*[:,;]\s*|\s+)(.+)"),
-        ("fact", r"remember that(?:\s*[:,;]\s*|\s+)(.+)"),
+        ("event", r"remember this event(?:\s*[:,;.!?]\s*|\s+)(.+)"),
+        ("fact", r"remember that(?:\s*[:,;.!?]\s*|\s+)(.+)"),
     )
     for kind, pattern in patterns:
         match = re.fullmatch(pattern, text, flags=re.IGNORECASE)
