@@ -1,4 +1,4 @@
-import os
+from core.config import face_match_debug_enabled
 import threading
 import time
 
@@ -351,7 +351,7 @@ class VisionCore:
     def _loop(self):
         recog_interval = 2.0
         enrollment_recog_interval = 0.4
-        debug_match = os.environ.get("THASHU_FACE_MATCH_DEBUG", "").strip() == "1"
+        debug_match = face_match_debug_enabled()
         if debug_match:
             print(
                 "[FACE MATCH TEST] enabled; thresholds are diagnostic only "

@@ -17,7 +17,6 @@ from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconn
 from starlette.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from api.config import get_api_state_db_path, get_api_token
 from pydantic import BaseModel, ConfigDict, Field
 from uuid import UUID, uuid4
 
@@ -27,6 +26,7 @@ THASHU_ROOT = REPO_ROOT / "thashu"
 if str(THASHU_ROOT) not in sys.path:
     sys.path.insert(0, str(THASHU_ROOT))
 
+from api.config import get_api_state_db_path, get_api_token
 from core.robot_manager import (
     ControlMode,
     ControlModeError,
@@ -738,6 +738,28 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.add_middleware(CommandBodySizeLimitMiddleware)
+
+
+@app.middleware("http")
+async def log_api_request(request, call_next):
+    """Log request completion without recording query strings or credentials."""
+    started = time.monotonic()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        record = {
+            "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+            "component": "pi_api",
+            "event": "http_request",
+            "method": request.method,
+            "path": request.url.path,
+            "http_status": status_code,
+            "duration_ms": round((time.monotonic() - started) * 1000, 2),
+        }
+        logger.info("%s", json.dumps(record, separators=(",", ":"), sort_keys=True))
 
 
 @app.get("/health", tags=["health"])

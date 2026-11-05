@@ -59,18 +59,18 @@ Create a maintainable, testable backend structure and reproducible local develop
 - [ ] Create and verify the virtual environment on the target Pi.
 - [ ] Keep API routes, robot orchestration, ESP32 communication, safety policy, telemetry, diagnostics, and logging in separate modules consistent with the existing repository structure. The broader diagnostics/logging separation still needs review.
 - [x] Keep the API token in environment configuration, outside source control.
-- [ ] Centralize and validate the rest of the backend configuration.
+- [x] Centralize and validate backend environment settings (API host/port, API token/state DB, model/data/cache paths, Piper binary, face-match debug flag) in `thashu/core/config.py`; invalid ports, blank path overrides, and invalid debug values fail explicitly.
 - [x] Add structured JSON logs for move/stop outcomes with severity, timestamp, component, command ID, and sanitized error codes.
-- [ ] Extend structured logging across other backend services and request flows.
+- [ ] Extend structured logging across other backend services and request flows. API HTTP requests and robot-process API startup now emit JSON records; other voice, vision, and transport services still use console messages and need a scoped logging pass.
 - [x] Document startup/shutdown commands and handle unavailable serial hardware without crashing the API; status reports unavailable transport. Full startup behavior on the target Pi has not been verified.
 - [x] Add baseline API/protocol tests and document development test commands.
 
 ### Exit criteria
 - [x] API-only backend starts in local development (Vishal verified it in Swagger). Full robot-process startup on the Pi remains unverified.
-- [ ] Configuration and logs are consistent across the full backend.
+- [ ] Configuration and logs are consistent across the full backend. Configuration is centralized; structured logging remains partial.
 - [x] Software handles unavailable/disconnected serial hardware as a degraded state; API status tests cover unavailable transport. Physical Pi behavior remains unverified.
 
-**Phase 1 evidence (2026-11-03):** Pi Setup documents Bookworm/Python 3.11.2, API dependencies, token configuration, and start/stop commands. Vishal previously reported 13/13 API tests passing; protocol tests passed 9/9 after the latest Pi transport changes. Phase 1 remains in progress because the target-Pi virtual environment/startup and full-backend configuration/logging review are still open.
+**Phase 1 evidence (2026-11-05):** Shared environment settings are centralized and validated in `thashu/core/config.py`; API request completion and robot-process API startup emit structured JSON logs. Configuration tests cover defaults, valid overrides, and invalid values. Phase 1 remains in progress because the target-Pi virtual environment/startup has not been verified, broader service logging/module separation still needs review, and full robot-process startup remains unverified.
 
 ## Phase 2 — Pi–ESP32 protocol contract and transport
 
@@ -105,7 +105,7 @@ Provide one authoritative high-level component for robot state and command coord
 ### Checklist
 - [x] Verify the single Pi-side `RobotCommandManager` path for API and voice motor commands; tests cover validation, mode tracking, and transport failure.
 - [x] Implement explicit MANUAL/AUTO mode selection; switch only after STOP receives `ACK|sequence|OK`, cancel Pi movement/follow work first, and keep AUTO paused until the existing follow behavior is explicitly started.
-- [ ] Confirm the mode-transition behavior with Tharun on the integrated robot. Pi code and unit tests cover the stop-before-switch and no-auto-restart rules; physical robot verification is still pending.
+- [x] Confirm the mode-transition behavior with Tharun on the integrated robot. Tharun reports the Manual/Auto switching and STOP behavior are working; this is team-reported physical verification.
 - [x] Route movement commands through request validation, manager dispatch, ACK tracking, and command-result reporting.
 - [x] Require a STOP `ACK|sequence|OK` before the first Manual move; tests verify a rejected/missing ACK prevents the move and an already-Manual move does not repeat the transition STOP.
 - [x] Require fresh, relevant sensor readings for each movement: 750 ms maximum age, `FAR` is clear, missing/`NA`/stale values block and send STOP, front ToF for forward/turns, rear sensor for backward, and numeric clearance above 300 mm.
@@ -114,7 +114,7 @@ Provide one authoritative high-level component for robot state and command coord
 - [x] Handle ESP32 ACK rejection and timeout in the command-result flow.
 - [x] Require UUID `request_id` values for move and STOP. Persist request ID, action, command ID, and latest result in SQLite for 24 hours; matching retries reuse the command, mismatched actions return 409, and interrupted dispatches become unknown without replay. Tests cover move/STOP retries, process restarts, ACK results, and action conflicts.
 - [x] Define stale-state and uncertain-dispatch recovery: an in-flight request found after restart returns `unknown` with its original command ID and is never resent. Expired records can be treated as new requests after 24 hours.
-- [ ] Add a latched Emergency Stop only after Tharun updates and verifies an ESP32 protocol command/event and explicit reset behavior; Pi-side latch must mirror and enforce it.
+- [ ] Add a latched Emergency Stop only after Tharun implements and tests the proposed ESP32 `ESTOP`/`ESTOP_RESET` protocol, including reboot-persistent latch and safe reset; Pi-side mirroring remains on hold until firmware verification.
 - [x] Keep API routes from independently mutating low-level state; they dispatch through the robot manager.
 - [x] Keep motor actuation and hardware safety logic on the ESP32; the Pi sends semantic commands.
 
@@ -123,7 +123,7 @@ Provide one authoritative high-level component for robot state and command coord
 - [x] Conflicting commands are safely serialized through the shared manager lock; a concurrent move/STOP test verifies they do not overlap.
 - [x] API responses distinguish Pi dispatch from later ESP32 ACK, safety rejection, or timeout.
 
-**Phase 3 evidence (2026-11-05):** The shared Pi manager now supports an explicit mode request, waits for `ACK|sequence|OK` before switching, inhibits movement after an unconfirmed mode STOP, and keeps AUTO paused until the existing follow-start action enables it. User-requested STOP cancels Pi movement/follow timers and returns to AUTO paused. Movement dispatch requires a fresh sensor snapshot (maximum 750 ms), treats `FAR` as clear, blocks `NA`/missing/stale readings and sends STOP, uses the existing 300 mm threshold, and leaves ESP32 safety interlocks authoritative. Control-state versions prevent a movement waiting across a STOP/mode change from being dispatched afterward. Bounded follow pulses stop without canceling the explicitly started Auto session. After persistent request ID idempotency was added for move and STOP, the combined API and robot-manager suites passed 61/61. In-flight records found after restart return unknown and are never replayed. Tharun must still verify mode transitions on the integrated robot. Emergency Stop remains open pending a latched ESP32 protocol/firmware change.
+**Phase 3 evidence (2026-11-05):** The shared Pi manager now supports an explicit mode request, waits for `ACK|sequence|OK` before switching, inhibits movement after an unconfirmed mode STOP, and keeps AUTO paused until the existing follow-start action enables it. User-requested STOP cancels Pi movement/follow timers and returns to AUTO paused. Movement dispatch requires a fresh sensor snapshot (maximum 750 ms), treats `FAR` as clear, blocks `NA`/missing/stale readings and sends STOP, uses the existing 300 mm threshold, and leaves ESP32 safety interlocks authoritative. Control-state versions prevent a movement waiting across a STOP/mode change from being dispatched afterward. Bounded follow pulses stop without canceling the explicitly started Auto session. After persistent request ID idempotency was added for move and STOP, the combined API and robot-manager suites passed 61/61. In-flight records found after restart return unknown and are never replayed. Tharun reports the integrated mode/STOP behavior is working. Emergency Stop remains open pending a latched ESP32 protocol/firmware change.
 
 ## Phase 4 — REST API
 

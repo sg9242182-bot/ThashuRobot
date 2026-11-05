@@ -89,15 +89,20 @@ tests, and integrated firmware on this branch use this format.
   Unsupported-version testing was not applicable to v0. The branch-aligned
   source still requires compile/upload and Pi integration verification.
 - A latched Emergency Stop and reset are not present in the deployed protocol.
-  Tharun must propose and verify the ESP32 protocol/firmware change before the
-  Pi claims or exposes that feature.
+  Tharun proposed `CMD|n|ESTOP` and `CMD|n|ESTOP_RESET`: ESTOP latches and
+  rejects later movement with `ACK|n|ERROR|ESTOP_LATCHED`; reset is allowed only
+  with motors stopped and safety hardware ready, never starts motion, and the
+  latch survives ESP32 reboot. Ordinary STOP remains non-latching. This is a
+  proposal only; firmware implementation and tests, including reboot behavior,
+  are pending. Do not mirror it in the Pi until Tharun implements and verifies
+  the firmware contract.
 
 ## Scope notes
 
 - The proposed mode route is implemented as `POST /api/v1/robot/mode`; Niteshvar
   must review its request/response contract before integrating the Flutter app.
-- Do not expose a latched Emergency Stop route until the ESP32 command/event and
-  explicit reset behavior are implemented and verified.
+- Do not expose a latched Emergency Stop route until the proposed ESP32 latch
+  and explicit reset behavior are implemented and verified.
 - Do not weaken ESP32 safety or treat stale/missing sensor values as clear.
 - Physical robot verification belongs to Tharun. Backend software and API
   integration belong to Vishal.

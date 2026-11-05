@@ -6,8 +6,43 @@ from uuid import UUID
 from unittest.mock import patch
 
 from api import main
+from thashu.core import config as robot_config
 from core.robot_manager import ControlModeError, ModeSwitchError
 from fastapi.security import HTTPAuthorizationCredentials
+
+
+class ConfigurationTests(unittest.TestCase):
+    def test_api_host_and_port_defaults(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(robot_config.api_host(), "127.0.0.1")
+            self.assertEqual(robot_config.api_port(), 8000)
+
+    def test_api_host_and_port_overrides_are_validated(self):
+        with patch.dict(os.environ, {"THASHU_API_HOST": "0.0.0.0", "THASHU_API_PORT": "8088"}):
+            self.assertEqual(robot_config.api_host(), "0.0.0.0")
+            self.assertEqual(robot_config.api_port(), 8088)
+        for value in ("0", "65536", "abc", ""):
+            with self.subTest(value=value), patch.dict(os.environ, {"THASHU_API_PORT": value}):
+                with self.assertRaises(ValueError):
+                    robot_config.api_port()
+
+    def test_optional_paths_reject_empty_overrides(self):
+        for name, getter in (
+            ("THASHU_API_STATE_DB", robot_config.api_state_db_path),
+            ("THASHU_MODELS_DIR", robot_config.models_dir),
+            ("THASHU_DATA_DIR", robot_config.data_dir),
+            ("THASHU_VOICE_CACHE_DIR", robot_config.voice_cache_dir),
+        ):
+            with self.subTest(name=name), patch.dict(os.environ, {name: "   "}):
+                with self.assertRaises(ValueError):
+                    getter()
+
+    def test_face_match_debug_requires_boolean_text(self):
+        with patch.dict(os.environ, {"THASHU_FACE_MATCH_DEBUG": "1"}):
+            self.assertTrue(robot_config.face_match_debug_enabled())
+        with patch.dict(os.environ, {"THASHU_FACE_MATCH_DEBUG": "yes"}):
+            with self.assertRaises(ValueError):
+                robot_config.face_match_debug_enabled()
 
 
 class FakeTransport:

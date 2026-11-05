@@ -4,6 +4,9 @@ import os
 import statistics
 import atexit
 import sys
+import logging
+import json
+from datetime import datetime, timezone
 
 import numpy as np
 import RPi.GPIO as GPIO
@@ -30,6 +33,7 @@ from core.robot_manager   import (
     RobotUnavailableError,
     stop_and_wait_for_ack,
 )
+from core.config import api_host, api_port
 from hardware.servo_tracking import ServoTracker
 from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, is_recognition_query
 from core.model_paths import model_path, project_path
@@ -126,8 +130,8 @@ def _start_api_server():
         from api.main import app, services
 
         services.attach_robot_manager(robot_manager)
-        host = os.environ.get("THASHU_API_HOST", "127.0.0.1")
-        port = int(os.environ.get("THASHU_API_PORT", "8000"))
+        host = api_host()
+        port = api_port()
         config = uvicorn.Config(app, host=host, port=port, log_level="info")
         _api_server = uvicorn.Server(config)
         _api_thread = threading.Thread(
@@ -136,9 +140,23 @@ def _start_api_server():
             daemon=True,
         )
         _api_thread.start()
-        print(f"[API] Started on http://{host}:{port} using the shared ESP32 connection")
-    except Exception as exc:
-        print(f"[API] Could not start; robot voice control remains available: {exc}")
+        _log_startup_event("api_started", host=host, port=port)
+    except Exception:
+        _log_startup_event("api_start_failed", severity="exception")
+
+
+def _log_startup_event(event, *, host=None, port=None, severity="info"):
+    record = {
+        "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+        "component": "pi_startup",
+        "event": event,
+    }
+    if host is not None:
+        record["host"] = host
+    if port is not None:
+        record["port"] = port
+    logger = logging.getLogger("thashu.startup")
+    getattr(logger, severity)("%s", json.dumps(record, separators=(",", ":"), sort_keys=True))
 
 
 def _stop_api_server():

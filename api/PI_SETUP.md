@@ -65,6 +65,24 @@ Stop the robot and API together with `Ctrl+C`.
 
 `127.0.0.1` works only on the Pi itself. Do not expose port 8000 to the public internet. Before the Flutter app connects, Tharun and Vishal need to arrange a private, encrypted connection and restrict access with the Pi firewall. Then set `THASHU_API_HOST=0.0.0.0` in the robot process environment, and provide Niteshvar the Pi's private-network address and a fresh test token through a secure channel. Rotate the test token after the test.
 
+## Backend environment settings
+
+Settings are read and validated by `thashu/core/config.py`:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `THASHU_API_HOST` | `127.0.0.1` | API bind address; use `0.0.0.0` only after private-network/firewall setup. |
+| `THASHU_API_PORT` | `8000` | API port, from 1 through 65535. |
+| `THASHU_API_TOKEN` | unset | Bearer token; control routes fail closed until set. |
+| `THASHU_API_STATE_DB` | OS-specific persistent user state path | SQLite command/idempotency records. |
+| `THASHU_MODELS_DIR` | `~/.local/share/thashu/models` | Installed model files. |
+| `THASHU_DATA_DIR` | `~/.local/share/thashu/data` | Persistent robot data. |
+| `THASHU_PIPER_BIN` | `~/piper/piper/piper` | Piper executable. |
+| `THASHU_VOICE_CACHE_DIR` | `$XDG_DATA_HOME/thashu/voice_responses` | Generated voice cache. |
+| `THASHU_FACE_MATCH_DEBUG` | `0` | Enables extra face-match debug output when set to `1`. |
+
+Invalid ports, blank path overrides, or a face-match debug value other than `0`/`1` stop startup/use with a configuration error.
+
 ## Automatic startup
 
 Do not enable an automatic-start service until Tharun confirms the Pi's install location, service account, serial-device permissions, and private-network setup. Store the token in a root-readable environment file outside the repository; never put it in a committed service file.

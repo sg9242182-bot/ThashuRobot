@@ -1,22 +1,16 @@
 import hashlib
-import os
 import subprocess
 import threading
 
+from core.config import piper_binary, voice_cache_dir
 from core.model_paths import model_path
 from core.quick_responses import QuickResponses
 from voice.sound_player import _lock, play
 
-PIPER_PATH = os.environ.get(
-    "THASHU_PIPER_BIN", os.path.expanduser("~/piper/piper/piper")
-)
+PIPER_PATH = piper_binary()
 MODEL_PATH = model_path("piper", "en_US-lessac-low.onnx")
 DEVICE     = "default"
-VOICE_CACHE_DIR = os.path.expanduser(os.environ.get(
-    "THASHU_VOICE_CACHE_DIR",
-    os.path.join(os.environ.get("XDG_DATA_HOME", "~/.local/share"),
-                 "thashu", "voice_responses"),
-))
+VOICE_CACHE_DIR = str(voice_cache_dir())
 
 # Short, fixed replies are generated once on the Pi and kept outside the repo.
 COMMAND_VOICE_PROMPTS = {

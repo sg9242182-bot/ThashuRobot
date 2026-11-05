@@ -1,14 +1,12 @@
 """Stable source and machine-local model paths for Thashu."""
 
-import os
 from pathlib import Path
+
+from core.config import data_dir, models_dir
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_MODELS_DIR = Path.home() / ".local" / "share" / "thashu" / "models"
-MODELS_DIR = Path(
-    os.environ.get("THASHU_MODELS_DIR", str(DEFAULT_MODELS_DIR))
-).expanduser().resolve()
+MODELS_DIR = models_dir()
 
 
 def project_path(*parts):
@@ -21,10 +19,7 @@ def model_path(*parts):
     return str(MODELS_DIR.joinpath(*parts))
 
 
-DEFAULT_DATA_DIR = Path.home() / ".local" / "share" / "thashu" / "data"
-DATA_DIR = Path(
-    os.environ.get("THASHU_DATA_DIR", str(DEFAULT_DATA_DIR))
-).expanduser().resolve()
+DATA_DIR = data_dir()
 
 
 def data_path(*parts):
