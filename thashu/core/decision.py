@@ -597,3 +597,17 @@ def decide(user_input: str, context=None) -> str:
 
     # ===== DEFAULT =====
     return "AI_FALLBACK"
+
+def should_announce_recognized_person(person_name, last_announced_name):
+    """Announce only a new, non-unknown identity relative to the last announcement."""
+    if not isinstance(person_name, str) or not person_name.strip():
+        return False
+    normalized = person_name.strip().casefold()
+    if normalized == "unknown":
+        return False
+    previous = (
+        last_announced_name.strip().casefold()
+        if isinstance(last_announced_name, str)
+        else ""
+    )
+    return normalized != previous
