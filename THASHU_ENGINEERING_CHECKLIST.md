@@ -1059,11 +1059,11 @@ Tasks:
 
 \[ ] Camera failure recovery.
 
-\[ ] ESP32 disconnect/reconnect.
+\[x] ESP32 disconnect/reconnect.
 
 \[ ] Sensor failure handling.
 
-\[ ] Motor stale-command protection.
+\[x] Motor stale-command protection.
 
 \[x] Process/thread cleanup.
 
@@ -1075,9 +1075,9 @@ Acceptance:
 
 \[ ] Major subsystem failures do not permanently brick the robot.
 
-\[ ] Motors fail safely.
+\[x] Motors fail safely.
 
-\[ ] ESP32 reconnects or enters a safe state.
+\[x] ESP32 reconnects or enters a safe state.
 
 \[ ] Robot can recover from common runtime failures.
 
@@ -1553,3 +1553,6 @@ Phase 6 recognition response delay follow-up (2026-11-03): Updated `thashu/visio
 Phase 6 dlib-only backend migration (2026-11-05): Replaced the default ArcFace/ONNX embedding path with dlib descriptors, kept YuNet as an optional detector accelerator with Haar fallback, and moved recognition to the dlib Euclidean-distance database at `~/.local/share/thashu/data/people_faces_dlib.json`. Integrated dlib dependencies into `requirements.txt` and removed the optional `requirements-dlib.txt`; setup documentation now states that existing ArcFace embeddings/model files are left untouched and are not compatible, so identities must be enrolled again in dlib mode. Added isolated dlib database tests. Python syntax compilation and five dlib database tests passed in a host scratch copy; dlib inference, Pi performance, and physical recognition acceptance remain unverified. The old ArcFace database and model were not deleted.
 
 Recognition announcement deduplication (2026-11-06): Updated `thashu/main.py` and `thashu/core/decision.py` so the recognition WAV plays on first confirmed identity and when the confirmed identity changes, but not when the same person is reacquired after a conversation or brief confidence loss. The comparison is case-insensitive and is held for the process lifetime; a return after another identity is announced counts as a change. Added five pure decision tests. The 12 isolated memory/recognition tests and Python syntax compilation passed on a host scratch copy; Pi WAV behavior still requires validation.
+
+
+Phase 10 user-reported Pi verification (2026-11-06): ESP32 disconnect/reconnect test passed, and stale motor-command protection test passed. These verify the corresponding task and safety acceptance items; other subsystem failure/recovery checks and overall Phase 10 acceptance remain open.
