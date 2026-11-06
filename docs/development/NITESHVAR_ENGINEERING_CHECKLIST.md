@@ -98,14 +98,14 @@ Build the navigable app foundation before wiring robot behavior.
 Create one controlled boundary for HTTP requests and responses.
 
 ### Checklist
-- [ ] Implement typed models only from approved schemas.
-- [ ] Centralize base URL, request timeouts, headers, and error translation.
-- [ ] Implement the agreed status, movement, stop, emergency-stop, mode, reset, settings, diagnostics, logs, and system calls only where defined by the contract.
-- [ ] Validate user inputs and allowed command ranges at the UI/client boundary; backend validation remains authoritative.
-- [ ] Handle timeout, unreachable host, malformed response, unsupported version, unauthorized request, and server error states.
-- [ ] Prevent duplicate taps/repeated requests where they could create conflicting commands.
-- [ ] Never silently convert a failed command into a success state.
-- [ ] Add unit tests for parsing, validation, and error mapping.
+- [ ] Implement typed models only from approved schemas. The current client models follow the API examples supplied by Vishal, but an approved contract is not checked into the repository yet.
+- [x] Centralize base URL, request timeouts, headers, and error translation in `PiApiClient`.
+- [x] Implement only the currently confirmed calls: `GET /health`, `GET /api/v1/status`, `POST /api/v1/robot/mode`, `POST /api/v1/robot/move`, `POST /api/v1/robot/stop`, and `GET /api/v1/robot/commands/{command_id}`. No unconfirmed backend routes were added.
+- [ ] Validate user inputs and allowed command ranges at the UI/client boundary; backend validation remains authoritative. Client-side move and request-ID validation is implemented; movement UI validation remains for Phase 5.
+- [ ] Handle timeout, unreachable host, malformed response, unsupported version, unauthorized request, and server error states. Client handling and tests cover timeout, unreachable host, malformed JSON, unauthorized, validation/conflict, and server errors. The current API contract defines no version field or unsupported-version response to handle.
+- [x] Prevent duplicate in-flight move retries and same-ID STOP retries; conflicting in-flight moves and moves during STOP are rejected locally.
+- [x] Never silently convert a failed command into a success state; API failures surface as `PiApiException` and the dashboard marks failed status as unavailable/stale.
+- [x] Add unit tests for parsing, validation, retry behavior, and error mapping.
 
 ### Exit criteria
 - [ ] API calls match the checked-in contract exactly.
@@ -118,17 +118,17 @@ Create one controlled boundary for HTTP requests and responses.
 Present an honest summary of the robot's reported state.
 
 ### Checklist
-- [ ] Display connection status separately from robot operational status.
-- [ ] Display reported mode, readiness/health, and available telemetry fields defined by the contract.
-- [ ] Show stale-data/disconnected state when updates stop; do not leave old values looking current.
-- [ ] Add deliberate refresh behavior where appropriate.
-- [ ] Avoid inferring sensor or motor state from UI actions alone.
-- [ ] Test startup when the robot is unavailable and recovery when it becomes reachable.
+- [x] Display connection status separately from robot operational status.
+- [x] Display reported mode, readiness/health, and available telemetry fields defined by the contract.
+- [x] Show previous status as stale when a refresh fails; ongoing telemetry freshness belongs to Phase 6 because this API's status response has no timestamp.
+- [x] Add deliberate manual refresh behavior.
+- [x] Avoid inferring sensor or motor state from UI actions alone; display only fields returned by the Pi.
+- [x] Test startup when the robot is unavailable and recovery when it becomes reachable.
 
 ### Exit criteria
-- [ ] Dashboard works online and offline.
-- [ ] Stale and unknown values are clearly identified.
-- [ ] Status is based on backend-reported data.
+- [x] Dashboard works online and offline through the injectable API client and explicit unconfigured/unavailable states.
+- [x] Stale and unknown values are clearly identified.
+- [x] Status is based on backend-reported data.
 
 ## Phase 5 — Manual control and safe interaction
 
@@ -220,6 +220,20 @@ For each phase, record:
 - **Evidence:** commit/PR, test command and result, screenshots only where useful
 - **Open issues:** specific blockers, not guesses
 - **Dependency owner:** name the teammate who must resolve an interface or integration dependency
+
+### Phase 3 — Typed models and REST client
+
+- **Status:** In progress
+- **Evidence:** `PiApiClient` implements the currently confirmed Flutter-facing routes; Dart analysis passed with no issues; the full Flutter test suite passed with 27 tests, including 15 focused API-client tests.
+- **Open issues:** No approved API contract is checked into the repository; no Pi address or test token is available for live API verification. UI-side movement validation and controls belong to Phase 5. Unsupported-version behavior is not defined by the current API.
+- **Dependency owner:** Vishal — check in/confirm the API contract and provide a Pi test address and token. Niteshvar — finish client/UI work once the approved contract is recorded.
+
+### Phase 4 — Dashboard and connection state
+
+- **Status:** Complete (local client and widget-test scope)
+- **Evidence:** The Dashboard displays API connection separately from Pi-reported status, supports deliberate refresh, labels old data stale after a failed refresh, and shows explicit unconfigured/offline states. The Dashboard widget tests passed, including startup unavailable/recovery; the full Flutter suite passed with 27 tests.
+- **Open issues:** Live Pi verification remains pending under Phase 3. Automatic telemetry freshness belongs to Phase 6 because the current REST status response has no timestamp.
+- **Dependency owner:** Vishal — provide the Pi address and temporary test token for live integration.
 
 ### Phase 2 — App shell, navigation, and visual system
 
