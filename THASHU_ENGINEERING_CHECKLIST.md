@@ -1089,7 +1089,12 @@ User-reported Pi verification (2026-11-06): The user confirms all remaining Phas
 
 Phase 11 — Performance Optimization
 
-Status: NOT STARTED
+Status: IN PROGRESS — baseline instrumentation and measurements are the first task.
+
+Baseline instrumentation audit (2026-11-07):
+- `thashu/main.py` already prints coarse wall-clock durations for STT, Brain, TTS, and total interaction. These do not isolate wake-word-to-listening, Brain-to-first-audio, or Piper-to-idle latency.
+- Existing output does not provide a consolidated baseline for vision CPU/RAM, face-recognition latency, camera FPS, Pi–ESP32 round-trip latency, or sensor update rate.
+- No performance tuning is approved before those baselines are measured on the Raspberry Pi. Keep all Phase 11 measurement checkboxes open until recorded.
 
 Measure before optimizing:
 
