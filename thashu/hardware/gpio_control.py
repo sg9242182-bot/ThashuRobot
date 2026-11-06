@@ -317,9 +317,16 @@ class GPIOControl:
                         print(f"[ESP32] {line}")
                         self._events.put(line)
             except (serial.SerialException, OSError) as exc:
+                if self._stop_event.is_set():
+                    break
                 self._disconnect(f"read failed: {exc}", expected_serial=serial_conn)
             except Exception as exc:
-                # A malformed inbound frame must not kill the reader thread.
+                # Closing the serial port can interrupt readline() with a
+                # backend-specific exception (including TypeError). Treat that
+                # as normal during shutdown, but keep logging unexpected errors
+                # while the transport is meant to be running.
+                if self._stop_event.is_set():
+                    break
                 print(f"[GPIO] ESP32 receive error: {exc}")
 
     def _update_sensor_snapshot(self, line):
