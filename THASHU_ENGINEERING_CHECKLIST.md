@@ -1037,7 +1037,7 @@ Acceptance:
 
 Phase 10 — Reliability \& Recovery
 
-Status: IN PROGRESS — baseline audit complete; cleanup and recovery hardening underway. Phase 9 remains separately open for its two Pi edge checks.
+Status: COMPLETE — user-reported Raspberry Pi recovery and acceptance checks passed on 2026-11-06.
 
 Initial Phase 10 audit (2026-11-06):
 - Existing safe foundations: ESP32 watchdog stops motors after Pi-frame loss; Pi motion commands have bounded stop timers; GPIOControl reconnects and rejects stale sensor snapshots; camera reconnects after frame loss; AudioManager has a bounded five-attempt watchdog; Whisper catches inference errors and returns empty text; Piper cache generation has a 60-second timeout.
@@ -1055,13 +1055,13 @@ Tasks:
 
 \[x] Piper timeout/recovery.
 
-\[ ] Whisper failure recovery.
+\[x] Whisper failure recovery.
 
-\[ ] Camera failure recovery.
+\[x] Camera failure recovery.
 
 \[x] ESP32 disconnect/reconnect.
 
-\[ ] Sensor failure handling.
+\[x] Sensor failure handling.
 
 \[x] Motor stale-command protection.
 
@@ -1069,19 +1069,21 @@ Tasks:
 
 \[x] Graceful shutdown.
 
-\[ ] Restart/recovery behavior.
+\[x] Restart/recovery behavior.
 
 Acceptance:
 
-\[ ] Major subsystem failures do not permanently brick the robot.
+\[x] Major subsystem failures do not permanently brick the robot.
 
 \[x] Motors fail safely.
 
 \[x] ESP32 reconnects or enters a safe state.
 
-\[ ] Robot can recover from common runtime failures.
+\[x] Robot can recover from common runtime failures.
 
 \---
+
+User-reported Pi verification (2026-11-06): The user confirms all remaining Phase 10 checks passed, including Whisper failure recovery, camera recovery, sensor failure handling, and restart/recovery. Together with the previously confirmed Piper timeout/recovery, ESP32 disconnect/reconnect, stale motor-command protection, and graceful Ctrl+C cleanup, the Phase 10 acceptance checks are recorded passed. ESP32 firmware was unchanged and did not require reflashing. The focused host tests and syntax checks recorded above also passed. This completion status is based on user-reported Pi checks.
 
 Phase 11 — Performance Optimization
 
