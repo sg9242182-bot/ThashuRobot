@@ -997,9 +997,9 @@ Acceptance:
 
 Phase 9 — Unified Person + Place + Episodic Memory
 
-Status: IMPLEMENTATION AND ISOLATED UNIT TESTS COMPLETE; Raspberry Pi voice acceptance pending.
+Status: COMPLETE — implementation, isolated tests, and user-reported Raspberry Pi voice acceptance passed on 2026-11-07.
 
-Raspberry Pi follow-up (2026-11-06, user-reported): After the punctuation-tolerant parser update, asking “What happened at the library?” returned the saved event for Tharum. This confirms place-based recall for this run. The user also confirmed the event remained recallable after restarting Thashu, so place recall and persistence are passed. An event with no stated place and cancellation-without-save still need explicit confirmation before Phase 9 can be marked complete.
+Raspberry Pi follow-up (2026-11-06, user-reported): After the punctuation-tolerant parser update, asking “What happened at the library?” returned the saved event for Tharum. This confirms place-based recall for this run. The user also confirmed the event remained recallable after restarting Thashu, so place recall and persistence are passed. On 2026-11-07, the user additionally confirmed that an event saved without a stated place remains unknown (no place is inferred) and cancelling an event draft writes nothing. All Phase 9 Raspberry Pi acceptance checks are now passed.
 
 Architecture:
 - Reuse the existing confirmed-person event store; do not add a second memory database or place-recognition subsystem.
@@ -1024,16 +1024,18 @@ Tasks:
 \[x] Keep retrieval bounded and relevant (maximum five newest records; exact place label).
 \[x] Avoid duplicate records caused by case/spacing differences; preserve atomic storage and unreadable-store protection.
 \[x] Do not infer a place from camera imagery or substitute an unconfirmed identity.
-\[ ] Verify integrated voice save, cancellation, restart persistence, and person/place recall on the Raspberry Pi.
+\[x] Verify integrated voice save, cancellation, restart persistence, and person/place recall on the Raspberry Pi.
 
 Acceptance:
 
 \[x] Event records associate significant interactions with the confirmed person, optional explicit place label, and saved timestamp.
 \[x] Place-based lookup returns only exact normalized labels, bounded to five results.
 \[x] A place query in the runtime is scoped to the currently recognized person; unknown or stale identity cannot create or expose person-specific links.
-\[ ] Raspberry Pi voice acceptance: save a read-back-confirmed event with a place, restart and recall it by person and place, verify an unstated location stays unknown, and verify cancellation writes nothing.
+\[x] Raspberry Pi voice acceptance: save a read-back-confirmed event with a place, restart and recall it by person and place, verify an unstated location stays unknown, and verify cancellation writes nothing.
 
 \---
+
+Phase 9 completion report (2026-11-07): User reports the no-place event test and cancellation-without-save test both passed on the Raspberry Pi. Together with prior user-reported place recall and restart persistence, all Phase 9 acceptance criteria are complete.
 
 Phase 10 — Reliability \& Recovery
 
