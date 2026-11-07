@@ -1112,9 +1112,12 @@ Measure before optimizing:
 
 \[ ] Camera FPS.
 
-\[ ] Pi ↔ ESP32 latency.
+\[x] Pi ↔ ESP32 latency (20/20 HEARTBEAT ACKs; 41.1 ms median, 66.6 ms max round trip; user-reported Pi test, 2026-11-08).
 
-\[ ] Sensor update rate.
+\[x] Sensor update rate (377 telemetry frames/30 s; 80 ms mean interval, 108 ms max gap; user-reported Pi test, 2026-11-08).
+
+Phase 11 serial baseline (2026-11-08; user-reported Pi tests): Idle telemetry monitoring received 377 `TEL` frames in 30 seconds (80 ms mean interval; 108 ms longest gap). A separate 20-command HEARTBEAT test received 20/20 matching `ALIVE` ACKs (41.1 ms median, 66.6 ms maximum round trip). These establish standalone serial baselines; under-full-application-load behavior remains unmeasured.
+
 
 Acceptance:
 
