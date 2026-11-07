@@ -59,6 +59,18 @@ def _get_model():
     return _model
 
 
+def preload_model() -> bool:
+    """Load Whisper during startup so its first-use cost is not paid after a wake word."""
+    started = time.monotonic()
+    try:
+        _get_model()
+    except Exception as exc:
+        print(f"[STT] Startup preload failed; will retry on first command: {exc}")
+        return False
+    print(f"[STT] Startup model preload = {time.monotonic() - started:.2f}s")
+    return True
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def transcribe(audio_48k: np.ndarray, expected_phrases=None) -> str:
