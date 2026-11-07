@@ -189,7 +189,7 @@ If `pip check` reports a MediaPipe/protobuf conflict, stop and share the output.
 ```bash
 MODEL="$HOME/.local/share/thashu/models/piper/en_US-lessac-low.onnx"
 PYTHONPATH="$HOME/piper1-gpl/src" python -m piper.split_voice_for_streaming "$MODEL"
-ls -lh "$MODEL.encoder.onnx" "$MODEL.decoder.onnx"
+ls -lh "${MODEL%.onnx}.encoder.onnx" "${MODEL%.onnx}.decoder.onnx"
 ```
 
 Install the native build tools. CMake must be version 3.26 or newer:
