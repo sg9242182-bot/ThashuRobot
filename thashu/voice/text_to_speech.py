@@ -115,6 +115,66 @@ def play_cached_response(text: str) -> bool:
     return True
 
 
+_recognized_person_voice_lock = threading.Lock()
+
+
+def play_recognized_person(name: str) -> bool:
+    """Play a cached WAV saying the confirmed person's saved name."""
+    display_name = " ".join(str(name or "").split())
+    if not display_name or display_name.casefold() == "unknown" or len(display_name) > 80:
+        return False
+
+    prompt = f"I recognize {display_name}."
+    digest = hashlib.sha256(display_name.casefold().encode("utf-8")).hexdigest()[:16]
+    voice_name = f"recognized_person_{digest}"
+    voice_path = _voice_path(voice_name)
+
+    with _recognized_person_voice_lock:
+        if not os.path.isfile(voice_path) or os.path.getsize(voice_path) <= 44:
+            start_piper()
+            os.makedirs(VOICE_CACHE_DIR, exist_ok=True)
+            temporary_path = voice_path + ".tmp.wav"
+            try:
+                if _streaming_piper is not None:
+                    _streaming_piper.write_wav(prompt, temporary_path)
+                else:
+                    result = subprocess.run(
+                        [
+                            PIPER_PATH, "--model", MODEL_PATH,
+                            "--output_file", temporary_path,
+                            "--length_scale", "1.0",
+                        ],
+                        input=prompt.encode("utf-8"),
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.PIPE,
+                        timeout=60,
+                        check=False,
+                    )
+                    if result.returncode != 0:
+                        detail = result.stderr.decode("utf-8", errors="replace").strip()
+                        raise RuntimeError(detail or f"Piper exited with {result.returncode}")
+                if not os.path.isfile(temporary_path) or os.path.getsize(temporary_path) <= 44:
+                    raise RuntimeError("Piper did not create a valid WAV")
+                os.replace(temporary_path, voice_path)
+                print(f"[PIPER] Generated recognition WAV for {display_name}")
+            except Exception as exc:
+                try:
+                    if os.path.exists(temporary_path):
+                        os.remove(temporary_path)
+                except OSError:
+                    pass
+                print(f"[PIPER] Could not cache recognition WAV for {display_name}: {exc}")
+                return False
+
+        try:
+            play(voice_path, blocking=True)
+            print(f"[VOICE] Cached WAV played: I recognize {display_name}.")
+            return True
+        except Exception as exc:
+            print(f"[VOICE] Could not play recognition WAV for {display_name}: {exc}")
+            return False
+
+
 def prepare_command_voice_cache(names=None):
     """Pre-render selected replies with resident libpiper when it is installed."""
     start_piper()
