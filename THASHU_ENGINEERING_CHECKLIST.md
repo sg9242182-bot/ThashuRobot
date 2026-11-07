@@ -1089,13 +1089,16 @@ User-reported Pi verification (2026-11-06): The user confirms all remaining Phas
 
 Phase 11 — Performance Optimization
 
-Status: IN PROGRESS — serial baselines and integrated no-regression check are user-reported passed; remaining metric evidence and practical latency target signoff are open.
+Status: IN PROGRESS — practical latency target set; acceptance benchmark against it remains.
 
 Baseline instrumentation audit (2026-11-07):
 - `thashu/main.py` already prints coarse wall-clock durations for STT, Brain, TTS, and total interaction. These do not isolate wake-word-to-listening, Brain-to-first-audio, or Piper-to-idle latency.
 - Existing output does not provide a consolidated baseline for vision CPU/RAM, face-recognition latency, camera FPS, Pi–ESP32 round-trip latency, or sensor update rate.
 - No performance tuning is approved before those baselines are measured on the Raspberry Pi. Keep all Phase 11 measurement checkboxes open until recorded.
 
+
+
+Practical latency target (2026-11-08): With Thashu warmed and ready, first audible response for normal questions must begin within 8 seconds median and 12 seconds maximum over five valid trials. Timing starts at the end of the fixed recording window and includes STT, Brain generation, and time to first Piper audio; playback duration is excluded. Deterministic voice-command replies must begin within 4 seconds from recording end. Answers must remain clear and complete, and safety behavior must not regress. A missed target keeps Phase 11 open.
 Measure before optimizing:
 
 \[ ] Wake-word → Whisper latency.
@@ -1127,7 +1130,7 @@ Repeat stable-view sample (2026-11-08; user-reported Pi test): A second 30-secon
 
 Acceptance:
 
-\[ ] Measured latency meets the project's practical target.
+\[ ] Practical latency target: on a warmed Raspberry Pi, first audible response begins within 8 seconds median and 12 seconds maximum across five normal questions, measured from the end of recording through Whisper, Brain, and first Piper audio; deterministic command replies begin within 4 seconds. Replies must remain clear and complete.
 
 \[x] No optimization causes functional regressions (user-reported full-app Pi check passed 2026-11-08).
 
