@@ -196,9 +196,14 @@ Install the native build tools. CMake must be version 3.26 or newer:
 
 ```bash
 sudo apt update
-sudo apt install -y build-essential cmake git
+sudo apt install -y build-essential git
+python -m pip install "cmake==3.30.9"
+hash -r
+which cmake
 cmake --version
 ```
+
+The pip-installed CMake is isolated in the active Thashu virtual environment and provides a Linux ARM64 wheel. Confirm `which cmake` points inside `~/.venvs/thashu/bin` and the version is at least 3.26 before building. Do not run a full OS upgrade just to get CMake.
 
 Then build and install libpiper:
 
