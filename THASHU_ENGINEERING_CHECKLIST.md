@@ -1130,6 +1130,10 @@ Performance sample (2026-11-07; user-reported Raspberry Pi cold-start interactio
 
 Warm-session follow-up (2026-11-07; user-reported Raspberry Pi run after pulling the 12-word cap): First knowledge interaction — recording 4.93 s, STT 6.03 s, Brain 7.20 s, TTS/playback 6.75 s (Piper to EOF 4.48 s), total 26.38 s. Subsequent knowledge interactions — STT 2.71/2.43 s, Brain 3.56/3.33 s, TTS/playback 6.86/7.42 s (Piper to EOF 4.54/5.10 s), totals 19.49/19.60 s. The cold-to-warm STT difference is consistent with model-load cost in the first run. The response cap reduced TTS time compared with the earlier 8.41 s sample, but caused incomplete clauses (“…bending of”, “…causing”). Updated `thashu/core/ai_engine.py` again to prefer a complete clause at the 12-word boundary; this refinement still needs Pi validation. Short cached responses in the same run took 1.53 s and 1.28 s TTS, with totals 10.22 s and 9.84 s. These are individual observations, not repeated statistical baselines. Camera/vision CPU/RAM, face-recognition latency, camera FPS, Pi–ESP32 latency, sensor update rate, practical latency target, and regression acceptance remain open.
 
+
+
+Answer-quality regression follow-up (2026-11-07; user-reported Pi run): The 12-word post-generation cap still produced incomplete/awkward answers for atmospheric diffraction (“…causing it”) and refraction (“…pass through”). The cap is removed; `thashu/core/ai_engine.py` now requests one complete answer, usually no more than 18 words, and allows 32 output tokens so it can finish. Pi accuracy, answer completeness, latency, and regression validation are pending. The same run recorded one cold LLM answer at 7.41 s and a subsequent warm answer at 2.91 s; TTS was 8.36 s and 6.51 s respectively. These are individual samples, not acceptance results.
+
 Phase 12 — Mobile Control
 
 Status: NOT STARTED
