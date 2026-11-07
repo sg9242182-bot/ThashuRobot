@@ -1119,6 +1119,9 @@ Measure before optimizing:
 
 \[x] Sensor update rate (377 telemetry frames/30 s; 80 ms mean interval, 108 ms max gap; user-reported Pi test, 2026-11-08).
 
+Phase 11 follow-up Pi run (2026-11-08; user-reported): Four clearly transcribed normal questions measured end-of-recording to first audio at 8.34 s (Newton's three laws), 6.05 s (dummy number), 5.12 s (chlorine atomic number), and 7.73 s (rain). Median was 6.89 s and maximum 8.34 s, within the 8 s median / 12 s maximum timing target. The Newton prompt was transcribed correctly, but the model again stopped mid-sentence (“...with the same”), so answer-completeness quality remains a confirmed open issue. Other transcripts in this run were garbled (including “rainbow fawn/fondant”); exclude those from content-quality evaluation and review STT separately. The deterministic 4-second command-response sound-onset target was not precisely timestamped in this log.
+
+
 Phase 11 integrated latency trial (2026-11-08; user-reported Pi log): Five normal question trials measured end-of-recording to first audio as STT + Brain + Piper first chunk: 6.39 s, 8.12 s, 5.11 s, 5.97 s, and 4.81 s (median 5.97 s; max 8.12 s). The five-trial normal-question timing target of 8 s median / 12 s maximum is met. A fast cached reply recorded STT at 2.44 s and Brain at 0.00 s; first-audio onset was not separately logged. A forward command was accepted after STT 2.16 s and command dispatch 0.07 s; ESP32 obstacle stop and cached obstacle announcement were observed. Answer-quality acceptance remains open: the response to Newton's three laws incorrectly listed universal gravitation as one of the three laws. The transcript “How do I prevent from tomorrow's exam?” may also indicate a Whisper misrecognition; do not treat that response as a valid question-quality sample.
 
 
