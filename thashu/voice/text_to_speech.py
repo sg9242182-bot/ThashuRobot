@@ -1,5 +1,7 @@
+import atexit
 import hashlib
 import os
+import select
 import subprocess
 import threading
 import time
@@ -174,6 +176,180 @@ def _terminate_process(process):
         print(f"[TTS] Could not stop child process: {exc}")
 
 
+class _PersistentPiper:
+    """One Piper model process, with serialized streaming playback requests."""
+
+    def __init__(self):
+        self._request_lock = threading.Lock()
+        self._process = None
+
+    def _close_streams(self, process):
+        for name in ("stdin", "stdout", "stderr"):
+            stream = getattr(process, name, None) if process else None
+            if stream is not None and not stream.closed:
+                try:
+                    stream.close()
+                except OSError:
+                    pass
+
+    def _stop_process(self):
+        process, self._process = self._process, None
+        if process is None:
+            return
+        _terminate_process(process)
+        self._close_streams(process)
+
+    def _ensure_process(self):
+        if self._process is not None and self._process.poll() is None:
+            return self._process
+        self._stop_process()
+        self._process = subprocess.Popen(
+            [
+                PIPER_PATH,
+                "--model", MODEL_PATH,
+                "--output-raw",
+                "--length_scale", "1.0",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=0,
+        )
+        return self._process
+
+    def _start_player(self):
+        return subprocess.Popen(
+            [
+                "aplay", "-q", "-D", DEVICE, "-t", "raw",
+                "-f", "S16_LE", "-r", "16000", "-c", "1",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            bufsize=0,
+        )
+
+    def _forward_pcm(self, process, player, chunk, first_audio_at):
+        if player is None:
+            player = self._start_player()
+            first_audio_at.append(time.monotonic())
+        if player.poll() is not None:
+            raise RuntimeError(f"aplay exited early with status {player.returncode}")
+        player.stdin.write(chunk)
+        return player
+
+    def speak(self, text):
+        # Only one caller may write to Piper or own its unframed PCM stream.
+        with self._request_lock:
+            process = self._ensure_process()
+            player = None
+            first_audio_at = []
+            stderr_buffer = bytearray()
+            started = time.monotonic()
+            deadline = started + TTS_PROCESS_TIMEOUT_SECONDS
+
+            try:
+                process.stdin.write((text.strip() + "\n").encode("utf-8"))
+                process.stdin.flush()
+
+                while time.monotonic() < deadline:
+                    if process.poll() is not None:
+                        raise RuntimeError(
+                            f"Piper exited with status {process.returncode}"
+                        )
+
+                    ready, _, _ = select.select(
+                        [process.stdout, process.stderr], [], [], 0.1
+                    )
+                    for stream in ready:
+                        chunk = os.read(stream.fileno(), 4096)
+                        if not chunk:
+                            raise RuntimeError("Piper closed an output pipe")
+
+                        if stream is process.stdout:
+                            player = self._forward_pcm(
+                                process, player, chunk, first_audio_at
+                            )
+                            continue
+
+                        stderr_buffer.extend(chunk)
+                        while b"\n" in stderr_buffer:
+                            raw_line, _, remainder = stderr_buffer.partition(b"\n")
+                            stderr_buffer = bytearray(remainder)
+                            line = raw_line.decode("utf-8", errors="replace")
+                            if "Real-time factor:" not in line:
+                                continue
+
+                            # Piper writes this completion line only after it
+                            # has finished writing this utterance's raw PCM.
+                            # Drain any bytes already waiting on stdout before
+                            # closing playback, then wait until audio has played.
+                            while select.select([process.stdout], [], [], 0)[0]:
+                                pcm = os.read(process.stdout.fileno(), 4096)
+                                if not pcm:
+                                    break
+                                player = self._forward_pcm(
+                                    process, player, pcm, first_audio_at
+                                )
+
+                            if player is not None:
+                                player.stdin.close()
+                                player.wait(
+                                    timeout=max(0.1, deadline - time.monotonic())
+                                )
+                                if player.returncode != 0:
+                                    raise RuntimeError(
+                                        f"aplay exited with status {player.returncode}"
+                                    )
+
+                            first_delay = (
+                                first_audio_at[0] - started
+                                if first_audio_at else None
+                            )
+                            if first_delay is None:
+                                raise RuntimeError(
+                                    "Piper completed without producing audio"
+                                )
+                            print(
+                                f"[TTS DETAIL] Persistent Piper first audio = "
+                                f"{first_delay:.2f}s"
+                            )
+                            print(
+                                f"[TTS DETAIL] Playback complete = "
+                                f"{time.monotonic() - started:.2f}s"
+                            )
+                            return
+
+                raise TimeoutError(
+                    "Piper did not report utterance completion within "
+                    f"{TTS_PROCESS_TIMEOUT_SECONDS:.0f}s"
+                )
+            except Exception:
+                _terminate_process(player)
+                self._stop_process()
+                raise
+            finally:
+                if player is not None:
+                    self._close_streams(player)
+
+    def shutdown(self):
+        with self._request_lock:
+            process, self._process = self._process, None
+            if process is None:
+                return
+            try:
+                if process.stdin and not process.stdin.closed:
+                    process.stdin.close()
+                process.wait(timeout=2.0)
+            except Exception:
+                _terminate_process(process)
+            self._close_streams(process)
+
+
+_persistent_piper = _PersistentPiper()
+atexit.register(_persistent_piper.shutdown)
+
+
 def speak(text: str):
     if not text or not text.strip():
         return
@@ -190,86 +366,11 @@ def speak(text: str):
             except Exception as exc:
                 print(f"[TTS] Cached WAV playback failed; trying Piper: {exc}")
 
-    with _lock:
-        piper = None
-        aplay = None
-        piper_started = None
-        aplay_started = None
-        try:
-            piper_started = time.monotonic()
-            piper = subprocess.Popen(
-                [
-                    PIPER_PATH,
-                    "--model", MODEL_PATH,
-                    "--output-raw",
-                    "--length_scale", "1.0",
-                ],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-            )
-            aplay_started = time.monotonic()
-            aplay = subprocess.Popen(
-                [
-                    "aplay",
-                    "-D", DEVICE,
-                    "--rate", "16000",
-                    "--format", "S16_LE",
-                    "--channels", "1",
-                    "--buffer-size", "4096",
-                ],
-                stdin=piper.stdout,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-
-            # aplay owns the read end. Close the parent's duplicate so either
-            # child can observe EOF/SIGPIPE correctly if the other exits.
-            if piper.stdout is not None:
-                piper.stdout.close()
-            if piper.stdin is not None:
-                piper.stdin.write(text.encode("utf-8"))
-                piper.stdin.close()
-
-            deadline = time.monotonic() + TTS_PROCESS_TIMEOUT_SECONDS
-            piper.wait(timeout=max(0.0, deadline - time.monotonic()))
-            piper_finished = time.monotonic()
-            print(
-                "[TTS DETAIL] Piper process to EOF = "
-                f"{piper_finished - piper_started:.2f}s "
-                "(includes startup, generation, and streaming)"
-            )
-            aplay.wait(timeout=max(0.0, deadline - time.monotonic()))
-            aplay_finished = time.monotonic()
-            print(
-                f"[TTS DETAIL] aplay process = "
-                f"{aplay_finished - aplay_started:.2f}s"
-            )
-            if piper.returncode != 0 or aplay.returncode != 0:
-                print(
-                    f"[TTS] Playback process failed "
-                    f"(Piper={piper.returncode}, aplay={aplay.returncode})"
-                )
-        except subprocess.TimeoutExpired:
-            print(
-                f"[TTS] Piper/audio playback exceeded "
-                f"{TTS_PROCESS_TIMEOUT_SECONDS:.0f}s; terminating it"
-            )
-        except Exception as exc:
-            print(f"[TTS ERROR]: {exc}")
-        finally:
-            # Stop downstream playback first, then Piper, so no child or pipe
-            # can keep the voice loop blocked after an error or timeout.
-            _terminate_process(aplay)
-            _terminate_process(piper)
-            for process in (aplay, piper):
-                for stream_name in ("stdin", "stdout", "stderr"):
-                    stream = getattr(process, stream_name, None) if process else None
-                    if stream is not None and not stream.closed:
-                        try:
-                            stream.close()
-                        except OSError:
-                            pass
+    try:
+        with _lock:
+            _persistent_piper.speak(text)
+    except Exception as exc:
+        print(f"[TTS ERROR]: {exc}")
 
 if __name__ == "__main__":
     prepare_command_voice_cache()
