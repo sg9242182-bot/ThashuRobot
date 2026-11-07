@@ -170,26 +170,38 @@ git -C ~/ThashuRobot check-ignore -v thashu/models/face/face_detection_yunet_202
 
 ## Low-latency streaming Piper setup (Phase 11)
 
-The application now prefers an in-process `libpiper` backend. It keeps the ONNX voice resident and streams decoder chunks directly to ALSA. True sub-sentence streaming requires the split voice files and native library; the existing single ONNX file alone synthesizes a full sentence before audio is returned.
+The application prefers the in-process `libpiper` backend. It keeps the voice model resident and streams decoder chunks to ALSA. This requires split ONNX files and the native library. Until both are available, Thashu uses the existing Piper CLI fallback.
 
-Run these once on the Raspberry Pi from the Thashu virtual environment:
+Run once on the Raspberry Pi. Keep MediaPipe's required protobuf version; do not install the PyPI `piper-tts` package for the splitter.
 
 ```bash
+cd ~/ThashuRobot
+git clone --depth 1 https://github.com/OHF-Voice/piper1-gpl.git ~/piper1-gpl
 cd ~/ThashuRobot/thashu
 source ~/.venvs/thashu/bin/activate
 
-python -m pip install piper-tts onnx
-MODEL="$HOME/.local/share/thashu/models/piper/en_US-lessac-low.onnx"
-python -m piper.split_voice_for_streaming "$MODEL"
+python -m pip install onnx
+python -m pip install --force-reinstall "protobuf==4.25.5"
+python -m pip check
+```
 
-git clone --depth 1 https://github.com/OHF-Voice/piper1-gpl.git "$HOME/piper1-gpl"
+If `pip check` reports a MediaPipe/protobuf conflict, stop and share the output. Split the existing voice using the splitter from the cloned upstream source:
+
+```bash
+MODEL="$HOME/.local/share/thashu/models/piper/en_US-lessac-low.onnx"
+PYTHONPATH="$HOME/piper1-gpl/src" python -m piper.split_voice_for_streaming "$MODEL"
+ls -lh "$MODEL.encoder.onnx" "$MODEL.decoder.onnx"
+```
+
+Install the native build tools. CMake must be version 3.26 or newer:
+
+```bash
 sudo apt update
 sudo apt install -y build-essential cmake git
-
 cmake --version
 ```
 
-The native build requires CMake 3.26 or newer. If the installed version is older, stop before building and install a newer CMake version for the Pi OS.
+Then build and install libpiper:
 
 ```bash
 cmake -S "$HOME/piper1-gpl/libpiper" \
@@ -199,9 +211,9 @@ cmake -S "$HOME/piper1-gpl/libpiper" \
 cmake --build "$HOME/piper1-gpl/libpiper/build" --parallel 2
 cmake --install "$HOME/piper1-gpl/libpiper/build"
 
-ls -lh "$MODEL.encoder.onnx" "$MODEL.decoder.onnx"
 ls -lh "$HOME/piper1-gpl/libpiper/install/lib/libpiper.so"
 ls -d "$HOME/piper1-gpl/libpiper/install/share/espeak-ng-data"
 ```
 
-The runtime looks for those files in the default locations shown above. For a different install location, set `THASHU_LIBPIPER` and `THASHU_ESPEAK_DATA_DIR` in the environment used to start Thashu. Until libpiper and the split files are both present, the old CLI remains a temporary fallback; do not remove it until the Pi streaming test passes. The splitter and native build are upstream Piper tools: [voice splitting and streaming](https://github.com/OHF-Voice/piper1-gpl/blob/main/docs/STREAMING.md), [libpiper build instructions](https://github.com/OHF-Voice/piper1-gpl/blob/main/libpiper/README.md).
+The runtime checks those default paths. For a different install location, set `THASHU_LIBPIPER` and `THASHU_ESPEAK_DATA_DIR` when launching Thashu. Upstream references: [voice splitting and streaming](https://github.com/OHF-Voice/piper1-gpl/blob/main/docs/STREAMING.md), [libpiper build instructions](https://github.com/OHF-Voice/piper1-gpl/blob/main/libpiper/README.md).
+
