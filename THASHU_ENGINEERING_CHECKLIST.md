@@ -1138,6 +1138,10 @@ Answer-quality regression follow-up (2026-11-07; user-reported Pi run): The 12-w
 
 Whisper first-use latency optimization (2026-11-07): Added `preload_model()` in `thashu/voice/speech_to_text.py` and call it during startup in `thashu/main.py` while the microphone is paused and before the ready prompt. This moves the observed model-load cost (STT 7.14 s cold versus 2.33–2.49 s warm in the user's Pi log) to startup without changing Whisper model or decoding settings. Startup delay and first-interaction latency must be measured on the Pi; functional/STT accuracy regression checks remain open. Do not check this optimization as passed until the user confirms startup readiness and first-command behavior.
 
+
+
+Piper repeatable-sentence timing (2026-11-07; user-reported Pi, standalone `speak()`): The same 16-word kinematics answer was spoken twice at `length_scale=1.0`. Run 1: Piper to EOF 6.71 s, aplay total 8.93 s. Run 2: 5.99 s and 8.21 s. The repeated 2.22 s gap between Piper EOF and aplay completion indicates generation finished while playback continued; playback duration is the main floor for this response. No speaking-rate or voice change is approved from timing alone. Compare a faster setting on this exact sentence and retain it only if speech remains clear. These two samples do not complete Piper latency or regression acceptance.
+
 Phase 12 — Mobile Control
 
 Status: NOT STARTED
