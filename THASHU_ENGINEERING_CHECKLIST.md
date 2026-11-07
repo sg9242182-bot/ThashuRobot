@@ -1142,6 +1142,12 @@ Whisper first-use latency optimization (2026-11-07): Added `preload_model()` in 
 
 Piper repeatable-sentence timing (2026-11-07; user-reported Pi, standalone `speak()`): The same 16-word kinematics answer was spoken twice at `length_scale=1.0`. Run 1: Piper to EOF 6.71 s, aplay total 8.93 s. Run 2: 5.99 s and 8.21 s. The repeated 2.22 s gap between Piper EOF and aplay completion indicates generation finished while playback continued; playback duration is the main floor for this response. No speaking-rate or voice change is approved from timing alone. Compare a faster setting on this exact sentence and retain it only if speech remains clear. These two samples do not complete Piper latency or regression acceptance.
 
+ONNX Piper comparison and streaming implementation (2026-11-07; user-reported Raspberry Pi):
+- Corrected ONNX tokenization produced clear English audio. Standalone warm inference took 0.29–1.32 s for the four test utterances; while the full Thashu process was running it took 0.50–2.35 s. Model load measured 5.85 s standalone and 8.39 s during runtime. The user reported the concurrent audio test played clearly and Thashu remained responsive.
+- Compared against the existing persistent Piper while Thashu was running: dynamic current-Piper first-audio delays were 1.06–5.14 s and playback completion was 3.52–8.23 s. “Moving forward” was a cached WAV and is excluded. These measurements favor ONNX for the tested dynamic replies but do not establish all-system latency acceptance.
+- Added `thashu/voice/piper_stream.py` using the official `libpiper` C API. It keeps the split ONNX voice resident and writes native decoder PCM chunks to ALSA as they arrive. `text_to_speech.py` prefers this backend and preserves cached WAV responses. The old Piper CLI is retained only as a temporary fallback until the Raspberry Pi has the split voice and ARM64 `libpiper` build.
+- Added one-time split/build instructions to `thashu/MODEL_SETUP.md`. The Pi build, dynamic-library ABI, first-chunk latency, audio quality under normal Thashu load, repeated speech, clean shutdown, and fallback recovery are not yet verified. Do not remove the temporary CLI fallback or mark the TTS optimization accepted until these Pi checks pass. All Phase 11 baseline and regression acceptance boxes remain open.
+
 Phase 12 — Mobile Control
 
 Status: NOT STARTED
