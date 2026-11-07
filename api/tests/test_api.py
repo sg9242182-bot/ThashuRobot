@@ -311,6 +311,36 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             ("forward", 120),
         ])
 
+    async def test_move_transport_failure_does_not_break_status_or_later_stop(self):
+        from fastapi import HTTPException
+
+        manager = await main.services.robot_manager()
+        manager.mode = main.ControlMode.MANUAL
+
+        def fail_move(_speed=None):
+            raise OSError("simulated serial write failure")
+
+        manager.motor.forward = fail_move
+        with self.assertRaises(HTTPException) as failure:
+            await self.endpoint("/api/v1/robot/move")(
+                main.MoveRequest(
+                    request_id=UUID("55555555-5555-4555-8555-555555555555"),
+                    direction="forward",
+                    speed=120,
+                )
+            )
+        self.assertEqual(failure.exception.status_code, 503)
+
+        status = await self.endpoint("/api/v1/status")()
+        self.assertEqual(status["api"], "ok")
+        stop_response = await self.endpoint("/api/v1/robot/stop")(
+            main.StopRequest(
+                request_id=UUID("66666666-6666-4666-8666-666666666666")
+            )
+        )
+        self.assertEqual(stop_response.command, "stop")
+        self.assertEqual(manager.motor.commands, [("stop", None)])
+
     async def test_move_returns_api_busy_without_dispatch_when_command_slot_times_out(self):
         from fastapi import HTTPException
 
