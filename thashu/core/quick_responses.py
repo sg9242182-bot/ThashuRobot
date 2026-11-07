@@ -30,6 +30,7 @@ Two-word/short keys that match mid-sentence:
 """
 
 import random
+import re
 
 
 # ── Removed keys reference (for audit trail) ──────────────────────────────────
@@ -322,14 +323,34 @@ class QuickResponses:
 
     def get_response(self, user_input: str) -> str | None:
         """
-        Return a response if user_input exactly matches a known phrase
-        after normalisation. Returns None otherwise.
-
-        No partial matching. No substring matching. No fuzzy matching.
-        If the normalised input is not an exact key, None is returned and
-        the caller (Brain) routes to the AI engine.
+        Return a deterministic response for exact phrases and tightly-scoped
+        identity questions. Other text falls through to the AI engine.
         """
         key = self._normalise(user_input)
+
+        # Creator identity is a project fact, so common speech variants must
+        # never fall through to a model guess. Keep the matcher anchored to a
+        # whole question and a small verb/object vocabulary.
+        creator_aliases = {
+            "who is your creator",
+            "whos your creator",
+            "who is the creator",
+            "who is your maker",
+            "whos your maker",
+            "who made thashu",
+            "who created thashu",
+            "who built thashu",
+        }
+        creator_question = re.fullmatch(
+            r"(?:hey thashu )?(?:who|whom) "
+            r"(?:made|make|created|create|built|build|designed|design|"
+            r"programmed|program|invented|invent) "
+            r"(?:you|u|ya|thashu)(?: please| exactly)?",
+            key,
+        )
+        if key in creator_aliases or creator_question:
+            return "Tharun created me."
+
         responses = self._lookup.get(key)
         if responses:
             return random.choice(responses)
