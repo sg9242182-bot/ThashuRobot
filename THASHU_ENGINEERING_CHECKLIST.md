@@ -1089,7 +1089,7 @@ User-reported Pi verification (2026-11-06): The user confirms all remaining Phas
 
 Phase 11 — Performance Optimization
 
-Status: IN PROGRESS — practical latency target set; acceptance benchmark against it remains.
+Status: COMPLETE — measured latency target and Pi functional checks reported passed by the user on 2026-11-08.
 
 Baseline instrumentation audit (2026-11-07):
 - `thashu/main.py` already prints coarse wall-clock durations for STT, Brain, TTS, and total interaction. These do not isolate wake-word-to-listening, Brain-to-first-audio, or Piper-to-idle latency.
@@ -1101,13 +1101,13 @@ Baseline instrumentation audit (2026-11-07):
 Practical latency target (2026-11-08): With Thashu warmed and ready, first audible response for normal questions must begin within 8 seconds median and 12 seconds maximum over five valid trials. Timing starts at the end of the fixed recording window and includes STT, Brain generation, and time to first Piper audio; playback duration is excluded. Deterministic voice-command replies must begin within 4 seconds from recording end. Answers must remain clear and complete, and safety behavior must not regress. A missed target keeps Phase 11 open.
 Measure before optimizing:
 
-\[ ] Wake-word → Whisper latency.
+\[x] Wake-word → Whisper latency measured (about 7.3–7.8 s from wake detection through the fixed 4.9–5.0 s recording and 2.4–2.8 s STT; user-reported Pi logs).
 
-\[ ] Whisper → Brain latency.
+\[x] Whisper → Brain latency measured (Brain stage 1.76–4.29 s across reported Pi samples).
 
-\[ ] Brain → Piper latency.
+\[x] Brain → Piper latency measured (native Piper first audio 0.45–1.21 s in reported Pi samples).
 
-\[ ] Piper → idle latency.
+\[x] Piper playback completion and return-to-IDLE observed (spoken reply playback 2.89–10.29 s depending on reply length; reported Pi logs).
 
 \[x] Vision CPU/RAM usage measured (user-reported Pi benchmark, 2026-11-08).
 
@@ -1137,9 +1137,12 @@ Repeat stable-view sample (2026-11-08; user-reported Pi test): A second 30-secon
 
 
 
+Phase 11 completion report (2026-11-08): User reports that the post-fix Newton's three laws response and ordinary factual-answer checks passed on the Raspberry Pi. The five-question warm-session timing target was met (5.97 s median, 8.12 s maximum); deterministic command feedback, functional behavior, and clear Piper audio were reported working. Stage timing and vision/recognition/serial baselines are recorded above. Completion is based on user-reported Pi validation; no independent hardware run was performed here.
+
+
 Acceptance:
 
-\[ ] Practical latency target: on a warmed Raspberry Pi, first audible response begins within 8 seconds median and 12 seconds maximum across five normal questions, measured from the end of recording through Whisper, Brain, and first Piper audio; deterministic command replies begin within 4 seconds. Replies must remain clear and complete.
+\[x] Practical latency target met (five normal questions: 5.97 s median / 8.12 s maximum; deterministic command response and cached audio reported working; Newton answer fix reported verified on Pi).
 
 \[x] No optimization causes functional regressions (user-reported full-app Pi check passed 2026-11-08).
 
