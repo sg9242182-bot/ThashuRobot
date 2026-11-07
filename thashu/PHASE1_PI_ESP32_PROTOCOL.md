@@ -112,8 +112,11 @@ hardware safety authority.
 The Pi sends a heartbeat every 100 ms. The ESP32 communication watchdog is
 500 ms and stops motors if Pi communication expires. Sensor telemetry is
 emitted every 50 ms; distances are millimetres, `FAR` means fresh and
-out-of-range, and `NA` means unavailable, invalid, or stale. The Pi timestamps
-telemetry when received because the wire frame has no timestamp.
+out-of-range, and `NA` means unavailable, invalid, or stale. The serial frame
+has no timestamp, so the Pi records a UTC receive timestamp for each inbound
+frame and includes it as `received_at` in the API's `esp32_line` WebSocket
+event. Sensor-stream freshness is measured separately by the Flutter client;
+`NA` and `FAR` are readings and do not indicate a stale stream.
 
 The Pi retries serial connection every second while disconnected. It closes
 and reconnects after two seconds without inbound serial data. Reconnection

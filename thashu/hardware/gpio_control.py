@@ -5,6 +5,7 @@ import serial
 import serial.tools.list_ports
 import threading
 import time
+from datetime import datetime, timezone
 
 
 class GPIOControl:
@@ -212,18 +213,23 @@ class GPIOControl:
 
     def read_line(self, timeout=0.0):
         """Return the next received protocol line, or an empty string."""
+        frame = self.read_frame(timeout)
+        return frame[0] if frame is not None else ""
+
+    def read_frame(self, timeout=0.0):
+        """Return (line, Pi UTC receive timestamp), or None when no line is ready."""
         try:
-            line = self._incoming.get(timeout=timeout)
+            return self._incoming.get(timeout=timeout)
         except queue.Empty:
-            return ""
-        return line
+            return None
 
     def drain_messages(self):
         """Return all currently queued inbound protocol lines."""
         messages = []
         while True:
             try:
-                messages.append(self._incoming.get_nowait())
+                line, _received_at = self._incoming.get_nowait()
+                messages.append(line)
             except queue.Empty:
                 return messages
 
@@ -377,7 +383,9 @@ class GPIOControl:
             print("[GPIO] Ignoring non-ASCII ESP32 frame")
             return
 
-        self._incoming.put(line)
+        received_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        received_at = received_at.replace("+00:00", "Z")
+        self._incoming.put((line, received_at))
         if line.startswith("TEL|"):
             self._update_sensor_snapshot(line)
         if line.startswith("ACK|"):

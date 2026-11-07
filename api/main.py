@@ -482,11 +482,13 @@ class ApiServices:
         """Read the single-consumer serial feed once and broadcast to clients."""
         try:
             while self._telemetry_subscribers:
-                line = await self.read_message()
-                if line is not None:
+                frame = await self.read_message()
+                if frame is not None:
+                    line, received_at = frame
                     self._publish_telemetry_event({
                         "type": "esp32_line",
                         "line": line,
+                        "received_at": received_at,
                     })
                 else:
                     await asyncio.sleep(0.05)
@@ -589,8 +591,16 @@ class ApiServices:
             manager = await self.robot_manager()
             motor = manager.motor
             transport = motor.gpio
+            read_frame = getattr(transport, "read_frame", None)
+            if callable(read_frame):
+                frame = await asyncio.to_thread(read_frame, 0.2)
+                return frame if frame is not None and frame[0] else None
+
             line = await asyncio.to_thread(transport.read_line, 0.2)
-            return line or None
+            if not line:
+                return None
+            received_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+            return line, received_at.replace("+00:00", "Z")
         except Exception:
             return None
 

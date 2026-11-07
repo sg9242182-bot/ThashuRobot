@@ -132,7 +132,14 @@ def _start_api_server():
         services.attach_robot_manager(robot_manager)
         host = api_host()
         port = api_port()
-        config = uvicorn.Config(app, host=host, port=port, log_level="info")
+        config = uvicorn.Config(
+            app,
+            host=host,
+            port=port,
+            log_level="info",
+            ws_ping_interval=20.0,
+            ws_ping_timeout=10.0,
+        )
         _api_server = uvicorn.Server(config)
         _api_thread = threading.Thread(
             target=_api_server.run,

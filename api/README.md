@@ -48,7 +48,7 @@ before changing the selected mode.
 | `POST /api/v1/robot/move` | Body: `{"request_id":"<UUID>","direction":"forward","speed":200}`. `request_id` is required; direction is `forward`, `backward`, `left`, or `right`; speed is an integer from 0 to 255 and defaults to 200. Requires MANUAL mode. |
 | `POST /api/v1/robot/stop` | Body: `{"request_id":"<UUID>"}`. Cancels active movement/follow output, sends the dedicated STOP command, and selects AUTO paused. It does not restart follow. |
 | `GET /api/v1/robot/commands/{command_id}` | Returns the current result for a command. Requires the same Bearer token. Results and request IDs are stored in SQLite for 24 hours and survive API restarts. |
-| `WS /api/v1/telemetry` | Server-to-client stream of raw ESP32 lines and `command_result` events. Raw lines are not represented as command success. |
+| `WS /api/v1/telemetry` | Bearer-authenticated server-to-client stream of timestamped ESP32 lines and `command_result` events. Raw lines are not represented as command success. |
 
 Successful move and STOP responses use:
 
@@ -107,6 +107,21 @@ Safety errors include the ESP32 reason as `error_code`; timeouts use
 `ACK_TIMEOUT`; acknowledged results have `error_code: null`. An ACK means
 the ESP32 acknowledged handling the command, not that movement completed.
 
+Each `esp32_line` event includes `received_at`, an ISO 8601 UTC timestamp
+recorded by the Pi when the serial frame arrives. For example:
+
+```json
+{"type":"esp32_line","line":"TEL|0|SENSORS|TOF_L|420|TOF_C|FAR|TOF_R|390|US_REAR|NA","received_at":"2026-11-07T12:00:00.123Z"}
+```
+
+The ESP32 emits sensor frames at 20 Hz. The Flutter client should mark sensor
+telemetry stale after 1 second without a new sensor `TEL` frame, and clear
+stale immediately when another arrives. `NA` and `FAR` are sensor values; a
+well-formed frame containing either value still refreshes telemetry. Keepalive
+uses WebSocket protocol Ping/Pong (Ping every 20 seconds, Pong timeout 10
+seconds), not a JSON heartbeat event. This keepalive timeout is separate from
+the 1-second sensor freshness timer.
+
 Move, mode, and STOP requests share a serialized command queue. STOP has
 priority over queued move/mode requests. It waits for the command already in
 progress to finish; it does not interrupt serial work already underway.
@@ -160,11 +175,11 @@ inbound queue exposed by `GPIOControl`, then fans each event out to connected
 WebSocket clients. Each client has a bounded 64-event queue; if a client is
 slow, its oldest queued event is dropped so it cannot block serial reading or
 robot control. A missed `command_result` can be recovered through the command
-result REST route. Raw `esp32_line` events do not yet carry an API timestamp or
-a stale-state classification; the telemetry cadence and stale threshold still
-need agreement with the hardware and Flutter owners. The API must share the
-robot process's existing `RobotCommandManager` and serial connection; do not
-run a separate Uvicorn process beside `thashu/main.py` on the Pi.
+result REST route. The app determines sensor freshness from Pi receive times;
+the API does not send a separate JSON heartbeat or stale-state event. The API
+must share the robot process's existing `RobotCommandManager` and serial
+connection; do not run a separate Uvicorn process beside `thashu/main.py` on
+the Pi.
 
 Mode, movement, stop, and WebSocket telemetry require an HTTP Bearer token configured
 in `THASHU_API_TOKEN`. Health and status remain unauthenticated. If the token is
@@ -174,7 +189,7 @@ starting Uvicorn. In PowerShell:
 
 ```powershell
 $env:THASHU_API_TOKEN = "paste-a-long-random-token-here"
-python -m uvicorn api.main:app --host 127.0.0.1 --port 8000
+python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --ws-ping-interval 20 --ws-ping-timeout 10
 ```
 
 Command retry records are stored by default at

@@ -863,8 +863,12 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
                 asyncio.wait_for(second.get(), timeout=1.0),
             )
             expected = {"type": "esp32_line", "line": "EVENT|0|READY"}
-            self.assertEqual(first_event, expected)
-            self.assertEqual(second_event, expected)
+            for event in (first_event, second_event):
+                self.assertEqual(
+                    {key: value for key, value in event.items() if key != "received_at"},
+                    expected,
+                )
+                self.assertTrue(event["received_at"].endswith("Z"))
         finally:
             main.services.unsubscribe_telemetry(first)
             main.services.unsubscribe_telemetry(second)
@@ -883,10 +887,9 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             manager.motor.gpio.messages.append("TEL|0|SENSORS|FAR|FAR|FAR")
             second = main.services.subscribe_telemetry()
             second_event = await asyncio.wait_for(second.get(), timeout=1.0)
-            self.assertEqual(second_event, {
-                "type": "esp32_line",
-                "line": "TEL|0|SENSORS|FAR|FAR|FAR",
-            })
+            self.assertEqual(second_event["type"], "esp32_line")
+            self.assertEqual(second_event["line"], "TEL|0|SENSORS|FAR|FAR|FAR")
+            self.assertTrue(second_event["received_at"].endswith("Z"))
         finally:
             if second is not None:
                 main.services.unsubscribe_telemetry(second)
@@ -1087,10 +1090,10 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
 
         socket = FakeWebSocket()
         await main.telemetry(socket)
-        self.assertEqual(socket.frames, [{
-            "type": "esp32_line",
-            "line": "EVENT|0|READY",
-        }])
+        self.assertEqual(len(socket.frames), 1)
+        self.assertEqual(socket.frames[0]["type"], "esp32_line")
+        self.assertEqual(socket.frames[0]["line"], "EVENT|0|READY")
+        self.assertTrue(socket.frames[0]["received_at"].endswith("Z"))
 
     async def test_command_body_limit_rejects_oversized_request_before_route(self):
         reached_route = False

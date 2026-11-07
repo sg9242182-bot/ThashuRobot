@@ -128,7 +128,9 @@ class PiEsp32ProtocolVectorTests(unittest.TestCase):
 
         discarding = transport._consume_serial_bytes(frame[6:] + b"\n", rx_buffer, discarding)
         self.assertFalse(discarding)
-        self.assertEqual(transport._incoming.get_nowait(), frame.decode("ascii"))
+        received = transport.read_frame()
+        self.assertEqual(received[0], frame.decode("ascii"))
+        self.assertTrue(received[1].endswith("Z"))
         self.assertEqual(transport.wait_for_ack(1, timeout=0.001), "OK")
 
     def test_oversized_inbound_frame_is_discarded_through_newline(self):
@@ -142,7 +144,9 @@ class PiEsp32ProtocolVectorTests(unittest.TestCase):
         self.assertEqual(transport._incoming.qsize(), 0)
 
         transport._consume_serial_bytes(valid, rx_buffer, discarding)
-        self.assertEqual(transport._incoming.get_nowait(), "ACK|1|OK")
+        received = transport.read_frame()
+        self.assertEqual(received[0], "ACK|1|OK")
+        self.assertTrue(received[1].endswith("Z"))
         self.assertEqual(transport.wait_for_ack(1, timeout=0.001), "OK")
 
     def test_reconnect_opens_a_new_serial_connection(self):
