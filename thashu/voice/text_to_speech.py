@@ -12,7 +12,7 @@ PIPER_PATH = os.environ.get(
     "THASHU_PIPER_BIN", os.path.expanduser("~/piper/piper/piper")
 )
 MODEL_PATH = model_path("piper", "en_US-lessac-low.onnx")
-DEVICE     = "default"
+DEVICE     = os.environ.get("THASHU_AUDIO_OUTPUT", "sysdefault:CARD=Headphones")
 TTS_PROCESS_TIMEOUT_SECONDS = 30.0
 VOICE_CACHE_DIR = os.path.expanduser(os.environ.get(
     "THASHU_VOICE_CACHE_DIR",
