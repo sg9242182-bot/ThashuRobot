@@ -14,6 +14,7 @@ from voice.speech_to_text import transcribe, preload_model
 from voice.text_to_speech import speak, play_cached_response, start_piper
 from voice.sound_player   import play
 from core.brain           import Brain
+from core.ai_engine      import warmup_model
 from core.attention       import AttentionSystem
 from core.state           import RuntimeState, RuntimeStateMachine
 from core.event_bus       import EventBus
@@ -862,6 +863,7 @@ def main():
     audio.pause()
     start_piper()
     preload_model()
+    warmup_model()
 
     play(SOUND_STARTUP, blocking=True)
 
