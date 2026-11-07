@@ -1152,6 +1152,8 @@ Qwen thread-count comparison (2026-11-07; user-reported Pi, standalone model): W
 
 The `THASHU_LLM_THREADS` environment override is now available in `thashu/core/ai_engine.py` (default remains 4; values are clamped to available CPU count). Use it only to compare 3 versus 4 threads in separate full-app runs; keep `max_tokens` and all other model settings fixed. Full-app A/B timing and complete-answer checks remain open.
 
+Full-app Qwen thread A/B (2026-11-07; user-reported Pi, startup logs confirm requested settings): For the three intended prompts, Brain timings were 7.72/4.23/2.24 s at 3 threads and 6.76/4.37/2.42 s at 4 threads. The medians are 4.23 s and 4.37 s, effectively tied given different Whisper transcripts and generated answer lengths; the standalone test slightly favored 4 threads. Keep the default at 4; the test does not show a reliable latency improvement from 3. Piper first-chunk times were 0.63–1.15 s (3 threads) and 0.61–1.17 s (4 threads), also effectively tied. The Newton answer was truncated at “same” under both settings, so answer completeness remains a regression issue. No production thread setting changed; overall Phase 11 remains open.
+
 Phase 12 — Mobile Control
 
 Status: NOT STARTED
