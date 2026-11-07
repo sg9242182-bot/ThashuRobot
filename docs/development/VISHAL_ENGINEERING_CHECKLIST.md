@@ -171,10 +171,12 @@ Publish useful, consistent live state to the mobile app.
 - [ ] Publish only contract-defined state, sensor summaries, mode, health, and timestamps.
 - [ ] Distinguish live, stale, unavailable, and unknown values.
 - [ ] Define connection lifecycle, heartbeat, client disconnect, backpressure, and reconnect behavior.
-- [ ] Prevent a slow client from blocking robot control or telemetry collection.
+- [x] Prevent a slow client from blocking robot control or telemetry collection. Serial input is read once and fanned out through per-client bounded queues; oldest queued events are dropped for slow clients, and missed command results remain recoverable by command ID.
 - [ ] Ensure REST status and WebSocket events derive from the same authoritative state model.
 - [ ] Avoid broadcasting secrets or unnecessary sensitive diagnostics.
 - [ ] Test reconnects, server restart, malformed messages, multiple clients, and stale sensor data.
+
+**Phase 5 work-in-progress evidence (2026-11-07):** The API now owns one serial-reader task while telemetry subscribers are connected, fans the existing `esp32_line` and `command_result` event shapes out to each client, and uses a bounded 64-event queue per client. Slow clients cannot block serial collection; their oldest queued event is dropped. The Pi API suite passed 53/53, including multi-client fanout and slow-client queue coverage. Contract approval for the WebSocket schema and a telemetry stale-time threshold remain pending with Niteshvar and Tharun; live Pi/network verification is not available yet.
 
 ### Exit criteria
 - [ ] Mobile receives consistent telemetry under normal and degraded network conditions.

@@ -184,6 +184,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             pending = tuple(service._command_tasks)
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
+            await service.shutdown_telemetry()
 
     def tearDown(self):
         self.token_env.stop()
@@ -835,11 +836,14 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         manager = await main.services.robot_manager()
         manager.motor.gpio.ack_result = "ERROR|OBSTACLE"
         manager.mode = main.ControlMode.MANUAL
-        subscriber = main.services.subscribe_command_results()
+        subscriber = main.services.subscribe_telemetry()
         try:
             main.services.register_command("command-2", "forward", "MANUAL")
             await main.services.track_command_ack("command-2", 2)
-            event = subscriber.get_nowait()
+            events = []
+            while not subscriber.empty():
+                events.append(subscriber.get_nowait())
+            event = next(event for event in events if event["type"] == "command_result")
             self.assertEqual(event["type"], "command_result")
             self.assertEqual(event["command_id"], "command-2")
             self.assertEqual(event["status"], "safety_error")
@@ -848,7 +852,37 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(manager.motor.commands, [("stop", None)])
             self.assertEqual(manager.mode, main.ControlMode.MANUAL)
         finally:
-            main.services.unsubscribe_command_results(subscriber)
+            main.services.unsubscribe_telemetry(subscriber)
+
+    async def test_telemetry_single_reader_fans_out_to_multiple_clients(self):
+        first = main.services.subscribe_telemetry()
+        second = main.services.subscribe_telemetry()
+        try:
+            first_event, second_event = await asyncio.gather(
+                asyncio.wait_for(first.get(), timeout=1.0),
+                asyncio.wait_for(second.get(), timeout=1.0),
+            )
+            expected = {"type": "esp32_line", "line": "EVENT|0|READY"}
+            self.assertEqual(first_event, expected)
+            self.assertEqual(second_event, expected)
+        finally:
+            main.services.unsubscribe_telemetry(first)
+            main.services.unsubscribe_telemetry(second)
+
+    async def test_slow_telemetry_subscriber_drops_oldest_without_blocking(self):
+        subscriber = asyncio.Queue(maxsize=2)
+        main.services._telemetry_subscribers.add(subscriber)
+        try:
+            for sequence in range(3):
+                main.services._publish_telemetry_event({
+                    "type": "esp32_line",
+                    "line": f"TEL|{sequence}|DATA",
+                })
+            self.assertEqual(subscriber.qsize(), 2)
+            self.assertEqual(subscriber.get_nowait()["line"], "TEL|1|DATA")
+            self.assertEqual(subscriber.get_nowait()["line"], "TEL|2|DATA")
+        finally:
+            main.services._telemetry_subscribers.discard(subscriber)
 
     async def test_missing_ack_becomes_timeout(self):
         manager = await main.services.robot_manager()

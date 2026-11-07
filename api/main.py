@@ -189,7 +189,8 @@ class ApiServices:
         self._command_queue = PriorityCommandQueue()
         self._state_db_path = str(state_db_path or get_api_state_db_path())
         self._db_connection = None
-        self._command_subscribers = set()
+        self._telemetry_subscribers = set()
+        self._telemetry_task = None
         self._command_tasks = set()
         self._result_retention_seconds = 24 * 60 * 60
 
@@ -454,13 +455,51 @@ class ApiServices:
             ).fetchone()
             return json.loads(row["result_json"]) if row is not None else None
 
-    def subscribe_command_results(self):
+    def subscribe_telemetry(self):
         subscriber = asyncio.Queue(maxsize=64)
-        self._command_subscribers.add(subscriber)
+        self._telemetry_subscribers.add(subscriber)
+        if self._telemetry_task is None or self._telemetry_task.done():
+            self._telemetry_task = asyncio.create_task(self._pump_telemetry())
         return subscriber
 
-    def unsubscribe_command_results(self, subscriber):
-        self._command_subscribers.discard(subscriber)
+    def unsubscribe_telemetry(self, subscriber):
+        self._telemetry_subscribers.discard(subscriber)
+
+    def _publish_telemetry_event(self, event):
+        """Fan out without letting a slow WebSocket block serial reading."""
+        for subscriber in tuple(self._telemetry_subscribers):
+            if subscriber.full():
+                try:
+                    subscriber.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+            try:
+                subscriber.put_nowait(event)
+            except asyncio.QueueFull:
+                pass
+
+    async def _pump_telemetry(self):
+        """Read the single-consumer serial feed once and broadcast to clients."""
+        try:
+            while self._telemetry_subscribers:
+                line = await self.read_message()
+                if line is not None:
+                    self._publish_telemetry_event({
+                        "type": "esp32_line",
+                        "line": line,
+                    })
+                else:
+                    await asyncio.sleep(0.05)
+        finally:
+            self._telemetry_task = None
+
+    async def shutdown_telemetry(self):
+        task = self._telemetry_task
+        if task is None:
+            return
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        self._telemetry_task = None
 
     async def _publish_command_result(self, command_id, status, error_code):
         result = self.command_result(command_id)
@@ -479,16 +518,7 @@ class ApiServices:
             "error_code": error_code,
             "timestamp": result["timestamp"],
         }
-        for subscriber in tuple(self._command_subscribers):
-            if subscriber.full():
-                try:
-                    subscriber.get_nowait()
-                except asyncio.QueueEmpty:
-                    pass
-            try:
-                subscriber.put_nowait(event)
-            except asyncio.QueueFull:
-                pass
+        self._publish_telemetry_event(event)
 
     async def track_command_ack(self, command_id, sequence):
         try:
@@ -964,6 +994,7 @@ async def lifespan(_app: FastAPI):
         pending_commands = tuple(services._command_tasks)
         if pending_commands:
             await asyncio.gather(*pending_commands, return_exceptions=True)
+        await services.shutdown_telemetry()
         manager = services._robot_manager
         if manager is not None and services._owns_robot_manager:
             await asyncio.to_thread(manager.motor.gpio.close)
@@ -1417,27 +1448,12 @@ async def telemetry(websocket: WebSocket):
         await websocket.close(code=4401, reason="unauthorized")
         return
     await websocket.accept()
-    subscriber = services.subscribe_command_results()
+    subscriber = services.subscribe_telemetry()
     try:
         while True:
-            # Check result events before and after the existing serial queue read.
-            # That queue has a 200 ms timeout, bounding event delivery latency.
-            try:
-                event = subscriber.get_nowait()
-                await websocket.send_json(event)
-                continue
-            except asyncio.QueueEmpty:
-                pass
-            line = await services.read_message()
-            if line is not None:
-                await websocket.send_json({"type": "esp32_line", "line": line})
-            try:
-                event = subscriber.get_nowait()
-                await websocket.send_json(event)
-            except asyncio.QueueEmpty:
-                if line is None:
-                    await asyncio.sleep(0.05)
+            event = await subscriber.get()
+            await websocket.send_json(event)
     except WebSocketDisconnect:
         return
     finally:
-        services.unsubscribe_command_results(subscriber)
+        services.unsubscribe_telemetry(subscriber)

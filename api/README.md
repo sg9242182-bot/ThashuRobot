@@ -155,9 +155,14 @@ with HTTP 409 instead of being sent under the new state.
 The current protocol has no latched Emergency Stop command. Do not claim a
 latched Emergency Stop until the ESP32 protocol and firmware add and verify
 that behavior. See `docs/development/VISHAL_BACKEND_CONTRACT_GAPS.md` for the
-remaining hardware contract. The telemetry stream consumes the raw inbound
-queue exposed by `GPIOControl`; it is a single-consumer feed. Run one telemetry WebSocket
-consumer and do not add a second reader for that queue. The API must share the
+remaining hardware contract. The API uses one serial-reader task for the raw
+inbound queue exposed by `GPIOControl`, then fans each event out to connected
+WebSocket clients. Each client has a bounded 64-event queue; if a client is
+slow, its oldest queued event is dropped so it cannot block serial reading or
+robot control. A missed `command_result` can be recovered through the command
+result REST route. Raw `esp32_line` events do not yet carry an API timestamp or
+a stale-state classification; the telemetry cadence and stale threshold still
+need agreement with the hardware and Flutter owners. The API must share the
 robot process's existing `RobotCommandManager` and serial connection; do not
 run a separate Uvicorn process beside `thashu/main.py` on the Pi.
 
