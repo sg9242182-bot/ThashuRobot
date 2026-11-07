@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+from math import ceil
 import secrets
 import sqlite3
 import sys
@@ -143,6 +144,33 @@ class PriorityCommandQueue:
             future.set_result(None)
             return
         self._locked = False
+
+
+class TokenBucketRateLimiter:
+    """One in-memory bucket shared by every app using the configured token."""
+
+    def __init__(self, capacity=10, refill_per_second=5.0):
+        self.capacity = capacity
+        self.refill_per_second = refill_per_second
+        self.reset()
+
+    def reset(self, now=None):
+        self._tokens = float(self.capacity)
+        self._updated_at = time.monotonic() if now is None else now
+
+    def consume(self, now=None):
+        """Consume a request token; return retry seconds when exhausted."""
+        current = time.monotonic() if now is None else now
+        elapsed = max(0.0, current - self._updated_at)
+        self._tokens = min(
+            float(self.capacity),
+            self._tokens + elapsed * self.refill_per_second,
+        )
+        self._updated_at = current
+        if self._tokens >= 1.0:
+            self._tokens -= 1.0
+            return None
+        return (1.0 - self._tokens) / self.refill_per_second
 
 
 class ApiServices:
@@ -538,6 +566,7 @@ class ApiServices:
 
 
 services = ApiServices()
+move_mode_rate_limiter = TokenBucketRateLimiter(capacity=10, refill_per_second=5.0)
 
 API_COMMAND_QUEUE_TIMEOUT_SECONDS = 2.0
 
@@ -865,6 +894,27 @@ ROBOT_COMMAND_ERROR_RESPONSES = {
     },
 }
 
+MOVE_MODE_RATE_LIMIT_RESPONSES = {
+    429: {
+        "description": "The shared Bearer token bucket for move/mode requests is exhausted.",
+        "content": {
+            "application/json": {
+                "example": {"detail": {
+                    "error": "rate_limited",
+                    "error_code": "RATE_LIMITED",
+                    "retry_after_seconds": 0.2,
+                }},
+            }
+        },
+        "headers": {
+            "Retry-After": {
+                "description": "Whole seconds to wait before retrying.",
+                "schema": {"type": "integer", "minimum": 1},
+            }
+        },
+    },
+}
+
 
 async def require_api_token(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
@@ -884,6 +934,24 @@ async def require_api_token(
             status_code=401,
             detail={"error": "unauthorized"},
             headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+async def require_rate_limited_api_token(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+):
+    """Authenticate then enforce the shared move/mode token bucket."""
+    await require_api_token(credentials)
+    retry_after = move_mode_rate_limiter.consume()
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "rate_limited",
+                "error_code": "RATE_LIMITED",
+                "retry_after_seconds": round(retry_after, 3),
+            },
+            headers={"Retry-After": str(max(1, ceil(retry_after)))},
         )
 
 
@@ -932,6 +1000,7 @@ _ERROR_NAME_CODES = {
     "mode_switch_failed": "MODE_SWITCH_FAILED",
     "request_body_too_large": "PAYLOAD_TOO_LARGE",
     "request_id_conflict": "REQUEST_ID_REUSED",
+    "rate_limited": "RATE_LIMITED",
     "robot_unavailable": "ROBOT_UNAVAILABLE",
     "safety_blocked": "SAFETY_BLOCKED",
     "unauthorized": "UNAUTHORIZED",
@@ -1060,8 +1129,8 @@ async def get_command_result(command_id: str):
     "/api/v1/robot/mode",
     response_model=ModeSwitchResponse,
     tags=["robot"],
-    dependencies=[Depends(require_api_token)],
-    responses=ROBOT_COMMAND_ERROR_RESPONSES,
+    dependencies=[Depends(require_rate_limited_api_token)],
+    responses={**ROBOT_COMMAND_ERROR_RESPONSES, **MOVE_MODE_RATE_LIMIT_RESPONSES},
 )
 async def switch_control_mode(request: ModeSwitchRequest):
     """Stop and confirm before selecting Manual or Auto; never starts motion."""
@@ -1116,8 +1185,8 @@ async def switch_control_mode(request: ModeSwitchRequest):
     response_model=CommandResponse,
     status_code=202,
     tags=["robot"],
-    dependencies=[Depends(require_api_token)],
-    responses=ROBOT_COMMAND_ERROR_RESPONSES,
+    dependencies=[Depends(require_rate_limited_api_token)],
+    responses={**ROBOT_COMMAND_ERROR_RESPONSES, **MOVE_MODE_RATE_LIMIT_RESPONSES},
 )
 async def move(request: MoveRequest):
     """Dispatch a movement command and report its later ESP32 result asynchronously."""

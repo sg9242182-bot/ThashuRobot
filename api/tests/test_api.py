@@ -164,6 +164,7 @@ class FakeRobotManager:
 class ApiTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.old_services = main.services
+        main.move_mode_rate_limiter.reset()
         self.state_directory = tempfile.TemporaryDirectory()
         self.services_for_cleanup = []
         main.services = self.make_services(
@@ -942,6 +943,45 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException) as missing_config:
                 await main.require_api_token(None)
         self.assertEqual(missing_config.exception.status_code, 503)
+
+    async def test_move_and_mode_share_burst_limit_while_stop_is_exempt(self):
+        from fastapi import HTTPException
+
+        credentials = HTTPAuthorizationCredentials(
+            scheme="Bearer", credentials="test-token"
+        )
+        for path in ("/api/v1/robot/move", "/api/v1/robot/mode"):
+            route = next(route for route in main.app.routes if route.path == path)
+            calls = {dependency.call for dependency in route.dependant.dependencies}
+            self.assertIn(main.require_rate_limited_api_token, calls)
+
+        stop_route = next(
+            route for route in main.app.routes
+            if route.path == "/api/v1/robot/stop"
+        )
+        stop_calls = {dependency.call for dependency in stop_route.dependant.dependencies}
+        self.assertIn(main.require_api_token, stop_calls)
+        self.assertNotIn(main.require_rate_limited_api_token, stop_calls)
+
+        for _ in range(10):
+            self.assertIsNone(
+                await main.require_rate_limited_api_token(credentials)
+            )
+        with self.assertRaises(HTTPException) as limited:
+            await main.require_rate_limited_api_token(credentials)
+        self.assertEqual(limited.exception.status_code, 429)
+        self.assertEqual(limited.exception.detail["error_code"], "RATE_LIMITED")
+        self.assertGreater(limited.exception.detail["retry_after_seconds"], 0)
+        self.assertEqual(limited.exception.headers["Retry-After"], "1")
+        self.assertIsNone(main.services._robot_manager)
+
+    def test_rate_limit_bucket_refills_at_five_requests_per_second(self):
+        limiter = main.TokenBucketRateLimiter(capacity=10, refill_per_second=5.0)
+        limiter.reset(now=100.0)
+        for _ in range(10):
+            self.assertIsNone(limiter.consume(now=100.0))
+        self.assertAlmostEqual(limiter.consume(now=100.0), 0.2)
+        self.assertIsNone(limiter.consume(now=100.2))
 
     async def test_telemetry_stream_wraps_raw_line_without_claiming_ack(self):
         class FakeWebSocket:

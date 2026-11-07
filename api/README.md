@@ -110,12 +110,18 @@ the ESP32 acknowledged handling the command, not that movement completed.
 Move, mode, and STOP requests share a serialized command queue. STOP has
 priority over queued move/mode requests. It waits for the command already in
 progress to finish; it does not interrupt serial work already underway.
-Movement/mode rate limiting is not enabled yet; when added, STOP must bypass
-that limit. Move and mode requests that wait more than 2 seconds return HTTP
-503 with `detail.error_code: "API_BUSY"` and `retryable: true`; they have not
-been dispatched. STOP is not rejected by that queue-wait timeout. Retrying a
-move or STOP must reuse its original `request_id`. Hardware dispatch runs in a
-worker thread and is not cancelled when an HTTP client disconnects, so a
+Move and mode share one token bucket for the configured Bearer token: capacity
+10, refilling at 5 requests per second. The bucket is shared across every app
+using that token. A limited request returns HTTP 429 with
+`detail.error_code: "RATE_LIMITED"`, `retry_after_seconds`, and a `Retry-After`
+header, before entering the command queue. STOP remains authenticated, bypasses
+this limit, and has priority over queued move/mode requests. It waits for the
+command already in progress to finish; it does not interrupt serial work
+already underway. Move and mode requests that wait more than 2 seconds return
+HTTP 503 with `detail.error_code: "API_BUSY"` and `retryable: true`; they have
+not been dispatched. STOP is not rejected by that queue-wait timeout. Retrying
+a move or STOP must reuse its original `request_id`. Hardware dispatch runs in
+a worker thread and is not cancelled when an HTTP client disconnects, so a
 request timeout never cancels a motor operation that may already have reached
 the ESP32.
 
@@ -215,6 +221,10 @@ Robot command endpoints can return these responses:
 - **401 Unauthorized** when the Bearer token is missing or incorrect:
   ```json
   {"detail":{"error":"unauthorized","error_code":"UNAUTHORIZED"}}
+  ```
+- **429 Too Many Requests** when the shared move/mode token bucket is exhausted. No command is sent:
+  ```json
+  {"detail":{"error":"rate_limited","error_code":"RATE_LIMITED","retry_after_seconds":0.2}}
   ```
 - **409 Conflict** when a move or STOP request ID is reused for a different action:
   ```json
