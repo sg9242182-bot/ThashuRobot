@@ -1,6 +1,7 @@
 import unittest
 import os
 import asyncio
+import json
 import tempfile
 from uuid import UUID
 from unittest.mock import patch
@@ -845,6 +846,18 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
                 events.append(subscriber.get_nowait())
             event = next(event for event in events if event["type"] == "command_result")
             self.assertEqual(event["type"], "command_result")
+            self.assertEqual(
+                set(event),
+                {
+                    "type",
+                    "command_id",
+                    "request_id",
+                    "status",
+                    "error_code",
+                    "timestamp",
+                },
+            )
+            self.assertNotIn("test-token", json.dumps(event))
             self.assertEqual(event["command_id"], "command-2")
             self.assertEqual(event["status"], "safety_error")
             self.assertEqual(event["error_code"], "OBSTACLE")
@@ -864,6 +877,8 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             )
             expected = {"type": "esp32_line", "line": "EVENT|0|READY"}
             for event in (first_event, second_event):
+                self.assertEqual(set(event), {"type", "line", "received_at"})
+                self.assertNotIn("test-token", json.dumps(event))
                 self.assertEqual(
                     {key: value for key, value in event.items() if key != "received_at"},
                     expected,
@@ -1148,6 +1163,10 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         await main.telemetry(socket)
         self.assertEqual(len(socket.frames), 1)
         self.assertEqual(socket.frames[0]["type"], "esp32_line")
+        self.assertEqual(
+            set(socket.frames[0]), {"type", "line", "received_at"}
+        )
+        self.assertNotIn("test-token", json.dumps(socket.frames[0]))
         self.assertEqual(socket.frames[0]["line"], "EVENT|0|READY")
         self.assertTrue(socket.frames[0]["received_at"].endswith("Z"))
 
