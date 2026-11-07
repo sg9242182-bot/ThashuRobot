@@ -211,7 +211,8 @@ Then build and install libpiper:
 cmake -S "$HOME/piper1-gpl/libpiper" \
   -B "$HOME/piper1-gpl/libpiper/build" \
   -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_INSTALL_PREFIX="$HOME/piper1-gpl/libpiper/install"
+  -DCMAKE_INSTALL_PREFIX="$HOME/piper1-gpl/libpiper/install" \
+  -DCMAKE_INSTALL_RPATH='$ORIGIN'
 cmake --build "$HOME/piper1-gpl/libpiper/build" --parallel 2
 cmake --install "$HOME/piper1-gpl/libpiper/build"
 
