@@ -1124,6 +1124,10 @@ Acceptance:
 
 \---
 
+
+
+Performance sample (2026-11-07; user-reported Raspberry Pi cold-start interaction): “Explain kinematics” — command recording 4.93 s, STT 6.61 s, Brain 6.70 s, TTS/playback 8.41 s (Piper to EOF 6.09 s), total interaction 28.06 s. Whisper reported that `tiny.en` loaded in this interaction, so STT is a cold-start sample and must be repeated after the model is warm. The 16-word response exceeded the 12-word prompt and is evidence the prompt alone did not enforce the limit. Updated `thashu/core/ai_engine.py` to enforce one sentence and a 12-word maximum before speech; validate answer quality and timing on the Pi. This one sample does not complete any baseline checkbox; camera/vision, face-recognition, Pi–ESP32, sensor-rate, repeated warm/cold timings, and regression acceptance remain open.
+
 Phase 12 — Mobile Control
 
 Status: NOT STARTED
