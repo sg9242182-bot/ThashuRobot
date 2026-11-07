@@ -57,9 +57,13 @@ def generate_response(prompt: str, mode: str = "normal") -> str:
                 text = text[len(tag):].strip()
 
         text = " ".join(text.split())
-        sentence_limit = 2 if mode == "deep" else 1
+        # Keep spoken answers short in code as well as in the prompt; small local
+        # models do not reliably obey word-count instructions.
         sentences = re.split(r"(?<=[.!?])\s+", text)
-        text = " ".join(sentence.strip() for sentence in sentences[:sentence_limit]).strip()
+        text = sentences[0].strip() if sentences else ""
+        words = text.split()
+        if len(words) > 12:
+            text = " ".join(words[:12]).rstrip(" ,;:-")
         if text and text[-1] not in ".!?":
             text += "."
         if not text:
