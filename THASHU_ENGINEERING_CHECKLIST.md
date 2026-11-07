@@ -1089,7 +1089,7 @@ User-reported Pi verification (2026-11-06): The user confirms all remaining Phas
 
 Phase 11 — Performance Optimization
 
-Status: IN PROGRESS — baseline instrumentation and measurements are the first task.
+Status: IN PROGRESS — serial baselines and integrated no-regression check are user-reported passed; remaining metric evidence and practical latency target signoff are open.
 
 Baseline instrumentation audit (2026-11-07):
 - `thashu/main.py` already prints coarse wall-clock durations for STT, Brain, TTS, and total interaction. These do not isolate wake-word-to-listening, Brain-to-first-audio, or Piper-to-idle latency.
@@ -1123,7 +1123,7 @@ Acceptance:
 
 \[ ] Measured latency meets the project's practical target.
 
-\[ ] No optimization causes functional regressions.
+\[x] No optimization causes functional regressions (user-reported full-app Pi check passed 2026-11-08).
 
 \---
 
