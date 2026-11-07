@@ -896,6 +896,62 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             main.services.unsubscribe_telemetry(first)
             await main.services.shutdown_telemetry()
 
+    async def test_telemetry_websocket_accepts_fresh_subscriber_after_api_restart(self):
+        from starlette.websockets import WebSocketDisconnect
+
+        class OneFrameWebSocket:
+            def __init__(self):
+                self.frames = []
+                self.headers = {"authorization": "Bearer test-token"}
+
+            async def accept(self):
+                pass
+
+            async def send_json(self, payload):
+                self.frames.append(payload)
+                raise WebSocketDisconnect()
+
+        old_services = main.services
+        state_db_path = os.path.join(self.state_directory.name, "restart.sqlite3")
+        first_service = self.make_services(
+            lambda: FakeRobotManager(FakeMotor(messages=["EVENT|0|READY"])),
+            state_db_path,
+        )
+        restarted_service = self.make_services(
+            lambda: FakeRobotManager(FakeMotor(messages=[
+                "TEL|0|SENSORS|TOF_L|FAR|TOF_C|NA|TOF_R|FAR|US_REAR|NA"
+            ])),
+            state_db_path,
+        )
+
+        try:
+            main.services = first_service
+            async with main.lifespan(main.app):
+                first_socket = OneFrameWebSocket()
+                await main.telemetry(first_socket)
+                self.assertEqual(first_socket.frames[0]["line"], "EVENT|0|READY")
+                self.assertEqual(first_service._telemetry_subscribers, set())
+
+            self.assertIsNone(first_service._telemetry_task)
+            self.assertIsNone(first_service._db_connection)
+
+            main.services = restarted_service
+            async with main.lifespan(main.app):
+                restarted_socket = OneFrameWebSocket()
+                await main.telemetry(restarted_socket)
+
+            event = restarted_socket.frames[0]
+            self.assertEqual(event["type"], "esp32_line")
+            self.assertEqual(
+                event["line"],
+                "TEL|0|SENSORS|TOF_L|FAR|TOF_C|NA|TOF_R|FAR|US_REAR|NA",
+            )
+            self.assertTrue(event["received_at"].endswith("Z"))
+            self.assertEqual(restarted_service._telemetry_subscribers, set())
+            self.assertIsNone(restarted_service._telemetry_task)
+        finally:
+            main.services = old_services
+
     async def test_slow_telemetry_subscriber_drops_oldest_without_blocking(self):
         subscriber = asyncio.Queue(maxsize=2)
         main.services._telemetry_subscribers.add(subscriber)
