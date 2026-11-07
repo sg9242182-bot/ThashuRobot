@@ -10,7 +10,7 @@ import RPi.GPIO as GPIO
 from voice.audio_manager  import AudioManager
 from voice.wake_word      import WakeWordEngine
 from voice.vad            import VoiceActivityDetector
-from voice.speech_to_text import transcribe 
+from voice.speech_to_text import transcribe, preload_model
 from voice.text_to_speech import speak, play_cached_response
 from voice.sound_player   import play
 from core.brain           import Brain
@@ -860,6 +860,7 @@ def main():
     wake.lock()
 
     audio.pause()
+    preload_model()
 
     play(SOUND_STARTUP, blocking=True)
 
