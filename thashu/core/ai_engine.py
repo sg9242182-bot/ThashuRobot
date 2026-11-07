@@ -63,7 +63,31 @@ def generate_response(prompt: str, mode: str = "normal") -> str:
         text = sentences[0].strip() if sentences else ""
         words = text.split()
         if len(words) > 12:
-            text = " ".join(words[:12]).rstrip(" ,;:-")
+            limited = " ".join(words[:12]).rstrip(" ,;:-")
+            last_word = re.sub(r"[^a-z']", "", limited.split()[-1].lower())
+            dangling = {
+                "a", "an", "and", "as", "at", "because", "by", "causing",
+                "for", "from", "if", "in", "including", "into", "of", "on",
+                "or", "that", "the", "to", "which", "while", "with",
+            }
+            if last_word in dangling:
+                # Prefer a complete clause when the word limit lands inside one.
+                boundaries = [
+                    match.start()
+                    for match in re.finditer(r"[,;:]", text)
+                    if len(text[:match.start()].split()) <= 12
+                ]
+                if boundaries:
+                    text = text[:boundaries[-1]].rstrip(" ,;:")
+                else:
+                    limited_words = limited.split()
+                    while limited_words and re.sub(
+                        r"[^a-z']", "", limited_words[-1].lower()
+                    ) in dangling:
+                        limited_words.pop()
+                    text = " ".join(limited_words)
+            else:
+                text = limited
         if text and text[-1] not in ".!?":
             text += "."
         if not text:
