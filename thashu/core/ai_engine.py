@@ -53,7 +53,7 @@ def warmup_model() -> bool:
             ],
             max_tokens=1,
             temperature=0.0,
-            stop=["User:", "Assistant:", "\\n\\n"],
+            stop=["User:", "Assistant:", "\n\n"],
         )
         print(f"[AI ENGINE] Startup warm-up = {time.monotonic() - started:.2f}s")
         return True
