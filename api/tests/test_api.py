@@ -313,8 +313,8 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_move_returns_api_busy_without_dispatch_when_command_slot_times_out(self):
         from fastapi import HTTPException
 
-        lock = main.services._request_lock
-        await lock.acquire()
+        queue = main.services._command_queue
+        await queue.acquire()
         timeout_patch = patch.object(main, "API_COMMAND_QUEUE_TIMEOUT_SECONDS", 0.01)
         timeout_patch.start()
         try:
@@ -332,7 +332,54 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(main.services._robot_manager)
         finally:
             timeout_patch.stop()
-            lock.release()
+            queue.release()
+
+    async def test_stop_moves_ahead_of_waiting_move_and_mode_commands(self):
+        queue = main.PriorityCommandQueue()
+        await queue.acquire("normal")
+        order = []
+
+        async def queued_command(name, priority="normal"):
+            await queue.acquire(priority)
+            try:
+                order.append(name)
+            finally:
+                queue.release()
+
+        move_task = asyncio.create_task(queued_command("move"))
+        mode_task = asyncio.create_task(queued_command("mode"))
+        await asyncio.sleep(0)
+        stop_task = asyncio.create_task(queued_command("stop", "stop"))
+        await asyncio.sleep(0)
+
+        queue.release()
+        await asyncio.gather(move_task, mode_task, stop_task)
+        self.assertEqual(order, ["stop", "move", "mode"])
+
+    async def test_stop_waits_for_busy_queue_instead_of_returning_api_busy(self):
+        queue = main.services._command_queue
+        await queue.acquire("normal")
+        timeout_patch = patch.object(main, "API_COMMAND_QUEUE_TIMEOUT_SECONDS", 0.01)
+        timeout_patch.start()
+        try:
+            stop_task = asyncio.create_task(
+                self.endpoint("/api/v1/robot/stop")(
+                    main.StopRequest(
+                        request_id=UUID("44444444-4444-4444-8444-444444444444")
+                    )
+                )
+            )
+            await asyncio.sleep(0.03)
+            self.assertFalse(stop_task.done())
+            queue.release()
+            response = await stop_task
+            self.assertEqual(response.command, "stop")
+            manager = await main.services.robot_manager()
+            self.assertEqual(manager.motor.commands, [("stop", None)])
+        finally:
+            timeout_patch.stop()
+            if queue._locked:
+                queue.release()
 
     async def test_move_requires_explicit_manual_mode(self):
         from fastapi import HTTPException

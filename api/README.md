@@ -107,13 +107,17 @@ Safety errors include the ESP32 reason as `error_code`; timeouts use
 `ACK_TIMEOUT`; acknowledged results have `error_code: null`. An ACK means
 the ESP32 acknowledged handling the command, not that movement completed.
 
-Move and STOP requests share a command slot. If another command keeps that
-slot occupied for more than 2 seconds, the waiting request returns HTTP 503
-with `detail.error_code: "API_BUSY"` and `retryable: true`; it has not been
-dispatched. Retrying that same action must reuse its original `request_id`.
-Hardware dispatch runs in a worker thread and is not cancelled when an HTTP
-client disconnects, so a request timeout never cancels a motor operation that
-may already have reached the ESP32.
+Move, mode, and STOP requests share a serialized command queue. STOP has
+priority over queued move/mode requests. It waits for the command already in
+progress to finish; it does not interrupt serial work already underway.
+Movement/mode rate limiting is not enabled yet; when added, STOP must bypass
+that limit. Move and mode requests that wait more than 2 seconds return HTTP
+503 with `detail.error_code: "API_BUSY"` and `retryable: true`; they have not
+been dispatched. STOP is not rejected by that queue-wait timeout. Retrying a
+move or STOP must reuse its original `request_id`. Hardware dispatch runs in a
+worker thread and is not cancelled when an HTTP client disconnects, so a
+request timeout never cancels a motor operation that may already have reached
+the ESP32.
 
 If Flutter misses the WebSocket event, it can call
 `GET /api/v1/robot/commands/{command_id}` with the same Bearer token. The
@@ -233,7 +237,7 @@ Robot command endpoints can return these responses:
   ```json
   {"detail":{"error":"robot_unavailable","error_code":"ROBOT_UNAVAILABLE","command_id":"<uuid>"}}
   ```
-- **503 Service Unavailable** when the command slot is still occupied after 2 seconds. This request was not dispatched:
+- **503 Service Unavailable** when a move or mode request waits in the command queue for more than 2 seconds. That request was not dispatched:
   ```json
   {"detail":{"error":"command_queue_busy","error_code":"API_BUSY","retryable":true}}
   ```

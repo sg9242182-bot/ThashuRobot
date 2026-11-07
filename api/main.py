@@ -100,6 +100,51 @@ class ModeSwitchResponse(BaseModel):
     status: Literal["switched"]
 
 
+class PriorityCommandQueue:
+    """Serialize API commands while letting STOP pass queued non-STOP work."""
+
+    def __init__(self):
+        self._locked = False
+        self._next_order = 0
+        self._waiters = []
+
+    async def acquire(self, priority="normal"):
+        if priority not in {"stop", "normal"}:
+            raise ValueError("priority must be 'stop' or 'normal'")
+        if not self._locked and not self._waiters:
+            self._locked = True
+            return
+
+        loop = asyncio.get_running_loop()
+        waiter = (0 if priority == "stop" else 1, self._next_order, loop.create_future())
+        self._next_order += 1
+        self._waiters.append(waiter)
+        try:
+            await waiter[2]
+        except BaseException:
+            if waiter in self._waiters:
+                self._waiters.remove(waiter)
+            elif waiter[2].done() and not waiter[2].cancelled():
+                # The queue granted the slot as cancellation arrived. Pass it on.
+                self.release()
+            raise
+
+    def release(self):
+        if not self._locked:
+            raise RuntimeError("command queue released while not held")
+        while self._waiters:
+            index = min(
+                range(len(self._waiters)),
+                key=lambda item: (self._waiters[item][0], self._waiters[item][1]),
+            )
+            _priority, _order, future = self._waiters.pop(index)
+            if future.cancelled():
+                continue
+            future.set_result(None)
+            return
+        self._locked = False
+
+
 class ApiServices:
     """Small adapter around existing services; injectable for API tests."""
 
@@ -113,7 +158,7 @@ class ApiServices:
         self._owns_robot_manager = True
         self._lock = asyncio.Lock()
         self._command_lock = threading.RLock()
-        self._request_lock = asyncio.Lock()
+        self._command_queue = PriorityCommandQueue()
         self._state_db_path = str(state_db_path or get_api_state_db_path())
         self._db_connection = None
         self._command_subscribers = set()
@@ -498,26 +543,31 @@ API_COMMAND_QUEUE_TIMEOUT_SECONDS = 2.0
 
 
 @asynccontextmanager
-async def command_request_slot():
-    """Bound queueing before dispatch; never cancel hardware work mid-command."""
-    try:
-        await asyncio.wait_for(
-            services._request_lock.acquire(),
-            timeout=API_COMMAND_QUEUE_TIMEOUT_SECONDS,
-        )
-    except asyncio.TimeoutError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "error": "command_queue_busy",
-                "error_code": "API_BUSY",
-                "retryable": True,
-            },
-        ) from exc
+async def command_request_slot(priority="normal"):
+    """Bound queueing; prefer STOP and never cancel dispatched hardware work."""
+    if priority == "stop":
+        # A safety STOP waits for the active operation and jumps ahead of
+        # queued movement/mode work instead of being rejected as API_BUSY.
+        await services._command_queue.acquire("stop")
+    else:
+        try:
+            await asyncio.wait_for(
+                services._command_queue.acquire(priority),
+                timeout=API_COMMAND_QUEUE_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "command_queue_busy",
+                    "error_code": "API_BUSY",
+                    "retryable": True,
+                },
+            ) from exc
     try:
         yield
     finally:
-        services._request_lock.release()
+        services._command_queue.release()
 bearer_scheme = HTTPBearer(auto_error=False)
 
 # Document common command failures in Swagger without changing runtime behavior.
@@ -1016,48 +1066,49 @@ async def get_command_result(command_id: str):
 async def switch_control_mode(request: ModeSwitchRequest):
     """Stop and confirm before selecting Manual or Auto; never starts motion."""
     request_id = str(uuid4())
-    try:
-        await services.switch_mode(request.mode)
-    except ModeSwitchError as exc:
+    async with command_request_slot():
+        try:
+            await services.switch_mode(request.mode)
+        except ModeSwitchError as exc:
+            manager = await services.robot_manager()
+            _log_command_outcome(
+                command_id=request_id,
+                command=f"mode:{request.mode}",
+                outcome="failed",
+                http_status=503,
+                error_code=exc.error_code,
+                control_mode=manager.mode.value,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "mode_switch_failed",
+                    "error_code": exc.error_code,
+                    "control_mode": manager.mode.value,
+                },
+            ) from exc
+        except Exception as exc:
+            _log_command_outcome(
+                command_id=request_id,
+                command=f"mode:{request.mode}",
+                outcome="failed",
+                http_status=503,
+                error_code="robot_unavailable",
+            )
+            raise HTTPException(
+                status_code=503,
+                detail={"error": "robot_unavailable"},
+            ) from exc
+
         manager = await services.robot_manager()
         _log_command_outcome(
             command_id=request_id,
             command=f"mode:{request.mode}",
-            outcome="failed",
-            http_status=503,
-            error_code=exc.error_code,
+            outcome="switched",
+            http_status=200,
             control_mode=manager.mode.value,
         )
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "error": "mode_switch_failed",
-                "error_code": exc.error_code,
-                "control_mode": manager.mode.value,
-            },
-        ) from exc
-    except Exception as exc:
-        _log_command_outcome(
-            command_id=request_id,
-            command=f"mode:{request.mode}",
-            outcome="failed",
-            http_status=503,
-            error_code="robot_unavailable",
-        )
-        raise HTTPException(
-            status_code=503,
-            detail={"error": "robot_unavailable"},
-        ) from exc
-
-    manager = await services.robot_manager()
-    _log_command_outcome(
-        command_id=request_id,
-        command=f"mode:{request.mode}",
-        outcome="switched",
-        http_status=200,
-        control_mode=manager.mode.value,
-    )
-    return ModeSwitchResponse(mode=manager.mode.value, status="switched")
+        return ModeSwitchResponse(mode=manager.mode.value, status="switched")
 
 
 @app.post(
@@ -1208,7 +1259,7 @@ async def stop(request: StopRequest):
     request_id = str(request.request_id)
     action = {"type": "stop"}
 
-    async with command_request_slot():
+    async with command_request_slot("stop"):
         existing = services.request_record(request_id)
         if existing is not None:
             response = _replay_command_request(existing, action, request_id)
