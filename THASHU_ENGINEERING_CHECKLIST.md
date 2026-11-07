@@ -1134,6 +1134,10 @@ Warm-session follow-up (2026-11-07; user-reported Raspberry Pi run after pulling
 
 Answer-quality regression follow-up (2026-11-07; user-reported Pi run): The 12-word post-generation cap still produced incomplete/awkward answers for atmospheric diffraction (“…causing it”) and refraction (“…pass through”). The cap is removed; `thashu/core/ai_engine.py` now requests one complete answer, usually no more than 18 words, and allows 32 output tokens so it can finish. Pi accuracy, answer completeness, latency, and regression validation are pending. The same run recorded one cold LLM answer at 7.41 s and a subsequent warm answer at 2.91 s; TTS was 8.36 s and 6.51 s respectively. These are individual samples, not acceptance results.
 
+
+
+Whisper first-use latency optimization (2026-11-07): Added `preload_model()` in `thashu/voice/speech_to_text.py` and call it during startup in `thashu/main.py` while the microphone is paused and before the ready prompt. This moves the observed model-load cost (STT 7.14 s cold versus 2.33–2.49 s warm in the user's Pi log) to startup without changing Whisper model or decoding settings. Startup delay and first-interaction latency must be measured on the Pi; functional/STT accuracy regression checks remain open. Do not check this optimization as passed until the user confirms startup readiness and first-command behavior.
+
 Phase 12 — Mobile Control
 
 Status: NOT STARTED
