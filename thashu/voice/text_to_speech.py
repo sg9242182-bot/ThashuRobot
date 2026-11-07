@@ -9,6 +9,7 @@ import time
 from core.model_paths import model_path
 from core.quick_responses import QuickResponses
 from voice.sound_player import _lock, play
+from voice.piper_stream import PiperStream
 
 PIPER_PATH = os.environ.get(
     "THASHU_PIPER_BIN", os.path.expanduser("~/piper/piper/piper")
@@ -115,7 +116,8 @@ def play_cached_response(text: str) -> bool:
 
 
 def prepare_command_voice_cache(names=None):
-    """Pre-render selected command replies, or every reply when names is omitted."""
+    """Pre-render selected replies with resident libpiper when it is installed."""
+    start_piper()
     os.makedirs(VOICE_CACHE_DIR, exist_ok=True)
     if names is None:
         prompts = ALL_VOICE_PROMPTS
@@ -133,21 +135,24 @@ def prepare_command_voice_cache(names=None):
 
         temporary_path = output_path + ".tmp.wav"
         try:
-            result = subprocess.run(
-                [
-                    PIPER_PATH, "--model", MODEL_PATH,
-                    "--output_file", temporary_path,
-                    "--length_scale", "1.0",
-                ],
-                input=prompt.encode("utf-8"),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                timeout=60,
-                check=False,
-            )
-            if result.returncode != 0 or not os.path.isfile(temporary_path):
-                detail = result.stderr.decode("utf-8", errors="replace").strip()
-                raise RuntimeError(detail or f"Piper exited with {result.returncode}")
+            if _streaming_piper is not None:
+                _streaming_piper.write_wav(prompt, temporary_path)
+            else:
+                result = subprocess.run(
+                    [
+                        PIPER_PATH, "--model", MODEL_PATH,
+                        "--output_file", temporary_path,
+                        "--length_scale", "1.0",
+                    ],
+                    input=prompt.encode("utf-8"),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    timeout=60,
+                    check=False,
+                )
+                if result.returncode != 0 or not os.path.isfile(temporary_path):
+                    detail = result.stderr.decode("utf-8", errors="replace").strip()
+                    raise RuntimeError(detail or f"Piper exited with {result.returncode}")
             os.replace(temporary_path, output_path)
             print(f"[PIPER] Generated voice: {name}")
         except Exception as exc:
@@ -347,19 +352,40 @@ class _PersistentPiper:
 
 
 _persistent_piper = _PersistentPiper()
+_streaming_piper = None
 atexit.register(_persistent_piper.shutdown)
 
 
+def _shutdown_streaming_piper():
+    if _streaming_piper is not None:
+        _streaming_piper.shutdown()
+
+
+atexit.register(_shutdown_streaming_piper)
+
+
 def start_piper() -> bool:
-    """Start the persistent Piper process during startup, without blocking on speech."""
+    """Load the streaming ONNX voice in RAM; use CLI fallback until provisioned."""
+    global _streaming_piper
+    if _streaming_piper is not None:
+        return True
+
     try:
-        with _persistent_piper._request_lock:
-            _persistent_piper._ensure_process()
-        print("[TTS] Persistent Piper process started during startup")
+        streaming_piper = PiperStream()
+        streaming_piper.load()
+        _streaming_piper = streaming_piper
+        print("[TTS] Streaming ONNX Piper loaded and kept in RAM")
         return True
     except Exception as exc:
-        print(f"[TTS] Piper startup warm-up failed; it will retry on first reply: {exc}")
-        return False
+        print(f"[TTS] Streaming backend unavailable; using temporary CLI fallback: {exc}")
+        try:
+            with _persistent_piper._request_lock:
+                _persistent_piper._ensure_process()
+            print("[TTS] Persistent Piper CLI fallback started")
+            return True
+        except Exception as fallback_exc:
+            print(f"[TTS] Piper startup failed; it will retry on first reply: {fallback_exc}")
+            return False
 
 
 def speak(text: str):
@@ -380,7 +406,10 @@ def speak(text: str):
 
     try:
         with _lock:
-            _persistent_piper.speak(text)
+            if _streaming_piper is not None:
+                _streaming_piper.speak(text)
+            else:
+                _persistent_piper.speak(text)
     except Exception as exc:
         print(f"[TTS ERROR]: {exc}")
 
