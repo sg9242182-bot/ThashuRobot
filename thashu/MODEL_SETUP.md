@@ -180,8 +180,7 @@ git clone --depth 1 https://github.com/OHF-Voice/piper1-gpl.git ~/piper1-gpl
 cd ~/ThashuRobot/thashu
 source ~/.venvs/thashu/bin/activate
 
-python -m pip install onnx
-python -m pip install --force-reinstall "protobuf==4.25.5"
+python -m pip install --force-reinstall "onnx==1.17.0" "protobuf==4.25.5" "numpy==1.26.4"
 python -m pip check
 ```
 
