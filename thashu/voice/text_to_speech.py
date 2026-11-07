@@ -350,6 +350,18 @@ _persistent_piper = _PersistentPiper()
 atexit.register(_persistent_piper.shutdown)
 
 
+def start_piper() -> bool:
+    """Start the persistent Piper process during startup, without blocking on speech."""
+    try:
+        with _persistent_piper._request_lock:
+            _persistent_piper._ensure_process()
+        print("[TTS] Persistent Piper process started during startup")
+        return True
+    except Exception as exc:
+        print(f"[TTS] Piper startup warm-up failed; it will retry on first reply: {exc}")
+        return False
+
+
 def speak(text: str):
     if not text or not text.strip():
         return
