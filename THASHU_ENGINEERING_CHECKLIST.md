@@ -1150,6 +1150,8 @@ ONNX Piper comparison and streaming implementation (2026-11-07; user-reported Ra
 
 Qwen thread-count comparison (2026-11-07; user-reported Pi, standalone model): With identical prompts and generation settings, medians were 2.30 s at 2 threads, 1.89 s at 3 threads, and 1.85 s at 4 threads. Three and four threads were effectively tied in this small sample; 4 threads remains marginally faster, while 3 may leave more CPU headroom. The Newton's-laws answer was cut off at “unless” with max_tokens=32 under every thread count, so do not lower the token limit as a speed optimization. Full-app thread-count comparison and answer-completeness validation remain open; no production thread setting changed from this benchmark.
 
+The `THASHU_LLM_THREADS` environment override is now available in `thashu/core/ai_engine.py` (default remains 4; values are clamped to available CPU count). Use it only to compare 3 versus 4 threads in separate full-app runs; keep `max_tokens` and all other model settings fixed. Full-app A/B timing and complete-answer checks remain open.
+
 Phase 12 — Mobile Control
 
 Status: NOT STARTED
