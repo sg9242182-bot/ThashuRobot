@@ -1106,17 +1106,20 @@ Measure before optimizing:
 
 \[ ] Piper → idle latency.
 
-\[ ] Vision CPU/RAM usage.
+\[x] Vision CPU/RAM usage measured (user-reported Pi benchmark, 2026-11-08).
 
-\[ ] Face-recognition latency.
+\[x] Face-recognition latency measured (user-reported Pi benchmark, 2026-11-08; stable-face end-to-end delay not established).
 
-\[ ] Camera FPS.
+\[x] Camera FPS measured (user-reported Pi benchmark, 2026-11-08).
 
 \[x] Pi ↔ ESP32 latency (20/20 HEARTBEAT ACKs; 41.1 ms median, 66.6 ms max round trip; user-reported Pi test, 2026-11-08).
 
 \[x] Sensor update rate (377 telemetry frames/30 s; 80 ms mean interval, 108 ms max gap; user-reported Pi test, 2026-11-08).
 
 Phase 11 serial baseline (2026-11-08; user-reported Pi tests): Idle telemetry monitoring received 377 `TEL` frames in 30 seconds (80 ms mean interval; 108 ms longest gap). A separate 20-command HEARTBEAT test received 20/20 matching `ALIVE` ACKs (41.1 ms median, 66.6 ms maximum round trip). These establish standalone serial baselines; under-full-application-load behavior remains unmeasured.
+
+
+Phase 11 vision baseline (2026-11-08; user-reported Pi test): The 30-second standalone VisionCore run processed 3.10 FPS, used an average of 39% of total Pi CPU, and averaged 313 MB RAM (316 MB peak). Dlib embedding time was 64.5 ms median / 215.7 ms max; database matching was 2.6 ms median / 3.1 ms max. The script reported 27.98 s from first detected face to recognized name, but detections flickered during the run, so this is not a valid stable-face confirmation latency. It logged recognized label `Tharum`; verify this is the intended canonical identity before treating the recognition result as a correct match.
 
 
 Acceptance:
