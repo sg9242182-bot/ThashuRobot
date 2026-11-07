@@ -1156,6 +1156,8 @@ Full-app Qwen thread A/B (2026-11-07; user-reported Pi, startup logs confirm req
 
 Cold-inference optimization candidate added on phase-10: `warmup_model()` runs one discarded token during the existing startup preload sequence, keeping the user's model-generation settings and 4-thread default unchanged. Also corrected the first-sentence split regex in `ai_engine.py`. Pi trial (user-reported 2026-11-07): warm-up took 4.42 s at startup. The first Brain response took 4.75 s, compared with earlier 6.76–7.72 s cold first responses; Piper first chunk was 1.11 s and shutdown was clean. This is one sample and moves work into startup. The answer to Newton's three laws only described the first law, so answer completeness failed. Repeat with several questions, verify full answers and later-response timing, and confirm the startup delay is acceptable before accepting the candidate.
 
+After the first warm-up trial produced an incomplete multi-part answer, updated both AI system prompts to direct the model to cover every requested item briefly. This prompt adjustment is unvalidated on the Pi; keep answer-quality acceptance open and verify several normal and multi-part questions before accepting.
+
 Phase 12 — Mobile Control
 
 Status: NOT STARTED
