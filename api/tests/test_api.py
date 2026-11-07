@@ -869,6 +869,30 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             main.services.unsubscribe_telemetry(first)
             main.services.unsubscribe_telemetry(second)
 
+    async def test_telemetry_reader_stops_and_restarts_after_last_client_reconnects(self):
+        manager = await main.services.robot_manager()
+        first = main.services.subscribe_telemetry()
+        first_task = main.services._telemetry_task
+        second = None
+        try:
+            first_event = await asyncio.wait_for(first.get(), timeout=1.0)
+            self.assertEqual(first_event["line"], "EVENT|0|READY")
+            main.services.unsubscribe_telemetry(first)
+            await asyncio.wait_for(asyncio.shield(first_task), timeout=1.0)
+
+            manager.motor.gpio.messages.append("TEL|0|SENSORS|FAR|FAR|FAR")
+            second = main.services.subscribe_telemetry()
+            second_event = await asyncio.wait_for(second.get(), timeout=1.0)
+            self.assertEqual(second_event, {
+                "type": "esp32_line",
+                "line": "TEL|0|SENSORS|FAR|FAR|FAR",
+            })
+        finally:
+            if second is not None:
+                main.services.unsubscribe_telemetry(second)
+            main.services.unsubscribe_telemetry(first)
+            await main.services.shutdown_telemetry()
+
     async def test_slow_telemetry_subscriber_drops_oldest_without_blocking(self):
         subscriber = asyncio.Queue(maxsize=2)
         main.services._telemetry_subscribers.add(subscriber)
