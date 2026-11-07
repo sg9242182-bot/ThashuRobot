@@ -310,6 +310,30 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             ("forward", 120),
         ])
 
+    async def test_move_returns_api_busy_without_dispatch_when_command_slot_times_out(self):
+        from fastapi import HTTPException
+
+        lock = main.services._request_lock
+        await lock.acquire()
+        timeout_patch = patch.object(main, "API_COMMAND_QUEUE_TIMEOUT_SECONDS", 0.01)
+        timeout_patch.start()
+        try:
+            with self.assertRaises(HTTPException) as failure:
+                await self.endpoint("/api/v1/robot/move")(
+                    main.MoveRequest(
+                        request_id=UUID("33333333-3333-4333-8333-333333333333"),
+                        direction="forward",
+                        speed=120,
+                    )
+                )
+            self.assertEqual(failure.exception.status_code, 503)
+            self.assertEqual(failure.exception.detail["error_code"], "API_BUSY")
+            self.assertTrue(failure.exception.detail["retryable"])
+            self.assertIsNone(main.services._robot_manager)
+        finally:
+            timeout_patch.stop()
+            lock.release()
+
     async def test_move_requires_explicit_manual_mode(self):
         from fastapi import HTTPException
 

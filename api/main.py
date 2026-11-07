@@ -493,6 +493,31 @@ class ApiServices:
 
 
 services = ApiServices()
+
+API_COMMAND_QUEUE_TIMEOUT_SECONDS = 2.0
+
+
+@asynccontextmanager
+async def command_request_slot():
+    """Bound queueing before dispatch; never cancel hardware work mid-command."""
+    try:
+        await asyncio.wait_for(
+            services._request_lock.acquire(),
+            timeout=API_COMMAND_QUEUE_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "command_queue_busy",
+                "error_code": "API_BUSY",
+                "retryable": True,
+            },
+        ) from exc
+    try:
+        yield
+    finally:
+        services._request_lock.release()
 bearer_scheme = HTTPBearer(auto_error=False)
 
 # Document common command failures in Swagger without changing runtime behavior.
@@ -749,6 +774,14 @@ ROBOT_COMMAND_ERROR_RESPONSES = {
         "content": {
             "application/json": {
                 "examples": {
+                    "command_queue_busy": {
+                        "summary": "The command slot stayed busy; this request was not dispatched",
+                        "value": {"detail": {
+                            "error": "command_queue_busy",
+                            "error_code": "API_BUSY",
+                            "retryable": True,
+                        }},
+                    },
                     "authentication_not_configured": {
                         "summary": "The API token is not configured",
                         "value": {"detail": {
@@ -844,6 +877,7 @@ _HTTP_STATUS_ERROR_CODES = {
 _ERROR_NAME_CODES = {
     "authentication_not_configured": "AUTHENTICATION_NOT_CONFIGURED",
     "command_not_found": "COMMAND_NOT_FOUND",
+    "command_queue_busy": "API_BUSY",
     "invalid_command": "INVALID_COMMAND",
     "mode_switch_failed": "MODE_SWITCH_FAILED",
     "request_body_too_large": "PAYLOAD_TOO_LARGE",
@@ -1043,7 +1077,7 @@ async def move(request: MoveRequest):
         "speed": request.speed,
     }
 
-    async with services._request_lock:
+    async with command_request_slot():
         existing = services.request_record(request_id)
         if existing is not None:
             response = _replay_command_request(existing, action, request_id)
@@ -1174,7 +1208,7 @@ async def stop(request: StopRequest):
     request_id = str(request.request_id)
     action = {"type": "stop"}
 
-    async with services._request_lock:
+    async with command_request_slot():
         existing = services.request_record(request_id)
         if existing is not None:
             response = _replay_command_request(existing, action, request_id)
