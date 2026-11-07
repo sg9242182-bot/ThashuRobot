@@ -28,7 +28,7 @@ _SYSTEM_NORMAL = (
 
 _SYSTEM_DEEP = (
     "You are Thashu, a helpful robot assistant. "
-    "Answer the user's actual question directly in at most two short sentences and 20 words total. "
+    "Answer the user's actual question directly in one concise sentence of at most 12 words. "
     "If the input is unclear, incomplete, or nonsensical, reply exactly: "
     "I didn't understand that. Please say it again. "
     "Do not guess unclear words or add a preamble, unrelated facts, lists, or filler."
@@ -44,7 +44,7 @@ def generate_response(prompt: str, mode: str = "normal") -> str:
                 {"role": "system", "content": system},
                 {"role": "user",   "content": prompt}
             ],
-            max_tokens=40 if mode == "deep" else 24,
+            max_tokens=24,
             temperature=0.2,
             stop=["User:", "Assistant:", "\n\n"]
         )
