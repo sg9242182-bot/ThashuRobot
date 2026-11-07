@@ -166,3 +166,42 @@ git -C ~/ThashuRobot check-ignore -v thashu/models/face/face_detection_yunet_202
 - [Official Qwen 2.5 0.5B Instruct GGUF files](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/tree/main)
 - [Piper en_US-lessac-low voice files](https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_US/lessac/low)
 - [faster-whisper `download_root` option](https://github.com/SYSTRAN/faster-whisper/blob/master/faster_whisper/transcribe.py)
+
+
+## Low-latency streaming Piper setup (Phase 11)
+
+The application now prefers an in-process `libpiper` backend. It keeps the ONNX voice resident and streams decoder chunks directly to ALSA. True sub-sentence streaming requires the split voice files and native library; the existing single ONNX file alone synthesizes a full sentence before audio is returned.
+
+Run these once on the Raspberry Pi from the Thashu virtual environment:
+
+```bash
+cd ~/ThashuRobot/thashu
+source ~/.venvs/thashu/bin/activate
+
+python -m pip install piper-tts onnx
+MODEL="$HOME/.local/share/thashu/models/piper/en_US-lessac-low.onnx"
+python -m piper.split_voice_for_streaming "$MODEL"
+
+git clone --depth 1 https://github.com/OHF-Voice/piper1-gpl.git "$HOME/piper1-gpl"
+sudo apt update
+sudo apt install -y build-essential cmake git
+
+cmake --version
+```
+
+The native build requires CMake 3.26 or newer. If the installed version is older, stop before building and install a newer CMake version for the Pi OS.
+
+```bash
+cmake -S "$HOME/piper1-gpl/libpiper" \
+  -B "$HOME/piper1-gpl/libpiper/build" \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX="$HOME/piper1-gpl/libpiper/install"
+cmake --build "$HOME/piper1-gpl/libpiper/build" --parallel 2
+cmake --install "$HOME/piper1-gpl/libpiper/build"
+
+ls -lh "$MODEL.encoder.onnx" "$MODEL.decoder.onnx"
+ls -lh "$HOME/piper1-gpl/libpiper/install/lib/libpiper.so"
+ls -d "$HOME/piper1-gpl/libpiper/install/share/espeak-ng-data"
+```
+
+The runtime looks for those files in the default locations shown above. For a different install location, set `THASHU_LIBPIPER` and `THASHU_ESPEAK_DATA_DIR` in the environment used to start Thashu. Until libpiper and the split files are both present, the old CLI remains a temporary fallback; do not remove it until the Pi streaming test passes. The splitter and native build are upstream Piper tools: [voice splitting and streaming](https://github.com/OHF-Voice/piper1-gpl/blob/main/docs/STREAMING.md), [libpiper build instructions](https://github.com/OHF-Voice/piper1-gpl/blob/main/libpiper/README.md).
