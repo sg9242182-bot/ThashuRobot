@@ -135,7 +135,7 @@ def prepare_command_voice_cache(names=None):
                 [
                     PIPER_PATH, "--model", MODEL_PATH,
                     "--output_file", temporary_path,
-                    "--length_scale", "1.1",
+                    "--length_scale", "1.0",
                 ],
                 input=prompt.encode("utf-8"),
                 stdout=subprocess.DEVNULL,
@@ -197,7 +197,7 @@ def speak(text: str):
                     PIPER_PATH,
                     "--model", MODEL_PATH,
                     "--output-raw",
-                    "--length_scale", "1.1",
+                    "--length_scale", "1.0",
                 ],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
