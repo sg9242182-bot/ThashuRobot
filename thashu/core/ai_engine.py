@@ -7,15 +7,22 @@ from core.model_paths import model_path
 # ── Load once at import time ──────────────────────────────────────────────────
 _MODEL_PATH = model_path("llm", "qwen2.5-0.5b-instruct-q4_k_m.gguf")
 
+try:
+    _requested_threads = int(os.environ.get("THASHU_LLM_THREADS", "4"))
+except ValueError:
+    _requested_threads = 4
+_LLM_THREADS = max(1, min(os.cpu_count() or 4, _requested_threads))
+
 _llm = Llama(
     model_path=_MODEL_PATH,
     n_ctx=512,          # small context = less RAM
-    n_threads=4,        # use all Pi 4 cores
+    n_threads=_LLM_THREADS,
     n_gpu_layers=0,     # CPU only
     verbose=False
 )
 
 print("[AI ENGINE] Qwen2.5-0.5B loaded")
+print(f"[AI ENGINE] CPU threads: {_LLM_THREADS}")
 
 # ── Prompts ───────────────────────────────────────────────────────────────────
 _SYSTEM_NORMAL = (
