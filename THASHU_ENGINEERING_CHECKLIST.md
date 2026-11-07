@@ -1119,6 +1119,9 @@ Measure before optimizing:
 
 \[x] Sensor update rate (377 telemetry frames/30 s; 80 ms mean interval, 108 ms max gap; user-reported Pi test, 2026-11-08).
 
+Phase 11 answer-truncation fix (2026-11-08): In `thashu/core/ai_engine.py`, raised the output ceiling from 32 to 64 tokens so complete short answers are not cut off by the cap, while retaining concise one-sentence prompts and existing temperature/thread settings. If generation still reaches the cap mid-sentence, the code returns the existing clarification fallback instead of adding punctuation to a fragment. Added a deterministic 18-word response for clearly transcribed questions asking for Newton's three laws of motion. Raspberry Pi verification is pending; repeat the Newton question and one ordinary factual question, confirm the Newton answer includes inertia, F=ma, and equal/opposite reaction, and check latency/answer quality before accepting Phase 11.
+
+
 Phase 11 follow-up Pi run (2026-11-08; user-reported): Four clearly transcribed normal questions measured end-of-recording to first audio at 8.34 s (Newton's three laws), 6.05 s (dummy number), 5.12 s (chlorine atomic number), and 7.73 s (rain). Median was 6.89 s and maximum 8.34 s, within the 8 s median / 12 s maximum timing target. The Newton prompt was transcribed correctly, but the model again stopped mid-sentence (“...with the same”), so answer-completeness quality remains a confirmed open issue. Other transcripts in this run were garbled (including “rainbow fawn/fondant”); exclude those from content-quality evaluation and review STT separately. The deterministic 4-second command-response sound-onset target was not precisely timestamped in this log.
 
 
