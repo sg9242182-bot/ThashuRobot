@@ -1,6 +1,7 @@
 from llama_cpp import Llama
 import os
 import re
+import time
 
 from core.model_paths import model_path
 
@@ -41,6 +42,26 @@ _SYSTEM_DEEP = (
     "Do not guess unclear words or add a preamble, unrelated facts, lists, or filler."
 )
 
+def warmup_model() -> bool:
+    """Run one discarded token so first real inference avoids cold backend setup."""
+    started = time.monotonic()
+    try:
+        _llm.create_chat_completion(
+            messages=[
+                {"role": "system", "content": _SYSTEM_NORMAL},
+                {"role": "user", "content": "Say ready."},
+            ],
+            max_tokens=1,
+            temperature=0.0,
+            stop=["User:", "Assistant:", "\\n\\n"],
+        )
+        print(f"[AI ENGINE] Startup warm-up = {time.monotonic() - started:.2f}s")
+        return True
+    except Exception as exc:
+        print(f"[AI ENGINE] Startup warm-up failed: {exc}")
+        return False
+
+
 # ── Main function (same signature as before) ──────────────────────────────────
 def generate_response(prompt: str, mode: str = "normal") -> str:
     try:
@@ -64,7 +85,7 @@ def generate_response(prompt: str, mode: str = "normal") -> str:
                 text = text[len(tag):].strip()
 
         text = " ".join(text.split())
-        sentences = re.split(r"(?<=[.!?])\\s+", text)
+        sentences = re.split(r"(?<=[.!?])\s+", text)
         text = sentences[0].strip() if sentences else ""
         if text and text[-1] not in ".!?":
             text += "."
