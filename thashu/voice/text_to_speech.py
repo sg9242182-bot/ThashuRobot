@@ -183,7 +183,9 @@ def speak(text: str):
         voice_path = _voice_path(voice_name)
         if os.path.isfile(voice_path):
             try:
+                cache_started = time.monotonic()
                 play(voice_path)
+                print(f"[TTS DETAIL] Cached WAV playback = {time.monotonic() - cache_started:.2f}s")
                 return
             except Exception as exc:
                 print(f"[TTS] Cached WAV playback failed; trying Piper: {exc}")
@@ -191,7 +193,10 @@ def speak(text: str):
     with _lock:
         piper = None
         aplay = None
+        piper_started = None
+        aplay_started = None
         try:
+            piper_started = time.monotonic()
             piper = subprocess.Popen(
                 [
                     PIPER_PATH,
@@ -203,6 +208,7 @@ def speak(text: str):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
             )
+            aplay_started = time.monotonic()
             aplay = subprocess.Popen(
                 [
                     "aplay",
@@ -227,7 +233,18 @@ def speak(text: str):
 
             deadline = time.monotonic() + TTS_PROCESS_TIMEOUT_SECONDS
             piper.wait(timeout=max(0.0, deadline - time.monotonic()))
+            piper_finished = time.monotonic()
+            print(
+                "[TTS DETAIL] Piper process to EOF = "
+                f"{piper_finished - piper_started:.2f}s "
+                "(includes startup, generation, and streaming)"
+            )
             aplay.wait(timeout=max(0.0, deadline - time.monotonic()))
+            aplay_finished = time.monotonic()
+            print(
+                f"[TTS DETAIL] aplay process = "
+                f"{aplay_finished - aplay_started:.2f}s"
+            )
             if piper.returncode != 0 or aplay.returncode != 0:
                 print(
                     f"[TTS] Playback process failed "
