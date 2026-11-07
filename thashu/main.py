@@ -11,7 +11,7 @@ from voice.audio_manager  import AudioManager
 from voice.wake_word      import WakeWordEngine
 from voice.vad            import VoiceActivityDetector
 from voice.speech_to_text import transcribe, preload_model
-from voice.text_to_speech import speak, play_cached_response, start_piper
+from voice.text_to_speech import speak, play_cached_response, play_recognized_person, start_piper
 from voice.sound_player   import play
 from core.brain           import Brain
 from core.ai_engine      import warmup_model
@@ -23,7 +23,7 @@ from vision.follow_logic   import FollowLogic
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
 from hardware.servo_tracking import ServoTracker
-from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, get_enrollment_spelling, is_recognition_query, get_person_memory_request, get_event_memory_request, get_person_event_query, get_place_event_query, get_person_memory_save_confirmation, is_person_memory_query, get_person_memory_delete_command, should_announce_recognized_person
+from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, get_enrollment_spelling, is_recognition_query, get_person_memory_request, get_event_memory_request, get_person_event_query, get_place_event_query, get_person_memory_save_confirmation, is_person_memory_query, get_person_memory_delete_command
 from core.model_paths import model_path, project_path
 from memory.people import PeopleMemory
 
@@ -98,7 +98,6 @@ _memory_delete_pending = None
 _memory_pending = None
 _last_idle_recognized_person = None
 _last_idle_recognized_at = 0.0
-_last_announced_recognition_name = None
 _motion_timer = None
 _motion_generation = 0
 _motion_lock = threading.Lock()
@@ -214,19 +213,18 @@ def _rearm_wake_after_audio():
     wake.unlock()
 
 
-def _announce_recognized_person():
-    """Play the prepared recognition WAV once while vision and wake input are paused."""
-    message = "I recognize a known person."
+def _announce_recognized_person(person_name):
+    """Announce the confirmed person's saved name while vision and wake input are paused."""
+    display_name = " ".join(str(person_name or "").split())
+    message = f"I recognize {display_name}."
     transition_runtime(RuntimeState.SPEAKING)
     wake.lock()
     audio.pause()
     eyes.happy()
     try:
-        if not play_cached_response(message):
-            print(
-                "[VISION] Recognition WAV is missing; run "
-                "prepare_command_voice_cache({person_recognized}) once."
-            )
+        if not play_recognized_person(display_name):
+            print(f"[VISION] Named recognition WAV unavailable; using live Piper for {display_name}.")
+            speak(message)
         time.sleep(0.4)
     except Exception as exc:
         print(f"[VISION] Could not play recognition announcement: {exc}")
@@ -841,7 +839,6 @@ def main():
     global _identity_enrollment_state, _identity_pending_name
     global _memory_delete_pending, _memory_pending
     global _last_idle_recognized_person, _last_idle_recognized_at
-    global _last_announced_recognition_name
     print("[SYSTEM] Jarvis started")
 
     # Start systems
@@ -1675,19 +1672,16 @@ def main():
                     (
                         event.get("name")
                         for event in reversed(recognition_events)
-                        if isinstance(event, dict) and event.get("name")
+                        if isinstance(event, dict)
+                        and isinstance(event.get("name"), str)
+                        and event.get("name").strip()
+                        and event.get("name").strip().casefold() != "unknown"
                     ),
                     None,
                 )
-                if recognized_name is None and len(faces) == 1 and len(known_faces) == 1 and frame_fresh:
-                    recognized_name = known_faces[0]["name"]
-
-                if should_announce_recognized_person(
-                    recognized_name, _last_announced_recognition_name
-                ):
-                    _last_announced_recognition_name = recognized_name
-                    print(f"[VISION] Announcing newly recognized person: {recognized_name}")
-                    _announce_recognized_person()
+                if recognized_name is not None:
+                    print(f"[VISION] Announcing recognized person: {recognized_name}")
+                    _announce_recognized_person(recognized_name)
 
 
 
