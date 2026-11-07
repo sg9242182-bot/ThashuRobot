@@ -71,7 +71,7 @@ def generate_response(prompt: str, mode: str = "normal") -> str:
         if (
             "newton" in normalized_prompt
             and ("three" in normalized_prompt or "3" in normalized_prompt)
-            and "law" in normalized_prompt or "laws" in normalized_prompt
+            and ("law" in normalized_prompt or "laws" in normalized_prompt)
         ):
             if "motion" in normalized_prompt:
                 print("[FAST RESPONSE] Newton's three laws")
