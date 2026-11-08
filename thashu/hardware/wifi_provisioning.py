@@ -69,13 +69,21 @@ STATE = ProvisionState()
 
 
 def _keyfile_escape(value: str) -> str:
-    escaped = value.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
-    if escaped.startswith(" "):
-        escaped = "\\s" + escaped[1:]
-    if escaped.endswith(" "):
-        escaped = escaped[:-1] + "\\s"
-    return escaped
-
+    escaped = []
+    for index, char in enumerate(value):
+        if char == "\\":
+            escaped.append("\\\\")
+        elif char == "\n":
+            escaped.append("\\n")
+        elif char == "\r":
+            escaped.append("\\r")
+        elif char == "\t":
+            escaped.append("\\t")
+        elif char == " " and index in (0, len(value) - 1):
+            escaped.append("\\s")
+        else:
+            escaped.append(char)
+    return "".join(escaped)
 
 def _validate_credentials(raw: bytes) -> tuple[str, str]:
     if len(raw) > 512:
@@ -108,7 +116,7 @@ def _write_profile(ssid: str, password: str) -> str:
         f"ssid={_keyfile_escape(ssid)}\n"
         "\n[wifi-security]\n"
         "key-mgmt=wpa-psk\n"
-        f"psk={password}\n"
+        f"psk={_keyfile_escape(password)}\n"
         "\n[ipv4]\nmethod=auto\n"
         "\n[ipv6]\nmethod=auto\n"
     )
