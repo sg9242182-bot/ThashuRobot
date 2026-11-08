@@ -77,6 +77,13 @@ class HardwareProtocolTests(unittest.TestCase):
                 expected = vector["request_frame"].format(sequence=sequence) + chr(10)
                 self.assertEqual(self.fake.writes[-1], expected)
 
+    def test_controller_readiness_requires_ready_event(self):
+        self.assertFalse(self.transport.has_ready_event())
+        self.transport._observe_controller_event("EVENT|0|OTHER")
+        self.assertFalse(self.transport.has_ready_event())
+        self.transport._observe_controller_event("EVENT|0|READY")
+        self.assertTrue(self.transport.has_ready_event())
+
     def test_sensor_freshness_is_unknown_until_complete_frame(self):
         result = self.transport.get_sensor_freshness()
         self.assertEqual(
