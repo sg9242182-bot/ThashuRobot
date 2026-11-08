@@ -1206,9 +1206,17 @@ Implementation present on this branch:
 
 \[x] Start and stop Uvicorn with the robot runtime; stop the API before closing the shared ESP32 transport.
 
-\[x] Keep the API loopback-only by default and refuse a non-loopback bind unless both TLS certificate and private-key paths are configured.
+\[x] Keep the API loopback-only by default and refuse a non-loopback bind unless both TLS certificate and private-key paths are configured and `THASHU_API_TLS_ANDROID_TRUST_CONFIRMED=1` is explicitly set.
 
 \[x] Document private-LAN HTTPS setup and certificate trust requirements. No certificate or private key is committed.
+
+HTTPS deployment decision (2026-11-08; Tharun): **PENDING.** The robot must
+work offline across changing Wi-Fi networks and phone hotspots; no stable
+hostname or certificate source has been selected. Keep the API on loopback and
+leave `THASHU_API_TLS_ANDROID_TRUST_CONFIRMED=0`. Do not bind to a network
+interface until the hostname and Android-trusted certificate plan are agreed
+and checked. The approval setting is an operator attestation, not an automatic
+certificate trust test.
 
 \[x] Add Flutter runtime Pi address/token settings using HTTPS-only validation and platform secure storage; initialize REST and WebSocket clients from saved settings, add Android internet permission, and expose settings in the app. Integrated from Niteshvar's Phase 12 connection setup branch; Flutter dependency resolution/build and device verification remain pending.
 

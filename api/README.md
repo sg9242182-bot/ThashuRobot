@@ -301,11 +301,28 @@ Use the response's `command_id` to find its matching API log entry. A `dispatche
 
 ## Phase 12: HTTPS for phone access
 
+**Deployment is pending.** The robot needs to work offline across changing
+Wi-Fi networks and phone hotspots, and the team has not chosen a stable
+hostname or certificate source. Keep the API on its loopback default; do not
+bind it to a network interface until the hostname and an Android-trusted
+certificate are agreed and verified. The network-bind TLS-file guard only
+checks that certificate/key paths are present; it cannot establish Android
+trust.
+
 The Pi API defaults to loopback HTTP for local development. It refuses to bind
-to a non-loopback address unless both TLS files are configured. Set
-`THASHU_API_TLS_CERTFILE` and `THASHU_API_TLS_KEYFILE` to a certificate and
+to a non-loopback address unless both TLS files are configured and
+`THASHU_API_TLS_ANDROID_TRUST_CONFIRMED=1`. This last setting is an explicit
+operator attestation; it does not itself verify Android trust. Leave it at its
+default `0` until the team approves and verifies the hostname and certificate.
+Set `THASHU_API_TLS_CERTFILE` and `THASHU_API_TLS_KEYFILE` to a certificate and
 matching private key before using a LAN address. Keep the private key outside
 the repository with owner-only permissions. Use a certificate whose Subject
-Alternative Name matches the hostname or IP used by the app. The Flutter client
-must trust the issuing CA/certificate; do not disable certificate validation.
-The robot continues to work offline on the local network.
+Alternative Name matches the stable hostname the phone resolves on the chosen
+private network. The hostname and certificate issuer have not yet been assigned.
+The Flutter client currently uses Android's normal certificate validation, so
+the certificate chain must be trusted by the phone's system CA store. A private
+or self-signed CA requires an explicit, tested app trust configuration. Never
+disable certificate or hostname validation. See [Android Network Security
+Configuration](https://developer.android.com/privacy-and-security/security-config)
+and `api/PI_SETUP.md` for the setup steps. The robot continues to work offline
+on the local network.

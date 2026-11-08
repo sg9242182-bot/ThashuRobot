@@ -3,10 +3,12 @@ import os
 import asyncio
 import json
 import tempfile
+from pathlib import Path
 from uuid import UUID
 from unittest.mock import patch
 
 from api import main
+from api.config import get_api_tls_files, validate_api_tls_bind
 from thashu.core import config as robot_config
 from core.robot_manager import ControlModeError, ModeSwitchError
 from fastapi.security import HTTPAuthorizationCredentials
@@ -44,6 +46,51 @@ class ConfigurationTests(unittest.TestCase):
         with patch.dict(os.environ, {"THASHU_FACE_MATCH_DEBUG": "yes"}):
             with self.assertRaises(ValueError):
                 robot_config.face_match_debug_enabled()
+
+    def test_loopback_api_can_run_without_tls(self):
+        for host in ("localhost", "127.0.0.1", "::1"):
+            with self.subTest(host=host):
+                validate_api_tls_bind(host, None, None)
+
+    def test_non_loopback_api_requires_certificate_and_key(self):
+        for host in ("0.0.0.0", "192.168.1.20", "thashu-pi.local"):
+            with self.subTest(host=host), self.assertRaises(ValueError):
+                validate_api_tls_bind(host, None, None)
+
+        with self.assertRaisesRegex(ValueError, "Android certificate trust"):
+            validate_api_tls_bind("0.0.0.0", "/tls/pi.crt", "/tls/pi.key")
+        validate_api_tls_bind(
+            "0.0.0.0", "/tls/pi.crt", "/tls/pi.key", android_trust_confirmed=True
+        )
+
+    def test_android_trust_confirmation_defaults_off_and_is_validated(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(robot_config.api_tls_android_trust_confirmed())
+        with patch.dict(os.environ, {"THASHU_API_TLS_ANDROID_TRUST_CONFIRMED": "1"}):
+            self.assertTrue(robot_config.api_tls_android_trust_confirmed())
+        for value in ("true", "yes", "", "2"):
+            with self.subTest(value=value), patch.dict(
+                os.environ, {"THASHU_API_TLS_ANDROID_TRUST_CONFIRMED": value}
+            ):
+                with self.assertRaises(ValueError):
+                    robot_config.api_tls_android_trust_confirmed()
+
+    def test_tls_certificate_and_key_must_be_configured_together(self):
+        for environment in (
+            {"THASHU_API_TLS_CERTFILE": "/tls/pi.crt", "THASHU_API_TLS_KEYFILE": ""},
+            {"THASHU_API_TLS_CERTFILE": "", "THASHU_API_TLS_KEYFILE": "/tls/pi.key"},
+        ):
+            with self.subTest(environment=environment), patch.dict(os.environ, environment):
+                with self.assertRaises(ValueError):
+                    get_api_tls_files()
+
+        with patch.dict(os.environ, {
+            "THASHU_API_TLS_CERTFILE": "/tls/pi.crt",
+            "THASHU_API_TLS_KEYFILE": "/tls/pi.key",
+        }):
+            certfile, keyfile = get_api_tls_files()
+            expected = (Path("/tls/pi.crt"), Path("/tls/pi.key"))
+            self.assertEqual((Path(certfile), Path(keyfile)), expected)
 
 
 class FakeTransport:

@@ -80,7 +80,13 @@ paths, serial permissions, and safe restart procedure.
 
 ## 5. Prepare app access later
 
-`127.0.0.1` works only on the Pi itself. Do not expose port 8000 to the public internet. For private-LAN phone access, set `THASHU_API_HOST=0.0.0.0` and configure both TLS paths in the robot process environment. The certificate SAN must match the Pi hostname/IP entered in Flutter, and Flutter must trust its CA/certificate. Without TLS configured, the server refuses a non-loopback bind. Share any test token only through a secure channel.
+`127.0.0.1` works only on the Pi itself. Do not expose port 8000 to the public
+internet. For private-network phone access, follow the HTTPS setup below. The
+phone needs a stable hostname it can resolve, and the certificate SAN must
+match that hostname. The current Flutter app uses Android's normal certificate
+validation, so its certificate chain must be trusted by the phone. Without TLS
+configured, the server refuses a non-loopback bind. Share any test token only
+through a secure channel.
 
 ## Backend environment settings
 
@@ -91,6 +97,7 @@ Settings are read and validated by `thashu/core/config.py`:
 | `THASHU_API_HOST` | `127.0.0.1` | API bind address. Non-loopback binds require TLS files. |
 | `THASHU_API_TLS_CERTFILE` | unset | TLS certificate path; required with key for non-loopback access. |
 | `THASHU_API_TLS_KEYFILE` | unset | Matching TLS private-key path; keep it outside the repo and restrict file permissions. |
+| `THASHU_API_TLS_ANDROID_TRUST_CONFIRMED` | `0` | Explicit operator approval required for non-loopback binds after the hostname and Android certificate trust are confirmed. |
 | `THASHU_API_PORT` | `8000` | API port, from 1 through 65535. |
 | `THASHU_API_TOKEN` | unset | Bearer token; control routes fail closed until set. |
 | `THASHU_API_STATE_DB` | OS-specific persistent user state path | SQLite command/idempotency records. |
@@ -109,22 +116,54 @@ Do not enable an automatic-start service until Tharun confirms the Pi's install 
 
 ## HTTPS setup for private-LAN phone access
 
-TLS listener support is implemented, but deployment is not complete: no certificate, trust anchor, or stable Pi hostname has been selected or installed. Vishal and Tharun need to choose the stable address (a DHCP-reserved IP or a hostname that resolves on the phone's local network) and coordinate the certificate trust method with Niteshvar. The app currently requires HTTPS and uses Android's normal certificate validation; it does not disable checks or include a private CA.
+**Deployment status (2026-11-08): pending.** Tharun confirmed that the robot
+must work offline across different Wi-Fi networks and phone hotspots, and the
+team has not selected a stable hostname or certificate source. Keep
+`THASHU_API_HOST` at its loopback default. Do not bind the API to a network
+interface until the hostname is agreed and the certificate is confirmed to be
+trusted by Android. The instructions below are for a future approved setup.
 
-Create or install a certificate and matching key outside the repository. The
-certificate must include the Pi's chosen private hostname or static LAN IP as
-a Subject Alternative Name. Set the runtime environment securely, for example
-in the systemd environment file:
+First agree on a stable hostname that the phone can resolve through the
+team's private network. The hostname is not assigned in this repository yet;
+`thashu.local` is only an example and must not be used unless the chosen network
+actually resolves it. Do not choose a temporary DHCP address as the app URL.
+
+The Flutter app currently uses Android's normal certificate validation. Use a
+certificate chain trusted by the phone's system CA store and include the exact
+hostname in its Subject Alternative Name (SAN). A self-signed certificate or
+private CA is not automatically trusted by current Android app defaults; if
+the team chooses one, Niteshvar must add and test the agreed CA trust/pinning in
+the app before the phone can connect. Never disable hostname or certificate
+validation. See [Android Network Security Configuration](https://developer.android.com/privacy-and-security/security-config).
+
+After the team assigns the hostname and certificate source:
+
+1. Obtain a server certificate for that exact hostname, with its full chain and
+   matching private key.
+2. Install the certificate and key outside the repository, for example under
+   `/etc/thashu/tls/`. Restrict the private key so only the robot service
+   account can read it.
+3. Set the API bind and TLS paths in the robot process environment (or its
+   protected service environment file):
 
 ```ini
 THASHU_API_HOST=0.0.0.0
 THASHU_API_PORT=8000
 THASHU_API_TLS_CERTFILE=/etc/thashu/tls/pi-api.crt
 THASHU_API_TLS_KEYFILE=/etc/thashu/tls/pi-api.key
+THASHU_API_TLS_ANDROID_TRUST_CONFIRMED=0
 ```
 
-Restrict the private key to the robot service account. The Android app must
-trust the certificate chain or an explicitly pinned certificate; never turn
-off TLS hostname or certificate verification. Keep the API on the private LAN
-and firewall its port to trusted clients. No internet connection is required
-for the robot or this local API.
+4. Restrict port 8000 to the team's private network in the Pi firewall; do not
+   use public port forwarding.
+5. Enter `https://<agreed-hostname>:8000` in the Flutter app. Confirm that the
+   certificate is valid for this hostname and that `/health` and
+   `/api/v1/status` load before attempting any control action.
+
+The HTTPS server configuration is already wired into the robot process. It
+refuses non-loopback binding unless both certificate and key paths are set;
+it also refuses the bind unless
+`THASHU_API_TLS_ANDROID_TRUST_CONFIRMED=1`. That setting is an operator
+attestation after confirming the agreed hostname and certificate trust; it
+does not itself verify Android trust. Leave it at `0` until the team approves
+and verifies the plan. Routes and Bearer authentication are unchanged.

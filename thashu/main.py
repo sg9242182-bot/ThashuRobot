@@ -438,7 +438,6 @@ def _start_api_server():
     global _api_server, _api_thread
 
     try:
-        import ipaddress
         import sys
         from pathlib import Path
 
@@ -447,22 +446,20 @@ def _start_api_server():
             sys.path.insert(0, repo_root)
 
         import uvicorn
-        from api.config import get_api_tls_files
+        from api.config import get_api_tls_files, validate_api_tls_bind
         from api.main import app, services
-        from core.config import api_host, api_port
+        from core.config import api_host, api_port, api_tls_android_trust_confirmed
         from core.robot_manager import RobotCommandManager
 
         host = api_host()
         port = api_port()
         certfile, keyfile = get_api_tls_files()
-        try:
-            loopback = host.lower() == "localhost" or ipaddress.ip_address(host).is_loopback
-        except ValueError:
-            loopback = False
-        if not loopback and not (certfile and keyfile):
-            raise ValueError(
-                "Refusing non-loopback API without TLS; set both TLS certificate and key paths"
-            )
+        validate_api_tls_bind(
+            host,
+            certfile,
+            keyfile,
+            android_trust_confirmed=api_tls_android_trust_confirmed(),
+        )
 
         manager = RobotCommandManager(
             motor=motors,

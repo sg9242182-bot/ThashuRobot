@@ -92,3 +92,11 @@ def api_tls_keyfile() -> str | None:
     if value is not None and not value.strip():
         raise ValueError("THASHU_API_TLS_KEYFILE must not be empty")
     return str(Path(value).expanduser()) if value else None
+
+
+def api_tls_android_trust_confirmed() -> bool:
+    """Require explicit operator approval before exposing TLS to the network."""
+    value = os.environ.get("THASHU_API_TLS_ANDROID_TRUST_CONFIRMED", "0").strip()
+    if value not in {"0", "1"}:
+        raise ValueError("THASHU_API_TLS_ANDROID_TRUST_CONFIRMED must be 0 or 1")
+    return value == "1"
