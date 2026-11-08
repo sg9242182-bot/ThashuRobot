@@ -44,11 +44,23 @@ before changing the selected mode.
 |---|---|
 | `GET /health` | Returns `{"status":"ok"}` when the API process responds. This is liveness only. |
 | `GET /api/v1/status` | Reports API liveness, serial transport (`connected`, `disconnected`, or `unavailable`), `controller_readiness: "unknown"`, and the Pi control mode (`AUTO`, `MANUAL`, or `unknown` if the manager cannot start). Opening a serial port does not prove the ESP32 emitted `EVENT|0|READY`. |
+| `GET /api/v1/diagnostics` | Read-only diagnostic snapshot with API, ESP32 transport, sensor telemetry freshness, and controller readiness checks. Requires the configured Bearer token. Does not expose logs. |
 | `POST /api/v1/robot/mode` | Body: `{"mode":"MANUAL"}` or `{"mode":"AUTO"}`. Cancels motion/follow, sends STOP, waits up to 750 ms for `ACK|sequence|OK`, then selects the mode. A failed STOP leaves the prior mode selected. Selecting AUTO does not start follow. |
 | `POST /api/v1/robot/move` | Body: `{"request_id":"<UUID>","direction":"forward","speed":200}`. `request_id` is required; direction is `forward`, `backward`, `left`, or `right`; speed is an integer from 0 to 255 and defaults to 200. Requires MANUAL mode. |
 | `POST /api/v1/robot/stop` | Body: `{"request_id":"<UUID>"}`. Cancels active movement/follow output, sends the dedicated STOP command, and selects AUTO paused. It does not restart follow. |
 | `GET /api/v1/robot/commands/{command_id}` | Returns the current result for a command. Requires the same Bearer token. Results and request IDs are stored in SQLite for 24 hours and survive API restarts. |
 | `WS /api/v1/telemetry` | Bearer-authenticated server-to-client stream of timestamped ESP32 lines and `command_result` events. Raw lines are not represented as command success. |
+
+Diagnostics returns a top-level UTC `observed_at` and four named checks. Each
+check has `name`, `status` (`PASS`, `WARNING`, `FAIL`, or `UNKNOWN`),
+`observed_at`, `source`, and `reason_code`. Only the
+`sensor_telemetry` check includes `age_ms`; it is required and nullable.
+Telemetry is fresh for 1,000 ms after receipt of a complete valid sensor
+frame, including frames containing `NA` or `FAR`. Controller readiness stays
+`UNKNOWN` until the current ESP32 connection emits `EVENT|0|READY`.
+Detailed logs remain on the Pi; this API has no remote log retrieval.
+See the [diagnostics contract](../docs/development/VISHAL_DIAGNOSTICS_CONTRACT_DRAFT.md)
+for the full response schema and reason-code mappings.
 
 Successful move and STOP responses use:
 
