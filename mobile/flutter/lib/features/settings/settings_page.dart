@@ -35,7 +35,7 @@ class _SettingsPageState extends State<SettingsPage> {
     });
     try {
       final result = await _wifiClient.provision(
-        ssid: _ssid.text.trim(),
+        ssid: _ssid.text,
         password: _password.text,
       );
       if (!mounted) return;
