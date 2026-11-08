@@ -114,18 +114,33 @@ event_bus.subscribe(
 def monitor_shutdown_button():
     GPIO.setmode(GPIO.BCM)
 
-    # Internal pull-up resistor
+    # Internal pull-up resistor. A short press still shuts down; a long hold is
+    # reserved for the separately running BLE provisioning service.
     GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
     print("[SYSTEM] Shutdown button monitoring started")
+    press_started = None
+    provisioning_hold = False
 
-    while not _shutdown_event.wait(0.1):
-        # Button pressed = LOW
-        if GPIO.input(BUTTON_PIN) == GPIO.LOW:
-            print("[SYSTEM] Shutdown button pressed")
-            _shutdown_runtime("physical shutdown button")
-            os.system("sudo shutdown now")
-            break
+    while not _shutdown_event.wait(0.05):
+        pressed = GPIO.input(BUTTON_PIN) == GPIO.LOW
+        if pressed and press_started is None:
+            press_started = time.monotonic()
+            provisioning_hold = False
+            print("[SYSTEM] Physical button pressed")
+        elif pressed and not provisioning_hold:
+            if time.monotonic() - press_started >= 3.0:
+                provisioning_hold = True
+                print("[BLE SETUP] Button hold detected; pairing window is opening")
+        elif not pressed and press_started is not None:
+            if provisioning_hold:
+                print("[BLE SETUP] Button released; use the app within 60 seconds")
+            else:
+                print("[SYSTEM] Short button press; shutting down cleanly")
+                _shutdown_runtime("physical shutdown button")
+                os.system("sudo shutdown now")
+                break
+            press_started = None
 
 
 # ── Collect spoken command ─────────────────────────────────────────────────────
