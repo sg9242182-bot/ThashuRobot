@@ -1,8 +1,8 @@
-# Pi Diagnostics Contract — Review Draft
+# Pi Diagnostics Contract
 
-**Status:** Route/access, read-only behavior, status vocabulary, no-remote-logs decision, and evidence limits approved by Vishal. **Exact response schema below is proposed for Flutter alignment. Do not implement the route until Niteshvar confirms it.**
+**Status:** Approved by Vishal and confirmed by Niteshvar for Flutter alignment. The read-only authenticated route is implemented on `phase-12-pi-api-https`; verification is pending.
 
-This document does not add or authorize a route. Current API behavior remains the contract in [`api/README.md`](../../api/README.md).
+This is the approved response contract for `GET /api/v1/diagnostics`. Existing health, status, REST command, and WebSocket telemetry contracts remain unchanged; see [`api/README.md`](../../api/README.md).
 
 ## Approved constraints
 
@@ -13,7 +13,7 @@ This document does not add or authorize a route. Current API behavior remains th
 - Report API liveness, ESP32 transport connectivity, telemetry freshness, and controller readiness. Do not report unimplemented checks as passing.
 - A connected serial port is not proof of controller readiness. Keep readiness `UNKNOWN` until an ESP32 READY signal is actually observed.
 
-## Exact proposed JSON shape
+## Exact JSON shape
 
 Top-level object fields:
 
@@ -35,9 +35,9 @@ Each check object:
 
 Timestamps use UTC with a trailing `Z`, for example `2026-11-08T12:00:00Z`. The WebSocket telemetry contract remains unchanged: ESP32 line events keep `received_at`; complete sensor frames and their Pi receipt time are used for freshness. Diagnostics `observed_at` describes when the diagnostic snapshot/check was evaluated, not when a WebSocket event was sent.
 
-## Proposed example response
+## Example response
 
-This is an example of the intended response after telemetry receipt tracking is implemented. It is **not** a claim that the current API already provides this route or telemetry check.
+This example shows the approved response shape. Controller readiness remains UNKNOWN until a READY event has been observed.
 
 ```json
 {
@@ -90,6 +90,6 @@ This is an example of the intended response after telemetry receipt tracking is 
 ## Approval record
 
 - Vishal: route, Bearer authentication, read-only behavior, status vocabulary, no remote logs, evidence limits, and one-second telemetry freshness confirmed.
-- Flutter confirmation of field names, enums, reason codes, and nullability: pending.
-- Backend implementation: pending Flutter confirmation.
-- Tharun / firmware READY evidence: pending for readiness tracking; until tracked, readiness stays `UNKNOWN`.
+- Niteshvar: confirmed field names, enums, reason codes, timestamp semantics, and required-but-nullable sensor `age_ms` on 2026-11-09; no field changes requested.
+- Backend implementation: read-only Bearer-authenticated route and READY event tracking implemented; automated verification pending.
+- Tharun / firmware READY evidence: live readiness observation is not yet claimed. The Pi reports `UNKNOWN` until the READY frame is observed on the current serial connection.
