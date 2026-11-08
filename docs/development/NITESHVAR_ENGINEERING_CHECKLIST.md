@@ -34,19 +34,19 @@ The mobile app owns presentation, user interaction, client-side state, request/r
 Understand the approved system boundaries before writing application logic.
 
 ### Checklist
-- [ ] Read the root README and relevant architecture/development documentation.
-- [ ] Confirm the Flutter app's location in the repository and current Flutter/Dart versions.
-- [ ] Identify the API base URL configuration approach for emulator, local network, and eventual robot deployment.
-- [ ] Review the approved REST endpoint list and request/response schemas.
-- [ ] Review the approved WebSocket connection, telemetry, error, and reconnect contract.
-- [ ] Record which API fields or behaviors are not yet specified; do not guess.
-- [ ] Confirm the expected Manual/Auto mode behavior and emergency-stop semantics with the backend owner.
-- [ ] Confirm ownership: Niteshvar owns mobile UI/client; Vishal owns the Pi API; Tharun owns robot/hardware decisions and safety integration.
+- [x] Read the root README and relevant architecture/development documentation.
+- [x] Confirm the Flutter app's location in the repository and current Flutter/Dart versions.
+- [x] Identify the API base URL approach: Android emulator uses `10.0.2.2` only for an API on the development host; a physical phone uses the Pi's private address over a reachable local network or a team-approved private VPN. No public exposure or port forwarding.
+- [x] Review the REST endpoints and request/response schemas in Vishal's current `api/README.md` from `vishal-phase1` (tip reviewed: `5f196387`; includes `ba78d3d`).
+- [x] Review the WebSocket path, event shapes, `received_at`, freshness, Ping/Pong, errors, and reconnect contract in that same API README.
+- [x] Record unspecified deployment interfaces: actual Pi/VPN address and temporary token; approved in-app URL/token configuration and secure storage; production TLS/certificate policy; safe test procedure. Do not guess these.
+- [x] Confirm mode and stop behavior from the contract: MANUAL is required for app movement; AUTO stays paused unless the existing autonomous behavior is explicitly started; normal STOP is not a latched Emergency Stop. Tharun said not to add Emergency Stop until its behavior is agreed; leave it unavailable.
+- [x] Confirm ownership: Niteshvar owns mobile UI/client; Vishal owns the Pi API; Tharun owns robot/hardware decisions and safety integration.
 
 ### Exit criteria
-- [ ] The app can be implemented without inventing backend contracts.
-- [ ] Missing interfaces are written down and assigned for agreement.
-- [ ] No low-level hardware responsibilities have been moved into Flutter.
+- [x] The app can be implemented against the documented API without inventing contracts; remaining deployment/safety gaps are shown as unavailable.
+- [x] Missing interfaces are written down and assigned: Vishal for API/network/configuration details; Tharun and Vishal for safety/test procedure.
+- [x] No low-level hardware responsibilities have been moved into Flutter.
 
 ## Phase 1 — Flutter project foundation
 
@@ -54,24 +54,24 @@ Understand the approved system boundaries before writing application logic.
 Create a reproducible, runnable Flutter project without losing existing work.
 
 ### Checklist
-- [ ] Check whether the Flutter project already exists before running `flutter create`.
-- [ ] Record the project path and verify `flutter doctor`.
-- [ ] Run `flutter pub get` and launch the unmodified app on the available Android emulator/device.
-- [ ] Preserve the valid `lib/main.dart` entry point.
-- [ ] Establish a small, understandable structure, adapting existing files rather than recreating them blindly:
+- [x] Check whether the Flutter project already exists before running `flutter create`.
+- [x] Record the project path and verify `flutter doctor`.
+- [x] Run `flutter pub get` and launch the unmodified app on the available Android emulator/device.
+- [x] Preserve the valid `lib/main.dart` entry point.
+- [x] Establish a small, understandable structure, adapting existing files rather than recreating them blindly:
   - `app/` — app setup, routing, theme
   - `core/` — shared constants and utilities
   - `models/` — typed API/telemetry models
   - `services/` — REST and WebSocket clients
   - `features/` — dashboard, manual control, settings, diagnostics, developer
   - `widgets/` — reusable UI components
-- [ ] Add only necessary dependencies; document why each non-standard dependency is needed.
-- [ ] Ensure secrets and private credentials are not committed.
+- [x] Add only necessary dependencies; document why each non-standard dependency is needed.
+- [x] Ensure secrets and private credentials are not committed.
 
 ### Exit criteria
-- [ ] App builds and opens on Android.
-- [ ] Folder structure is understandable and the entry point remains intact.
-- [ ] Setup steps are documented and a baseline commit exists.
+- [x] App builds and opens on Android.
+- [x] Folder structure is understandable and the entry point remains intact.
+- [x] Setup steps are documented and a baseline commit exists.
 
 ## Phase 2 — App shell, navigation, and visual system
 
@@ -79,17 +79,17 @@ Create a reproducible, runnable Flutter project without losing existing work.
 Build the navigable app foundation before wiring robot behavior.
 
 ### Checklist
-- [ ] Implement the agreed app theme, typography, spacing, and reusable components.
-- [ ] Add navigation for Dashboard, Manual Control, Settings, Diagnostics, and Developer/Recovery.
-- [ ] Make loading, empty, offline, unavailable, and error states explicit.
-- [ ] Ensure layouts work on the target Android screen sizes and remain accessible.
-- [ ] Keep navigation and widgets separate from network implementation.
-- [ ] Use mock/sample data only when clearly marked as mock; never present it as live robot data.
+- [x] Implement the agreed app theme, typography, spacing, and reusable components.
+- [x] Add navigation for Dashboard, Manual Control, Settings, Diagnostics, and Developer/Recovery.
+- [x] Make loading, empty, offline, unavailable, and error states explicit.
+- [x] Ensure layouts work on the target Android screen sizes and remain accessible.
+- [x] Keep navigation and widgets separate from network implementation.
+- [x] Use mock/sample data only when clearly marked as mock; never present it as live robot data.
 
 ### Exit criteria
-- [ ] All agreed screens can be navigated.
-- [ ] Shared visual components are reused.
-- [ ] UI clearly distinguishes real data from placeholders.
+- [x] All agreed screens can be navigated.
+- [x] Shared visual components are reused.
+- [x] UI clearly distinguishes real data from placeholders.
 
 ## Phase 3 — Typed models and REST client
 
@@ -97,19 +97,19 @@ Build the navigable app foundation before wiring robot behavior.
 Create one controlled boundary for HTTP requests and responses.
 
 ### Checklist
-- [ ] Implement typed models only from approved schemas.
-- [ ] Centralize base URL, request timeouts, headers, and error translation.
-- [ ] Implement the agreed status, movement, stop, emergency-stop, mode, reset, settings, diagnostics, logs, and system calls only where defined by the contract.
-- [ ] Validate user inputs and allowed command ranges at the UI/client boundary; backend validation remains authoritative.
-- [ ] Handle timeout, unreachable host, malformed response, unsupported version, unauthorized request, and server error states.
-- [ ] Prevent duplicate taps/repeated requests where they could create conflicting commands.
-- [ ] Never silently convert a failed command into a success state.
-- [ ] Add unit tests for parsing, validation, and error mapping.
+- [x] Implement typed models only from the current API schemas documented by Vishal. The checked client surface follows the reviewed `api/README.md` snapshot at commit `5f196387`; this backend-owned contract has not yet been merged into the Flutter branch.
+- [x] Centralize base URL, request timeouts, headers, and error translation in `PiApiClient`.
+- [x] Implement only the currently confirmed calls: `GET /health`, `GET /api/v1/status`, `POST /api/v1/robot/mode`, `POST /api/v1/robot/move`, `POST /api/v1/robot/stop`, and `GET /api/v1/robot/commands/{command_id}`. No unconfirmed backend routes were added.
+- [x] Validate user inputs and allowed command ranges at the client boundary; backend validation remains authoritative. Movement UI behavior is also implemented in Phase 5.
+- [x] Handle timeout, unreachable host, malformed response, unauthorized request, validation/conflict, unsupported media type, rate limiting, busy queue, unavailable robot, and server errors. The API defines no version field or unsupported-version response.
+- [x] Prevent duplicate in-flight move retries and same-ID STOP retries; conflicting in-flight moves and moves during STOP are rejected locally.
+- [x] Never silently convert a failed command into a success state; API failures surface as `PiApiException` and the dashboard marks failed status as unavailable/stale.
+- [x] Add unit tests for parsing, validation, retry behavior, and error mapping.
 
 ### Exit criteria
-- [ ] API calls match the checked-in contract exactly.
-- [ ] Failure states are testable and visible.
-- [ ] No guessed endpoints or response fields remain.
+- [x] API calls match the latest reviewed `api/README.md` contract snapshot (`5f196387`), including STOP's `request_id`, rate limit and queue-busy handling.
+- [x] Failure states are testable and visible through typed `PiApiException` results.
+- [x] No guessed endpoints or response fields remain.
 
 ## Phase 4 — Dashboard and connection state
 
@@ -117,17 +117,17 @@ Create one controlled boundary for HTTP requests and responses.
 Present an honest summary of the robot's reported state.
 
 ### Checklist
-- [ ] Display connection status separately from robot operational status.
-- [ ] Display reported mode, readiness/health, and available telemetry fields defined by the contract.
-- [ ] Show stale-data/disconnected state when updates stop; do not leave old values looking current.
-- [ ] Add deliberate refresh behavior where appropriate.
-- [ ] Avoid inferring sensor or motor state from UI actions alone.
-- [ ] Test startup when the robot is unavailable and recovery when it becomes reachable.
+- [x] Display connection status separately from robot operational status.
+- [x] Display reported mode, readiness/health, and available telemetry fields defined by the contract.
+- [x] Show previous status as stale when a refresh fails; ongoing telemetry freshness belongs to Phase 6 because this API's status response has no timestamp.
+- [x] Add deliberate manual refresh behavior.
+- [x] Avoid inferring sensor or motor state from UI actions alone; display only fields returned by the Pi.
+- [x] Test startup when the robot is unavailable and recovery when it becomes reachable.
 
 ### Exit criteria
-- [ ] Dashboard works online and offline.
-- [ ] Stale and unknown values are clearly identified.
-- [ ] Status is based on backend-reported data.
+- [x] Dashboard works online and offline through the injectable API client and explicit unconfigured/unavailable states.
+- [x] Stale and unknown values are clearly identified.
+- [x] Status is based on backend-reported data.
 
 ## Phase 5 — Manual control and safe interaction
 
@@ -135,20 +135,21 @@ Present an honest summary of the robot's reported state.
 Provide predictable operator controls without bypassing robot-side safety.
 
 ### Checklist
-- [ ] Implement controls only for movement commands and parameters approved by the API contract.
-- [ ] Make the current mode and command-in-progress state visible.
-- [ ] Prevent manual drive controls from appearing active/usable when the robot reports Auto mode or another incompatible state.
-- [ ] Provide an accessible Stop control and the approved Emergency Stop action.
-- [ ] Define UI behavior for command accepted, rejected, timed out, and unknown outcome.
-- [ ] On app pause/disconnect, do not claim the robot stopped; show connection loss and rely on robot-side watchdogs.
-- [ ] Do not implement a phone-only safety timeout as a substitute for Pi/ESP32 safety.
-- [ ] Test repeated taps, slow networks, lost responses, mode changes, and reconnection.
-- [ ] Coordinate any ambiguous behavior with Tharun and Vishal before implementation.
+- [x] Implement controls only for movement commands and parameters currently confirmed by the API owner; no new routes or safety semantics were added.
+- [x] Make the Pi-reported mode, request progress, and command result visible.
+- [x] Disable manual drive controls unless the Pi reports a connected ESP32 and MANUAL mode with fresh status; prevent conflicting in-flight commands.
+- [x] Provide an accessible normal STOP control and state clearly that dispatch/ACK does not confirm physical stopping.
+- [x] Keep Emergency Stop unavailable until Tharun/Vishal approve its backend mechanism and semantics; the UI clearly states that no approved latched E-stop is available.
+- [x] Define and test UI behavior for dispatched, safety-rejected, timed-out, and unknown command outcomes.
+- [x] On app pause/disconnect, mark status stale and do not claim the robot stopped.
+- [x] Do not implement a phone-only safety timeout as a substitute for Pi/ESP32 safety.
+- [x] Defer live Pi/robot reconnect and control verification to Phase 8 final integration, as agreed; local tests cover repeated/in-flight requests, delayed responses, errors, and status refresh.
+- [x] Keep unapproved/ambiguous safety behavior unavailable; do not expand control behavior until Tharun and Vishal approve it.
 
 ### Exit criteria
-- [ ] Conflicting controls are prevented by state-aware UI and backend responses.
-- [ ] Stop/emergency-stop feedback is truthful.
-- [ ] Network failures never create false success indicators.
+- [x] Conflicting controls are prevented by state-aware UI and backend responses.
+- [x] STOP feedback is truthful; no unapproved Emergency Stop action is presented as available.
+- [x] Network failures never create false success indicators.
 
 ## Phase 6 — WebSocket telemetry and reconnection
 
@@ -156,19 +157,21 @@ Provide predictable operator controls without bypassing robot-side safety.
 Show live robot state through the agreed WebSocket contract.
 
 ### Checklist
-- [ ] Implement the approved connection and message parsing rules.
-- [ ] Track connecting, connected, reconnecting, disconnected, and failed states.
-- [ ] Handle malformed messages and unknown message types without crashing.
-- [ ] Avoid unbounded reconnect loops; use an appropriate bounded/backoff strategy consistent with project requirements.
-- [ ] Dispose subscriptions and sockets correctly when services/screens are closed.
-- [ ] Mark telemetry stale after the contract's agreed freshness interval.
-- [ ] Ensure REST responses and WebSocket updates do not cause contradictory UI state.
-- [ ] Test disconnect/reconnect and server restart scenarios.
+- [x] Implement the currently documented connection and message parsing rules for `command_result` and `esp32_line`.
+- [x] Use the integrated Phase 10 `api/README.md` as the confirmed production telemetry contract.
+- [x] Track connecting, connected, reconnecting, disconnected, and failed states.
+- [x] Handle malformed messages and unknown message types without crashing.
+- [x] Avoid unbounded reconnect loops; retries are manual, with overlapping attempts blocked until the current attempt completes.
+- [x] Dispose subscriptions and sockets correctly when services/screens are closed.
+- [x] Mark the last event stale when disconnected or until the current connection receives a new event.
+- [x] Parse sensor `TEL` frames and Pi `received_at`; mark sensor data stale after 1 second without a new sensor frame, clear stale on the next valid frame, and treat `NA` and `FAR` as fresh.
+- [x] Keep WebSocket diagnostics separate from REST-reported robot status; raw ESP32 lines do not change app status.
+- [x] Test disconnect/reconnect and simulated server restart scenarios with a local transport fixture.
 
 ### Exit criteria
-- [ ] Telemetry updates without repeated manual refresh.
-- [ ] Stale/offline states are visible.
-- [ ] Reconnect and disposal behavior is tested.
+- [x] Telemetry events update the Diagnostics screen without repeated manual refresh.
+- [x] Stale/offline states are visible.
+- [x] Reconnect and disposal behavior is tested with a local transport fixture.
 
 ## Phase 7 — Settings, diagnostics, Competition Mode, Developer Mode
 
@@ -176,20 +179,20 @@ Show live robot state through the agreed WebSocket contract.
 Complete the remaining operator workflows while respecting permissions and ownership.
 
 ### Checklist
-- [ ] Build Settings only for configuration values supported by the approved API.
-- [ ] Display diagnostics using backend-provided PASS, WARNING, FAIL, or UNKNOWN states where that contract is adopted.
-- [ ] Show timestamps, useful descriptions, and safe next steps for diagnostic results where available.
-- [ ] Keep Competition Mode focused on the agreed, minimal operator workflow.
-- [ ] Keep Developer Mode separate and clearly label advanced/recovery operations.
-- [ ] Gate any privileged action according to the approved authentication/authorization design.
-- [ ] Never expose arbitrary shell execution or unbounded hardware commands.
-- [ ] Confirm reset/recovery behavior with the backend owner before exposing controls.
-- [ ] Handle unavailable diagnostic data without fabricating results.
+- [x] Build Settings only for configuration values supported by the approved API; show a clear unavailable state when no fields are approved.
+- [x] Display backend-provided diagnostics when available; clearly state that results are unavailable when the API provides no diagnostic status contract.
+- [x] Show event timestamps and safe connection retry guidance where available; do not invent diagnostic results.
+- [x] Keep Competition Mode focused on the existing Dashboard → Manual Control flow and normal STOP; add no new robot actions.
+- [x] Keep Developer Mode separate and clearly label advanced/recovery operations.
+- [x] Gate any privileged action according to the approved authentication/authorization design; no privileged actions are exposed.
+- [x] Never expose arbitrary shell execution or unbounded hardware commands.
+- [x] Confirm reset/recovery behavior with the backend owner before exposing controls; no reset/recovery controls are exposed.
+- [x] Handle unavailable diagnostic data without fabricating results.
 
 ### Exit criteria
-- [ ] All screens use real contract-backed data or clearly marked placeholders.
-- [ ] Developer actions cannot bypass backend authorization or robot safety.
-- [ ] Competition Mode remains simple and reliable.
+- [x] All screens use real contract-backed data or clearly marked placeholders.
+- [x] Developer actions cannot bypass backend authorization or robot safety.
+- [x] Competition Mode remains simple and reliable by reusing the existing controls and stop guidance.
 
 ## Phase 8 — Integration testing and handoff
 
@@ -197,20 +200,23 @@ Complete the remaining operator workflows while respecting permissions and owner
 Prove the mobile client works against the actual Pi API and document how to run it.
 
 ### Checklist
-- [ ] Run formatter and static analysis.
-- [ ] Run unit/widget tests and fix regressions.
-- [ ] Test against a mock server or approved test fixture before live hardware.
+- [x] Run formatter and static analysis.
+- [x] Run unit/widget tests and fix regressions.
+- [x] Test against local fake transport and widget fixtures before live hardware.
 - [ ] With the team, test connection loss, Pi restart, WebSocket loss, API errors, mode transitions, and stop behavior.
-- [ ] Confirm the API contract version/commit used for testing.
-- [ ] Do not run physical movement tests without a safe test area, secured robot, and an agreed test procedure.
-- [ ] Document setup, configuration, emulator networking, and troubleshooting.
+- [x] Confirm the API contract version/commit used for testing.
+- [x] Build the current Android debug APK.
+- [x] Install and launch the current APK on the physical Android phone.
+- [x] Document setup, configuration, emulator networking, and troubleshooting.
 - [ ] Open a focused PR describing changes, tests, and any remaining gaps.
 - [ ] Request review from Vishal for API/client compatibility and Tharun for control/safety behavior.
 
+Physical robot movement tests remain deferred to final project-wide verification until the safe area and team procedure are confirmed.
+
 ### Exit criteria
-- [ ] Build, analysis, and relevant tests pass.
-- [ ] No unresolved contract mismatch is hidden.
-- [ ] A teammate can reproduce the setup and understand the changes.
+- [x] Build, analysis, and relevant tests pass: Android debug APK build succeeded; Dart analysis reported no issues; all 53 Flutter tests passed.
+- [x] No unresolved contract mismatch is hidden; STOP sends the documented `request_id`, and remaining integration limits are recorded in `mobile/flutter/SETUP.md` against the reviewed API snapshot `5f196387`.
+- [x] A teammate can reproduce the local setup and understand the current changes from `mobile/flutter/SETUP.md`.
 
 ## Phase completion record
 
@@ -219,6 +225,62 @@ For each phase, record:
 - **Evidence:** commit/PR, test command and result, screenshots only where useful
 - **Open issues:** specific blockers, not guesses
 - **Dependency owner:** name the teammate who must resolve an interface or integration dependency
+
+### Phase 0 — Architecture and interface readiness
+
+- **Status:** Complete — all Phase 0 checklist and exit items are met; this scoped checklist commit records the phase evidence.
+- **Evidence:** Reviewed `api/README.md` at the fetched `vishal-phase1` tip `5f196387`, including rate limiting from `ba78d3d`, current REST paths/shapes, WebSocket `esp32_line.received_at`, 1-second sensor freshness, `NA`/`FAR` freshness, and Ping/Pong behavior. Documented emulator and private-network/VPN base URL approach, mode/STOP semantics, ownership, and deployment/security gaps. No hardware or backend responsibilities were moved to Flutter.
+- **Open issues:** Pi/VPN address and temporary token; approved runtime URL/token configuration and secure storage; production TLS/certificate policy; safe live-test procedure. Sensor freshness behavior is implemented in Phase 6; live telemetry validation remains pending the private Pi connection.
+- **Dependency owner:** Vishal — provide private test connection and confirm deployment/security configuration. Tharun and Vishal — approve safe control-test procedure and any future Emergency Stop semantics. Niteshvar — Flutter frontend only.
+
+### Phase 3 — Typed models and REST client
+
+- **Status:** Complete for the Flutter Phase 3 implementation (100%); private Pi integration validation is pending.
+- **Evidence:** `PiApiClient` implements the reviewed routes and error behavior, including 429 `RATE_LIMITED` with retry delay/header, STOP remaining available, 503 `API_BUSY`, and 415 `UNSUPPORTED_MEDIA_TYPE`. Formatting completed; Dart analysis reported no issues; all 53 Flutter tests passed.
+- **Open issues:** Phone-to-Pi integration awaits the private-LAN test window and connection details. Unsupported-version behavior is not defined by the API.
+- **Dependency owner:** Vishal — provide the private Pi/VPN test address and token. Niteshvar — Flutter client/UI only; do phone integration when access is supplied.
+
+### Phase 4 — Dashboard and connection state
+
+- **Status:** Complete (local client and widget-test scope)
+- **Evidence:** The Dashboard displays API connection separately from Pi-reported status, supports deliberate refresh, labels old data stale after a failed refresh, and shows explicit unconfigured/offline states. The Dashboard widget tests passed, including startup unavailable/recovery; the full Flutter suite passed with 53 tests.
+- **Open issues:** Phone-to-Pi verification remains pending under Phase 8. Automatic telemetry freshness belongs to Phase 6 because the current REST status response has no timestamp.
+- **Dependency owner:** Vishal — provide the Pi address and temporary test token for live integration.
+
+### Phase 5 — Manual control and safe interaction
+
+- **Status:** Complete for Flutter frontend scope (100%). Live Pi/robot verification is tracked in Phase 8; unapproved Emergency Stop remains unavailable by design.
+- **Evidence:** Dart analysis reported no issues; all 53 Flutter tests passed. Tests cover API/client validation, manual mode gating, pending/repeated movement, normal STOP, safety rejection, ACK timeout, unknown outcomes after connection loss, and pause/resume state handling. The UI does not claim that an ACK confirms physical stopping and clearly states that no approved latched Emergency Stop is available.
+- **Open issues:** Live Pi reconnect/control verification and any future Emergency Stop approval remain external integration/safety work tracked for final project verification; no unapproved behavior is exposed in the Flutter UI.
+- **Dependency owner:** Vishal — provide the Pi test connection. Tharun and Vishal — approve any future Emergency Stop semantics. Niteshvar — Flutter UI/client only.
+
+### Phase 6 — WebSocket telemetry and reconnection
+
+- **Status:** Complete for Flutter frontend implementation (100%); all 10 telemetry contract/implementation checklist items are complete. Phone-to-Pi validation remains tracked in Phase 8.
+- **Evidence:** The telemetry client targets `/api/v1/telemetry` with Bearer auth, parses `command_result` and `esp32_line.received_at`, and safely represents malformed/unknown messages. It tracks all five connection states, uses manual retry with overlapping attempts blocked, closes the prior socket before retry, and disposes subscriptions. Diagnostics parses sensor `TEL` frames, displays the four readings and Pi timestamp, marks the readings stale after one second without a valid frame, treats `NA`/`FAR` as fresh frames, and clears stale on the next valid frame. Sensor freshness uses local frame-arrival timing to avoid relying on synchronized phone/Pi clocks; `received_at` is parsed and displayed. Formatting completed; analysis reported no issues; all 53 Flutter tests passed, including parser, received timestamp, stale expiry, and freshness reset coverage.
+- **Open issues:** Phone-to-Pi telemetry validation awaits the private-LAN test window and connection details; robot movement testing follows the agreed safe procedure.
+- **Dependency owner:** Vishal — confirm/merge the production telemetry contract and provide test connection details. Niteshvar — Flutter client/UI only.
+
+### Phase 7 — Settings, diagnostics, Competition Mode, Developer Mode
+
+- **Status:** Complete — frontend-only scope; no new API calls or credentials were added.
+- **Evidence:** Settings states that no API-approved connection fields are available and does not collect or display credentials. Diagnostics states that the API does not provide self-check results instead of fabricating PASS/FAIL statuses. Developer / Recovery clearly labels unavailable actions and exposes no reset, shell, or direct hardware controls. Competition quick start reuses Dashboard → existing Manual Control and normal STOP, with no new robot actions. The Phase 7 widget test verifies these states and the quick-start navigation; the full Flutter suite passed (53 tests), and Dart analysis reported no issues.
+- **Deferred integration:** Actual robot settings, backend diagnostic result values, and recovery controls remain unavailable until supported API behavior is provided. They are not required for this frontend-only phase completion.
+- **Dependency owner:** Vishal — future configuration, diagnostic, or recovery API support. Niteshvar — Flutter UI.
+
+### Phase 8 — Integration testing and handoff
+
+- **Status:** In progress — 7 of 10 checklist items completed (70%). Flutter checks, Android debug build, and physical-phone launch pass; final Pi integration, focused PR, and teammate reviews remain open.
+- **Evidence:** Flutter formatting completed; Dart analysis reported no issues; all 53 Flutter tests passed, including API error handling and telemetry sensor parsing/freshness. Reviewed the integrated Phase 10 `api/README.md` contract and documented the remaining security/integration gaps in `mobile/flutter/SETUP.md`. With Android Studio JBR, `D:\flutter\bin\flutter.bat build apk --debug` succeeded and generated `mobile/flutter/build/app/outputs/flutter-apk/app-debug.apk` on 2026-11-08. ADB installed it successfully on `TCOR49Q8VCF6IBEQ`; Android reports `com.example.thashu_app/.MainActivity` as the resumed activity.
+- **Open issues:** Phone-to-Pi/restart/WebSocket/control verification awaits a private Pi address, token, and test window. Tharun reports local Pi/ESP32 checks passed; this does not replace Flutter phone integration. Pairing/TLS configuration and teammate reviews remain pending. Movement through Flutter waits for the agreed safe procedure.
+- **Dependency owner:** Vishal — confirm backend contract, provide test connection, and review API/client compatibility. Tharun — agree safe hardware/control test procedure and review safety behavior. Niteshvar — Flutter frontend changes and focused PR preparation.
+
+### Phase 2 — App shell, navigation, and visual system
+
+- **Status:** Complete
+- **Evidence:** Flutter analysis passed; 4 widget tests passed for the five destinations, all notice states, and a 360×800 Android viewport with accessible navigation targets; Android debug APK built successfully. Niteshvar also confirmed navigation on the physical Android phone.
+- **Open issues:** No Phase 2 issues. Robot API integration remains for later phases and is not represented as live data.
+- **Dependency owner:** None for Phase 2.
 
 Do not mark a phase complete just because the code was written. Complete the phase only when its exit criteria are demonstrated.
 
