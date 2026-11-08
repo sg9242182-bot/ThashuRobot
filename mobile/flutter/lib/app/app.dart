@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../features/dashboard/dashboard_page.dart';
@@ -6,6 +8,7 @@ import '../features/diagnostics/telemetry_diagnostics_page.dart';
 import '../features/manual_control/manual_control_page.dart';
 import '../features/settings/settings_page.dart';
 import '../services/pi_api_client.dart';
+import '../services/pi_connection_settings.dart';
 import '../services/pi_telemetry_client.dart';
 import '../widgets/zeno_offline_notice.dart';
 
@@ -37,6 +40,13 @@ class ZenoNavigationShell extends StatefulWidget {
 
 class _ZenoNavigationShellState extends State<ZenoNavigationShell> {
   int _selectedIndex = 0;
+  final PiConnectionSettings _settings = PiConnectionSettings();
+  late PiApiClient? _apiClient = widget.apiClient;
+  late PiTelemetryClient? _telemetryClient = widget.telemetryClient;
+  String? _connectionAddress;
+  bool _tokenConfigured = false;
+  bool _ownsClients = false;
+  bool _loadingSettings = false;
 
   static const List<String> _titles = [
     'Dashboard',
@@ -61,19 +71,123 @@ class _ZenoNavigationShellState extends State<ZenoNavigationShell> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    if (widget.apiClient == null) unawaited(_loadConnection());
+  }
+
+  Future<void> _loadConnection() async {
+    if (mounted) setState(() => _loadingSettings = true);
+    try {
+      final address = await _settings.readAddress();
+      final token = await _settings.readToken();
+      if (address != null && address.isNotEmpty && token != null && token.isNotEmpty) {
+        final uri = Uri.parse(address);
+        final api = PiApiClient(baseUri: uri, bearerToken: token);
+        final telemetry = PiTelemetryClient(baseUri: uri, bearerToken: token);
+        if (!mounted) {
+          api.close();
+          unawaited(telemetry.dispose());
+          return;
+        }
+        setState(() {
+          _connectionAddress = address;
+          _tokenConfigured = true;
+          _apiClient = api;
+          _telemetryClient = telemetry;
+          _ownsClients = true;
+        });
+      } else if (mounted) {
+        setState(() {
+          _connectionAddress = address;
+          _tokenConfigured = token?.isNotEmpty ?? false;
+        });
+      }
+    } catch (_) {
+      // Keep the app offline if secure settings are unavailable or malformed.
+    } finally {
+      if (mounted) setState(() => _loadingSettings = false);
+    }
+  }
+
+  Future<String?> _saveConnection(String address, String token) async {
+    try {
+      final existingToken = await _settings.readToken();
+      final effectiveToken = token.trim().isEmpty ? existingToken : token.trim();
+      if (effectiveToken == null || effectiveToken.isEmpty) {
+        return 'Enter the Pi Bearer token before saving.';
+      }
+
+      await _settings.save(baseUrl: address, bearerToken: token);
+      final uri = Uri.parse(address.trim().replaceFirst(RegExp(r'/+$'), ''));
+      final api = PiApiClient(baseUri: uri, bearerToken: effectiveToken);
+      final telemetry = PiTelemetryClient(baseUri: uri, bearerToken: effectiveToken);
+      _disposeOwnedClients();
+
+      if (!mounted) {
+        api.close();
+        unawaited(telemetry.dispose());
+        return 'Settings saved securely.';
+      }
+      setState(() {
+        _connectionAddress = uri.toString();
+        _tokenConfigured = true;
+        _apiClient = api;
+        _telemetryClient = telemetry;
+        _ownsClients = true;
+      });
+      return 'Saved securely. Check Dashboard and Diagnostics to verify the Pi connection. No robot command was sent.';
+    } catch (error) {
+      return 'Could not save connection settings: $error';
+    }
+  }
+
+  Future<void> _clearConnection() async {
+    await _settings.clear();
+    _disposeOwnedClients();
+    if (!mounted) return;
+    setState(() {
+      _connectionAddress = null;
+      _tokenConfigured = false;
+      _apiClient = widget.apiClient;
+      _telemetryClient = widget.telemetryClient;
+      _ownsClients = false;
+    });
+  }
+
+  void _disposeOwnedClients() {
+    if (!_ownsClients) return;
+    _apiClient?.close();
+    final telemetry = _telemetryClient;
+    if (telemetry != null) unawaited(telemetry.dispose());
+    _ownsClients = false;
+  }
+
+  @override
+  void dispose() {
+    _disposeOwnedClients();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('ZENO controller')),
       body: _selectedIndex == 0
-          ? DashboardPage(apiClient: widget.apiClient)
+          ? DashboardPage(apiClient: _apiClient)
           : _selectedIndex == 1
-          ? ManualControlPage(apiClient: widget.apiClient)
+          ? ManualControlPage(apiClient: _apiClient)
           : _selectedIndex == 2
           ? SettingsPage(
+              initialAddress: _connectionAddress,
+              tokenConfigured: _tokenConfigured,
+              isLoading: _loadingSettings,
+              onSaveConnection: _saveConnection,
+              onClearConnection: _clearConnection,
               onOpenManualControl: () => setState(() => _selectedIndex = 1),
             )
           : _selectedIndex == 3
-          ? TelemetryDiagnosticsPage(client: widget.telemetryClient)
+          ? TelemetryDiagnosticsPage(client: _telemetryClient)
           : _selectedIndex == 4
           ? const DeveloperRecoveryPage()
           : Center(
@@ -119,9 +233,7 @@ class _ZenoNavigationShellState extends State<ZenoNavigationShell> {
                             ),
                             decoration: BoxDecoration(
                               color: _selectedIndex == index
-                                  ? Theme.of(context)
-                                        .colorScheme
-                                        .secondaryContainer
+                                  ? Theme.of(context).colorScheme.secondaryContainer
                                   : Colors.transparent,
                               borderRadius: BorderRadius.circular(24),
                             ),
