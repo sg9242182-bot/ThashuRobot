@@ -30,8 +30,8 @@
     },
     {
       "name": "servo center",
-      "payload": "SERVO|PAN_TILT|90|90",
-      "request_frame": "CMD|{sequence}|SERVO|PAN_TILT|90|90",
+      "payload": "SERVO|MOVE|90|90|220",
+      "request_frame": "CMD|{sequence}|SERVO|MOVE|90|90|220",
       "response_frame": "ACK|{sequence}|OK"
     }
   ]
