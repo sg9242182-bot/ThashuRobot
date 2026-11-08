@@ -3,6 +3,7 @@ import threading
 import os
 import atexit
 import statistics
+import random
 
 import numpy as np
 import RPi.GPIO as GPIO
@@ -23,7 +24,7 @@ from vision.follow_logic   import FollowLogic
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
 from hardware.servo_tracking import ServoTracker
-from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, get_enrollment_spelling, is_recognition_query, get_person_memory_request, get_event_memory_request, get_person_event_query, get_place_event_query, get_person_memory_save_confirmation, is_person_memory_query, get_person_memory_delete_command
+from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, get_enrollment_spelling, is_recognition_query, get_person_memory_request, get_event_memory_request, get_person_event_query, get_place_event_query, get_person_memory_save_confirmation, is_person_memory_query, get_person_memory_delete_command, get_roaming_command
 from core.model_paths import model_path, project_path
 from memory.people import PeopleMemory
 
@@ -58,6 +59,16 @@ FOLLOW_OBSTACLE_CLEARANCE_MM = 300
 PENDING_MEMORY_CONFIRM_SECONDS = 120.0
 FACE_ENROLLMENT_SAMPLE_COUNT = 15
 FACE_ENROLLMENT_TIMEOUT_SECONDS = 180.0
+
+ROAM_PWM = 100
+ROAM_FORWARD_PULSE_SECONDS = 0.25
+ROAM_REVERSE_PULSE_SECONDS = 0.20
+ROAM_TURN_PULSE_SECONDS = 0.30
+ROAM_SENSOR_MAX_AGE_SECONDS = 0.75
+ROAM_OBSTACLE_MM = 300
+ROAM_GAZE_SECONDS = 3.0
+ROAM_GAZE_INTERVAL_SECONDS = 5.0
+ROAM_RETRY_DELAY_SECONDS = 0.6
 
 # ── Shutdown Button ───────────────────────────────────────────────────────────
 BUTTON_PIN = 17
@@ -98,6 +109,17 @@ _memory_delete_pending = None
 _memory_pending = None
 _last_idle_recognized_person = None
 _last_idle_recognized_at = 0.0
+_roaming_active = False
+_roaming_start_pending = False
+_roaming_phase = "idle"
+_roaming_next_at = 0.0
+_roaming_motion_active = False
+_roaming_motion_direction = None
+_roaming_obstacle_event = False
+_roaming_reverse_attempts = 0
+_roaming_gaze_track_id = None
+_roaming_gaze_until = 0.0
+_roaming_next_gaze_at = 0.0
 _motion_timer = None
 _motion_generation = 0
 _motion_lock = threading.Lock()
@@ -419,6 +441,8 @@ def _shutdown_runtime(reason="process exit"):
         _shutdown_event.set()
 
     print(f"[SYSTEM] Shutting down cleanly ({reason})")
+    if _roaming_active or _roaming_motion_active:
+        _stop_roaming("shutdown")
     try:
         follow_logic.stop()
     except Exception as exc:
@@ -763,7 +787,7 @@ def update_idle_face_tracking(snapshot):
     """Track one visible face with the camera servos while idle, independent of identity."""
     global _auto_face_track_id
 
-    if runtime.current != RuntimeState.IDLE or follow_logic.enabled:
+    if runtime.current != RuntimeState.IDLE or follow_logic.enabled or _roaming_active:
         return
 
     observed_at = (snapshot or {}).get("observed_at")
@@ -807,9 +831,167 @@ def update_idle_face_tracking(snapshot):
     servo_tracker.update(x, y, frame_w, frame_h)
 
 
+def _roam_clear(value):
+    return value == "FAR" or (isinstance(value, (int, float)) and value > ROAM_OBSTACLE_MM)
+
+
+def _stop_roaming(reason):
+    global _roaming_active, _roaming_motion_active, _roaming_motion_direction
+    global _roaming_phase, _roaming_next_at, _roaming_gaze_track_id
+    _roaming_active = False
+    _roaming_motion_active = False
+    _roaming_motion_direction = None
+    _roaming_phase = "idle"
+    _roaming_next_at = 0.0
+    _roaming_gaze_track_id = None
+    sequence = stop_motion()
+    servo_tracker.stop_search()
+    print(f"[ROAM] Stopped ({reason}); STOP sequence {sequence}")
+
+
+def _start_roaming():
+    global _roaming_active, _roaming_phase, _roaming_next_at
+    global _roaming_reverse_attempts, _roaming_next_gaze_at, _roaming_obstacle_event
+    if not motors.gpio.is_connected():
+        print("[ROAM] Start rejected; ESP32 link is unavailable")
+        return False
+    if follow_logic.enabled:
+        follow_logic.stop()
+        servo_tracker.stop_search()
+    stop_motion()
+    _roaming_active = True
+    _roaming_phase = "evaluate"
+    _roaming_next_at = time.monotonic()
+    _roaming_reverse_attempts = 0
+    _roaming_next_gaze_at = time.monotonic()
+    _roaming_obstacle_event = False
+    print("[ROAM] Enabled: bounded sensor-gated motion; wake word or STOP ends roaming")
+    return True
+
+
+def _roam_pulse(direction, duration):
+    global _roaming_motion_active, _roaming_motion_direction, _roaming_phase, _roaming_next_at
+    seq = start_bounded_motion(direction, ROAM_PWM, duration_override=duration)
+    if seq is None:
+        _roaming_phase = "wait"
+        _roaming_next_at = time.monotonic() + ROAM_RETRY_DELAY_SECONDS
+        print(f"[ROAM] {direction} unavailable; remaining stopped")
+        return False
+    ack = motors.gpio.wait_for_ack(seq, timeout=0.2)
+    if ack != "OK":
+        stop_motion()
+        _roaming_phase = "wait"
+        _roaming_next_at = time.monotonic() + ROAM_RETRY_DELAY_SECONDS
+        print(f"[ROAM] {direction} rejected ({ack or 'ACK_TIMEOUT'}); remaining stopped")
+        return False
+    _roaming_motion_active = True
+    _roaming_motion_direction = direction
+    _roaming_phase = "moving"
+    _roaming_next_at = time.monotonic() + duration
+    print(f"[ROAM] {direction} pulse accepted (PWM {ROAM_PWM}, {duration:.2f}s)")
+    return True
+
+
+def _update_roaming_gaze(snapshot, now):
+    global _roaming_gaze_track_id, _roaming_gaze_until, _roaming_next_gaze_at
+    people = [
+        p for p in ((snapshot or {}).get("persons") or [])
+        if isinstance(p, dict) and p.get("track_id") is not None
+        and not p.get("ambiguous", True) and p.get("center")
+    ]
+    if _roaming_gaze_track_id is not None and now < _roaming_gaze_until:
+        target = next((p for p in people if p.get("track_id") == _roaming_gaze_track_id), None)
+        if target:
+            frame_w = (snapshot or {}).get("frame_size", (640, 480))[0]
+            servo_tracker.update_pan_only(target["center"][0], frame_w)
+        return
+    if now < _roaming_next_gaze_at:
+        return
+    if not people:
+        _roaming_gaze_track_id = None
+        _roaming_next_gaze_at = now + ROAM_GAZE_INTERVAL_SECONDS
+        return
+    target = random.choice(people)
+    _roaming_gaze_track_id = target["track_id"]
+    _roaming_gaze_until = now + ROAM_GAZE_SECONDS
+    _roaming_next_gaze_at = now + ROAM_GAZE_INTERVAL_SECONDS
+    frame_w = (snapshot or {}).get("frame_size", (640, 480))[0]
+    servo_tracker.update_pan_only(target["center"][0], frame_w)
+    print(f"[ROAM] Briefly looking toward person track={_roaming_gaze_track_id}")
+
+
+def update_roaming(snapshot):
+    """Perform short IDLE-only roaming pulses after checking fresh safety telemetry."""
+    global _roaming_phase, _roaming_next_at, _roaming_motion_active
+    global _roaming_motion_direction, _roaming_reverse_attempts, _roaming_obstacle_event
+    if not _roaming_active or runtime.current != RuntimeState.IDLE:
+        return
+    now = time.monotonic()
+    _update_roaming_gaze(snapshot, now)
+    if _roaming_obstacle_event:
+        _roaming_obstacle_event = False
+        _roaming_motion_active = False
+        _roaming_motion_direction = None
+        stop_motion()
+        _roaming_phase = "evaluate"
+        _roaming_next_at = now + 0.15
+    if _roaming_motion_active:
+        if now < _roaming_next_at:
+            return
+        direction = _roaming_motion_direction
+        stop_motion()
+        _roaming_motion_active = False
+        _roaming_motion_direction = None
+        _roaming_phase = "evaluate"
+        _roaming_next_at = now + 0.20
+        print(f"[ROAM] {direction} pulse complete; waiting for fresh telemetry")
+        return
+    if now < _roaming_next_at:
+        return
+    sensors = motors.gpio.get_sensor_snapshot(max_age=ROAM_SENSOR_MAX_AGE_SECONDS)
+    if sensors is None:
+        _roaming_phase = "wait"
+        _roaming_next_at = now + ROAM_RETRY_DELAY_SECONDS
+        print("[ROAM] Sensor data missing or stale; staying stopped")
+        return
+    left, center, right = (sensors.get(k) for k in ("tof_left_mm", "tof_center_mm", "tof_right_mm"))
+    front_clear = all(_roam_clear(v) for v in (left, center, right))
+    rear_clear = _roam_clear(sensors.get("rear_mm"))
+    if front_clear:
+        _roaming_reverse_attempts = 0
+        _roam_pulse("FORWARD", ROAM_FORWARD_PULSE_SECONDS)
+        return
+    if rear_clear and _roaming_reverse_attempts < 2:
+        _roaming_reverse_attempts += 1
+        print(f"[ROAM] Front blocked; brief reverse attempt {_roaming_reverse_attempts}/2")
+        _roam_pulse("BACKWARD", ROAM_REVERSE_PULSE_SECONDS)
+        return
+    if rear_clear:
+        left_clear, right_clear = _roam_clear(left), _roam_clear(right)
+        if left_clear or right_clear:
+            if left_clear and not right_clear:
+                turn = "LEFT"
+            elif right_clear and not left_clear:
+                turn = "RIGHT"
+            else:
+                lm = float("inf") if left == "FAR" else float(left)
+                rm = float("inf") if right == "FAR" else float(right)
+                turn = "LEFT" if lm >= rm else "RIGHT"
+            print(f"[ROAM] Front blocked; trying the clearer {turn.lower()} side")
+            _roam_pulse(turn, ROAM_TURN_PULSE_SECONDS)
+            return
+    _roaming_phase = "wait"
+    _roaming_next_at = now + ROAM_RETRY_DELAY_SECONDS
+    print("[ROAM] No sensor-cleared route; staying stopped and rechecking")
+
+
 def process_safety_events():
-    global _follow_safety_notice_latched
+    global _follow_safety_notice_latched, _roaming_obstacle_event
     for event in motors.gpio.drain_events():
+        if event in ("EVENT|0|STOP|OBSTACLE", "EVENT|0|BLOCKED|OBSTACLE") and _roaming_active:
+            _roaming_obstacle_event = True
+            print("[ROAM] ESP32 safety stop; silently rechecking clearances")
+            continue
         if event == "EVENT|0|STOP|OBSTACLE":
             _follow_safety_notice_latched = "obstacle_blocked"
             # This is an asynchronous ESP32 safety event; announce it in IDLE too,
@@ -839,6 +1021,7 @@ def main():
     global _identity_enrollment_state, _identity_pending_name
     global _memory_delete_pending, _memory_pending
     global _last_idle_recognized_person, _last_idle_recognized_at
+    global _roaming_start_pending
     print("[SYSTEM] Jarvis started")
 
     # Start systems
@@ -974,6 +1157,9 @@ def main():
             # continue to listen for the wake word.
             wake_triggered = not _follow_search_active and wake.process(chunk)
             if wake_triggered:
+                if _roaming_active:
+                    _stop_roaming("wake word")
+                _roaming_start_pending = False
                 # Snapshot identity before the interaction pauses vision and STT delays dispatch.
                 recognized_person_at_wake = _recently_recognized_person()
                 transition_runtime(RuntimeState.WAKE_DETECTED)
@@ -1053,6 +1239,11 @@ def main():
                         "delete my saved memories",
                     ]
 
+                if expected_phrases is None and recognized_person_at_wake is None:
+                    expected_phrases = [
+                        "start roaming", "start roaming mode", "roaming mode",
+                        "roam around the room", "stop roaming", "stop roaming mode",
+                    ]
                 text = transcribe(raw_audio, expected_phrases=expected_phrases)
 
                 stt_time = time.time() - stt_start
@@ -1523,6 +1714,13 @@ def main():
                         )
                     else:
                         response = "I don't recognize a confirmed face right now."
+                elif (roaming_command := get_roaming_command(text)) == "START":
+                    _roaming_start_pending = True
+                    response = "Roaming mode will start after I finish speaking. Say Hey Thashu to stop it."
+                elif roaming_command == "STOP":
+                    _roaming_start_pending = False
+                    _stop_roaming("voice command")
+                    response = "Roaming mode is off."
                 elif (follow_command := get_follow_command(text)) == "STOP":
                     follow_logic.stop()
                     servo_tracker.stop_search()
@@ -1554,6 +1752,9 @@ def main():
                             print(f"[COMMAND] SERVO LOOK {look_direction} failed: {look_ack or 'ACK_TIMEOUT'}")
                             response = "I couldn't reach the servo controller."
                 elif is_stop_command(text):
+                    _roaming_start_pending = False
+                    if _roaming_active:
+                        _stop_roaming("voice STOP")
                     follow_logic.stop()
                     servo_tracker.stop_search()
                     print("[COMMAND] Explicit STOP recognized; sending directly to ESP32")
@@ -1663,7 +1864,12 @@ def main():
 
                 transition_runtime(RuntimeState.RETURN_TO_IDLE)
                 transition_runtime(RuntimeState.IDLE)
+                if _roaming_start_pending:
+                    _roaming_start_pending = False
+                    _start_roaming()
             elif not _follow_search_active:
+                if _roaming_active:
+                    update_roaming(vis)
                 # Consume all queued transitions and compare the newest identity
                 # with the last one announced. Reacquiring the same face after a
                 # conversation or a brief confidence flicker must stay silent.
