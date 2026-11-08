@@ -20,7 +20,8 @@ from dbus_next.errors import DBusError
 from bluez_peripheral.agent import NoIoAgent
 from bluez_peripheral.advert import Advertisement
 from bluez_peripheral.gatt.characteristic import CharacteristicFlags as CharFlags
-from bluez_peripheral.gatt import Service, characteristic
+from bluez_peripheral.gatt.characteristic import characteristic
+from bluez_peripheral.gatt.service import Service
 from bluez_peripheral.util import Adapter, get_message_bus
 
 
