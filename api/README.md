@@ -46,8 +46,9 @@ before changing the selected mode.
 | `GET /api/v1/status` | Reports API liveness, serial transport (`connected`, `disconnected`, or `unavailable`), `controller_readiness: "unknown"`, and the Pi control mode (`AUTO`, `MANUAL`, or `unknown` if the manager cannot start). Opening a serial port does not prove the ESP32 emitted `EVENT|0|READY`. |
 | `GET /api/v1/diagnostics` | Read-only diagnostic snapshot with API, ESP32 transport, sensor telemetry freshness, and controller readiness checks. Requires the configured Bearer token. Does not expose logs. |
 | `POST /api/v1/robot/mode` | Body: `{"mode":"MANUAL"}` or `{"mode":"AUTO"}`. Cancels motion/follow, sends STOP, waits up to 750 ms for `ACK|sequence|OK`, then selects the mode. A failed STOP leaves the prior mode selected. Selecting AUTO does not start follow. |
-| `POST /api/v1/robot/move` | Body: `{"request_id":"<UUID>","direction":"forward","speed":200}`. `request_id` is required; direction is `forward`, `backward`, `left`, or `right`; speed is an integer from 0 to 255 and defaults to 200. Requires MANUAL mode. |
-| `POST /api/v1/robot/stop` | Body: `{"request_id":"<UUID>"}`. Cancels active movement/follow output, sends the dedicated STOP command, and selects AUTO paused. It does not restart follow. |
+| `POST /api/v1/robot/move` | Body: `{"request_id":"<UUID>","direction":"forward","speed":200}`. Requires MANUAL mode and a connected authenticated telemetry WebSocket. A successful response uses its `command_id` as the `lease_id`; it dispatches the motor command once and starts a short-lived lease. |
+| `POST /api/v1/robot/commands/{lease_id}/renew` | Body: `{"request_id":"<UUID>"}`. Authenticated and rate-limited with move/mode. Renews only the active lease; it never sends or replays a motor command. Each renewal tick uses a new request ID. Retrying the same ID may refresh the still-active lease, but cannot revive an expired or STOP-cancelled lease. |
+| `POST /api/v1/robot/stop` | Body: `{"request_id":"<UUID>"}`. Invalidates the movement lease before dispatching the dedicated STOP. Preserves the selected mode and does not restart motion. |
 | `GET /api/v1/robot/commands/{command_id}` | Returns the current result for a command. Requires the same Bearer token. Results and request IDs are stored in SQLite for 24 hours and survive API restarts. |
 | `WS /api/v1/telemetry` | Bearer-authenticated server-to-client stream of timestamped ESP32 lines and `command_result` events. Raw lines are not represented as command success. |
 
@@ -62,10 +63,15 @@ Detailed logs remain on the Pi; this API has no remote log retrieval.
 See the [diagnostics contract](../docs/development/VISHAL_DIAGNOSTICS_CONTRACT_DRAFT.md)
 for the full response schema and reason-code mappings.
 
-Successful move and STOP responses use:
+A successful move response includes the command ID as its lease ID.
+STOP responses have no active lease:
 
 ```json
-{"request_id":"<uuid>","command_id":"<uuid>","command":"forward","status":"dispatched","control_mode":"MANUAL","error_code":null,"timestamp":"<UTC ISO 8601>"}
+{"request_id":"<uuid>","command_id":"<uuid>","lease_id":"<uuid>","command":"forward","status":"dispatched","control_mode":"MANUAL","error_code":null,"timestamp":"<UTC ISO 8601>"}
+```
+
+```json
+{"request_id":"<uuid>","command_id":"<uuid>","lease_id":null,"command":"stop","status":"dispatched","control_mode":"MANUAL","error_code":null,"timestamp":"<UTC ISO 8601>"}
 ```
 
 Move and STOP requests require a UUID `request_id`, created once per logical
@@ -73,6 +79,10 @@ action. If the app retries the same action with that ID, the API returns the
 original `command_id` and latest known result without sending the command
 again. Reusing an ID for a different action returns HTTP 409
 (`REQUEST_ID_REUSED`). A new STOP press must use a new ID to send a fresh STOP.
+A movement response also returns `lease_id`, equal to its `command_id`.
+Each lease renewal tick has its own UUID request ID. Retrying the same renewal
+ID for the same lease refreshes expiry only while that lease is active; it
+never dispatches motion and cannot revive an expired or cancelled lease.
 The Pi persists request IDs, action payloads, command IDs, and latest results in
 SQLite for 24 hours. If the Pi/API restarts while a command is marked
 `dispatching` or is awaiting its ESP32 ACK, its result is changed to `unknown` with
@@ -89,6 +99,24 @@ Example STOP request:
 
 ```json
 {"request_id":"c1234567-89ab-4cde-8f01-23456789abcd"}
+```
+
+Example lease renewal:
+
+```http
+POST /api/v1/robot/commands/<lease_id>/renew
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+```json
+{"request_id":"d1234567-89ab-4cde-8f01-23456789abcd"}
+```
+
+A successful renewal returns HTTP 200:
+
+```json
+{"lease_id":"<command_id>","status":"active","expires_at":"<UTC ISO 8601>"}
 ```
 
 A successful mode switch returns after the ESP32 acknowledges STOP:
@@ -137,16 +165,17 @@ the 1-second sensor freshness timer.
 Move, mode, and STOP requests share a serialized command queue. STOP has
 priority over queued move/mode requests. It waits for the command already in
 progress to finish; it does not interrupt serial work already underway.
-Move and mode share one token bucket for the configured Bearer token: capacity
-10, refilling at 5 requests per second. The bucket is shared across every app
-using that token. A limited request returns HTTP 429 with
+Move, mode, and lease-renewal requests share one token bucket for the configured
+Bearer token: capacity 10, refilling at 5 requests per second. A renewal every
+250 ms uses 4 requests per second, within the configured rate; the bucket is
+shared across every app using that token. A limited request returns HTTP 429 with
 `detail.error_code: "RATE_LIMITED"`, `retry_after_seconds`, and a `Retry-After`
 header, before entering the command queue. STOP remains authenticated, bypasses
 this limit, and has priority over queued move/mode requests. It waits for the
 command already in progress to finish; it does not interrupt serial work
-already underway. Move and mode requests that wait more than 2 seconds return
-HTTP 503 with `detail.error_code: "API_BUSY"` and `retryable: true`; they have
-not been dispatched. STOP is not rejected by that queue-wait timeout. Retrying
+already underway. Move, mode, and lease-renewal requests that wait more than
+2 seconds return HTTP 503 with `detail.error_code: "API_BUSY"` and
+`retryable: true`; they have not been dispatched. STOP is not rejected by that queue-wait timeout. Retrying
 a move or STOP must reuse its original `request_id`. Hardware dispatch runs in
 a worker thread and is not cancelled when an HTTP client disconnects, so a
 request timeout never cancels a motor operation that may already have reached
@@ -164,20 +193,27 @@ command ID. Requests are not queued for later delivery.
 The manager starts in `AUTO` paused. App movement requires an explicit switch
 to `MANUAL`; a move request in another mode receives HTTP 409. Auto movement
 is enabled only when the existing autonomous follow behavior is explicitly
-started. A mode switch cancels pending movement and follow timers, sends STOP,
-and changes mode only after the ESP32 ACKs `OK`; choosing AUTO never starts
-autonomous movement. If STOP cannot be confirmed during a switch, the old mode
-remains selected, the Pi sends a best-effort second STOP, and all movement stays
-blocked until a later mode switch receives a STOP ACK.
+started. A mode switch cancels pending movement, invalidates any lease, sends
+STOP, and changes mode only after the ESP32 ACKs `OK`; choosing AUTO never
+starts autonomous movement. If STOP cannot be confirmed during a switch, the
+old mode remains selected, the Pi sends a best-effort second STOP, and movement
+stays blocked until a later mode switch receives a STOP ACK.
 
 The Pi also requires a sensor snapshot no older than 750 ms. `FAR` is clear;
 `NA`, missing, or stale readings block movement and trigger a STOP. Forward, left, and right
 commands check all three front ToF sensors; backward checks the rear sensor.
 Numeric readings must be greater than 300 mm. The ESP32 retains final authority
-and may still reject a command. STOP cancels pending movement and follow output,
-returns the selected mode to AUTO paused, and does not restart follow.
-Moves that were waiting while a STOP or mode switch completed are rejected
-with HTTP 409 instead of being sent under the new state.
+and may still reject a command. A movement lease expires after a provisional
+500 ms without renewal; the app renews every 250 ms while a movement control is
+held. On expiry, the Pi invalidates the lease and sends normal STOP without
+changing the selected mode. If the authenticated telemetry WebSocket disconnects,
+new moves and renewals are rejected; an active lease expires and sends STOP.
+Reconnect does not resume or renew an old lease; the app must issue a fresh move.
+An explicit STOP invalidates the lease before sending STOP and preserves mode.
+The 500 ms value remains provisional until a restrained low-speed stopping
+distance test. Do not treat it as hardware-verified. Moves waiting behind a
+STOP or mode switch remain serialized; the selected state must be rechecked
+before dispatch.
 
 The current protocol has no latched Emergency Stop command. Do not claim a
 latched Emergency Stop until the ESP32 protocol and firmware add and verify
