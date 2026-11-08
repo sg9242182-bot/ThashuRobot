@@ -1,6 +1,6 @@
 # Pi Diagnostics Contract
 
-**Status:** Approved by Vishal and confirmed by Niteshvar for Flutter alignment. The read-only authenticated route is implemented on `phase-12-pi-api-https`; verification is pending.
+**Status:** Approved by Vishal and confirmed by Niteshvar for Flutter alignment. The read-only authenticated route is implemented on `phase-12-pi-api-https`; GitHub Actions run 42512821791 passed the API and Pi hardware-protocol suites (73 tests).
 
 This is the approved response contract for `GET /api/v1/diagnostics`. Existing health, status, REST command, and WebSocket telemetry contracts remain unchanged; see [`api/README.md`](../../api/README.md).
 
@@ -91,5 +91,5 @@ This example shows the approved response shape. Controller readiness remains UNK
 
 - Vishal: route, Bearer authentication, read-only behavior, status vocabulary, no remote logs, evidence limits, and one-second telemetry freshness confirmed.
 - Niteshvar: confirmed field names, enums, reason codes, timestamp semantics, and required-but-nullable sensor `age_ms` on 2026-11-09; no field changes requested.
-- Backend implementation: read-only Bearer-authenticated route and READY event tracking implemented; automated verification pending.
+- Backend implementation: read-only Bearer-authenticated route and READY event tracking implemented; GitHub Actions run 42512821791 passed 73 tests.
 - Tharun / firmware READY evidence: live readiness observation is not yet claimed. The Pi reports `UNKNOWN` until the READY frame is observed on the current serial connection.
