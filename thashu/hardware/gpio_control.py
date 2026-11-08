@@ -378,6 +378,26 @@ class GPIOControl:
                 return None
             return dict(snapshot)
 
+    def get_sensor_freshness(self, max_age=1.0):
+        """Report observation and age of the latest complete valid sensor frame.
+
+        This diagnostics-oriented view does not replace the stricter
+        get_sensor_snapshot default used by safety decisions. Age is measured
+        from Pi receipt using a monotonic clock. Freshness is None until a
+        complete valid frame has been received since startup.
+        """
+        now = time.monotonic()
+        with self._state_lock:
+            snapshot = self._sensor_snapshot
+            if snapshot is None:
+                return {"observed": False, "fresh": None, "age_ms": None}
+            age_seconds = max(0.0, now - snapshot["received_at"])
+            return {
+                "observed": True,
+                "fresh": age_seconds <= max_age,
+                "age_ms": int(age_seconds * 1000),
+            }
+
     # ------------------------------------------------------------------
     # Lifecycle / status
     # ------------------------------------------------------------------
