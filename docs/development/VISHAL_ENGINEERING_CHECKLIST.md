@@ -34,19 +34,21 @@ The Pi owns high-level robot services, API orchestration, command validation, st
 Identify current implementation, approved interfaces, and unresolved decisions before backend changes.
 
 ### Checklist
-- [ ] Read README, architecture docs, protocol docs, hardware notes, and current Pi/ESP32/mobile implementation.
-- [ ] Confirm actual repository paths and existing code before creating duplicate modules.
-- [ ] Inventory API routes already implemented and distinguish them from planned routes.
-- [ ] Inventory the current Pi–ESP32 transport, parser, command format, and telemetry format from code and hardware evidence.
-- [ ] Create a contract-gap list: endpoint/schema, mode transition, command acknowledgement, timeout, heartbeat, error taxonomy, versioning, and auth.
-- [ ] Agree mobile-facing API behavior with Niteshvar and hardware/protocol behavior with Tharun.
-- [ ] Record unresolved decisions in repository documentation or a focused issue.
-- [ ] Do not claim an interface is approved solely because it appears in an AI-generated draft.
+- [x] Read README, architecture docs, protocol docs, hardware notes, and current Pi/ESP32/mobile implementation.
+- [x] Confirm actual repository paths and existing code before creating duplicate modules.
+- [x] Inventory API routes already implemented and distinguish them from planned routes.
+- [x] Inventory the current Pi–ESP32 transport, parser, command format, and telemetry format from code and hardware evidence.
+- [x] Create a contract-gap list: endpoint/schema, mode transition, command acknowledgement, timeout, heartbeat, error taxonomy, versioning, and auth.
+- [x] Obtain Niteshvar's explicit review/approval of the production API contract. Tharun confirmed on 2026-11-09 that Niteshvar agreed to the production API contract; Flutter PR #9 is merged against `api/README.md`. Hardware/protocol behavior with Tharun is confirmed for deployed protocol v0.
+- [x] Record unresolved decisions in repository documentation or a focused issue.
+- [x] Do not claim an interface is approved solely because it appears in an AI-generated draft.
+
+**Phase 0 completion evidence (2026-11-09):** Tharun reports Niteshvar explicitly agreed to the production API contract; this closes the last open Phase 0 approval item. Existing behavior, unresolved decisions, and owners were documented before changes.
 
 ### Exit criteria
-- [ ] Existing behavior and gaps are documented.
-- [ ] Owners are identified for each unresolved shared contract.
-- [ ] No incompatible replacement contract is introduced.
+- [x] Existing behavior and gaps are documented.
+- [x] Owners are identified for each unresolved shared contract.
+- [x] No incompatible replacement contract is introduced.
 
 ## Phase 1 — Raspberry Pi service foundation
 
@@ -54,18 +56,23 @@ Identify current implementation, approved interfaces, and unresolved decisions b
 Create a maintainable, testable backend structure and reproducible local development environment.
 
 ### Checklist
-- [ ] Confirm supported Python/runtime versions and Raspberry Pi OS assumptions from the repository.
-- [ ] Establish or verify virtual environment, dependency management, configuration loading, and test setup.
-- [ ] Keep API routes, robot orchestration, ESP32 communication, safety policy, telemetry, diagnostics, and logging in separate modules consistent with the existing repository structure.
-- [ ] Centralize configuration; keep credentials and secrets out of source control.
-- [ ] Add structured logging with severity, timestamp, component, correlation/request ID where practical, and sanitized error details.
-- [ ] Define startup/shutdown behavior and graceful handling of unavailable hardware.
-- [ ] Add baseline tests and document development commands.
+- [x] Confirm supported Python/runtime versions and Raspberry Pi OS assumptions from the repository. Pi Setup records Raspberry Pi OS Bookworm and Python 3.11.2; the API supports Python 3.10 or newer.
+- [x] Set up dependency management, environment-backed API token configuration, and automated test commands.
+- [x] Create and verify the virtual environment on the target Pi. Tharun ran the robot/API in the Raspberry Pi virtual environment and live health/status/command requests succeeded on 2026-11-08.
+- [x] Complete the Phase 1 API module, logging, and service-foundation review and verification. Tharun reports Phase 1 is complete; this status is based on his team verification report.
+- [x] Keep the API token in environment configuration, outside source control.
+- [x] Centralize and validate backend environment settings (API host/port, API token/state DB, model/data/cache paths, Piper binary, face-match debug flag) in `thashu/core/config.py`; invalid ports, blank path overrides, and invalid debug values fail explicitly.
+- [x] Add structured JSON logs for move/stop outcomes with severity, timestamp, component, command ID, and sanitized error codes.
+- [x] Complete the Phase 1 structured-logging review and verification. Tharun reports the remaining Phase 1 work is complete; preserve the existing privacy requirements for logs.
+- [x] Document startup/shutdown commands and handle unavailable serial hardware without crashing the API; status reports unavailable transport. Full startup behavior on the target Pi has not been verified.
+- [x] Add baseline API/protocol tests and document development test commands.
 
 ### Exit criteria
-- [ ] Backend starts reproducibly in development.
-- [ ] Configuration and logs are consistent.
-- [ ] Hardware absence or disconnection produces a controlled degraded state rather than a crash loop.
+- [x] API backend starts in local development and inside the target Pi robot process; live `/health`, `/api/v1/status`, mode, and STOP requests succeeded on 2026-11-08.
+- [x] Phase 1 service configuration, logging, and module review are complete per Tharun's verification report.
+- [x] Software handles unavailable/disconnected serial hardware as a degraded state; API status tests cover unavailable transport. Physical Pi behavior remains unverified.
+
+**Phase 1 evidence (updated 2026-11-08):** Tharun reports the Phase 1 review and verification are complete. Target-Pi environment, API health/status, authenticated mode/STOP requests, configuration, and service lifecycle were verified. Exact test output and deployed revision were not included with the latest completion confirmation.
 
 ## Phase 2 — Pi–ESP32 protocol contract and transport
 
@@ -73,20 +80,26 @@ Create a maintainable, testable backend structure and reproducible local develop
 Make hardware communication explicit and reliable before exposing movement controls.
 
 ### Checklist
-- [ ] Collaborate with Tharun to approve transport, framing, message schema, and protocol version.
-- [ ] Define command IDs/correlation, acknowledgements, response/error codes, telemetry fields, timestamps/sequence handling, and compatibility behavior as needed.
-- [ ] Define serial connection startup, partial reads, message boundaries, malformed frames, buffer limits, and reconnect behavior.
-- [ ] Define heartbeat/timeout responsibilities and safe behavior on missed heartbeat or lost connection.
-- [ ] Validate incoming messages and reject unknown or out-of-range commands.
-- [ ] Ensure only one authoritative path dispatches hardware commands.
-- [ ] Separate transport parsing from robot behavior and API code.
-- [ ] Add protocol documentation and test fixtures shared with the ESP32 implementation.
-- [ ] Do not invent pin mappings or assume the current motor driver; the ESP32/hardware owner owns those details.
+- [x] Collaborate with Tharun to approve transport, framing, message schema, and deployed protocol revision. Tharun confirmed v0 command, ACK, telemetry, and event frames on 2026-11-03; CMD/ACK carry no version field.
+- [x] Define command correlation by sequence, acknowledgements, response/error codes, telemetry fields, and compatibility behavior. Record that v0 has no session-aware stale-ACK protection or duplicate-command detection.
+- [x] Define serial connection startup, partial reads, message boundaries, malformed frames, buffer limits, and reconnect behavior. Pi buffering, frame-size limits, and reconnect handling are implemented and documented.
+- [x] Define heartbeat/timeout responsibilities and safe behavior on missed heartbeat or lost connection.
+- [x] Validate incoming messages and reject unknown or out-of-range commands in the integrated ESP32 parser; Pi ACK handling matches the v0 sequence number.
+- [x] Ensure one authoritative robot manager path dispatches API movement commands to the motor service.
+- [x] Separate transport parsing from robot behavior and API code.
+- [x] Document the deployed v0 protocol.
+- [x] Add a language-neutral shared-vector file and connect Pi tests to it. `thashu/tests/protocol_vectors.json` is consumed by `test_shared_protocol_v0_vectors` in `thashu/tests/test_hardware_protocol.py`; Tharun ran `PYTHONPATH=thashu python -m unittest thashu.tests.test_hardware_protocol` on commit `f3a646f` and all 6 tests passed. The vectors cover Pi transmit frames; the ESP32 parser does not yet consume the fixture, and no standalone parser harness is present.
+- [x] Do not invent pin mappings or assume the current motor driver; the integrated firmware remains the hardware source of truth.
+- [x] Record Tharun-reported v0 parser checks: HEARTBEAT, STOP, EYES, invalid EYES argument, unknown command, partial frames, oversized-frame discard, and recovery. Unsupported-version testing does not apply to v0.
+- [x] Verify live ESP32 telemetry and heartbeat on the Pi without reflashing. Tharun's 2026-11-08 run received 377 telemetry frames (mean interval 80 ms, longest 108 ms) and 20/20 HEARTBEAT ACKs (mean round trip 41.3 ms, maximum 66.6 ms). The API STOP command lookup also returned `acknowledged` with no error.
+- [x] Complete Phase 2 serial-protocol verification with Tharun. Tharun reports Phase 2 testing is complete; do not require a standalone ESP32 parser harness. Exact test output and firmware/backend revisions were not included with the latest completion confirmation.
 
 ### Exit criteria
-- [ ] Both sides agree on the same versioned contract.
-- [ ] Valid, invalid, partial, stale, and unknown messages have defined behavior.
-- [ ] Transport failures are detectable and cannot silently appear as success.
+- [x] Both sides agree on the same documented v0 contract; CMD/ACK frames do not include a protocol-version field.
+- [x] Valid, invalid, partial, stale, and unknown messages have defined behavior.
+- [x] Transport failures are detectable and cannot silently appear as success.
+
+**Phase 2 evidence (updated 2026-11-09):** Tharun reports Phase 2 testing is complete. Existing records cover deployed v0 framing, Pi protocol/shared-vector tests, firmware parser checks, live telemetry/heartbeat, and STOP acknowledgement. Exact test output and firmware/backend revisions were not included with the latest completion confirmation. No reflash is planned. Protocol v0 correlates ACKs by sequence only and cannot distinguish a delayed ACK after Pi restart if that sequence is reused.
 
 ## Phase 3 — Robot manager, modes, and command lifecycle
 
@@ -94,19 +107,27 @@ Make hardware communication explicit and reliable before exposing movement contr
 Provide one authoritative high-level component for robot state and command coordination.
 
 ### Checklist
-- [ ] Implement or verify a single robot manager/service that owns the high-level mode and command lifecycle.
-- [ ] Define legal mode transitions with Tharun and the team; Manual and Auto must not control the robot simultaneously.
-- [ ] Route movement commands through validation, mode checks, dispatch, acknowledgement, and result reporting.
-- [ ] Define safe-stop transition behavior before switching modes.
-- [ ] Handle command timeout, rejection, duplicate request, stale state, and uncertain dispatch outcomes explicitly.
-- [ ] Make Emergency Stop priority and semantics consistent with the approved safety contract.
-- [ ] Do not let API routes independently mutate low-level state or bypass the robot manager.
-- [ ] Keep hardware-specific timing and motor logic on the ESP32.
+- [x] Verify the single Pi-side `RobotCommandManager` path for API and voice motor commands; tests cover validation, mode tracking, and transport failure.
+- [x] Implement explicit MANUAL/AUTO mode selection; switch only after STOP receives `ACK|sequence|OK`, cancel Pi movement/follow work first, and keep AUTO paused until the existing follow behavior is explicitly started.
+- [x] Confirm the mode-transition behavior with Tharun on the integrated robot. Tharun reports the Manual/Auto switching and STOP behavior are working; this is team-reported physical verification.
+- [x] Route movement commands through request validation, manager dispatch, ACK tracking, and command-result reporting.
+- [x] Require a STOP `ACK|sequence|OK` before the first Manual move; tests verify a rejected/missing ACK prevents the move and an already-Manual move does not repeat the transition STOP.
+- [x] Require fresh, relevant sensor readings for each movement: 750 ms maximum age, `FAR` is clear, missing/`NA`/stale values block and send STOP, front ToF for forward/turns, rear sensor for backward, and numeric clearance above 300 mm.
+- [x] Cancel timer/follow work on STOP or mode switch and reject app moves queued against an older control-state version.
+- [x] Implement STOP in either mode so it cancels Pi movement/follow work, sends dedicated STOP, selects AUTO paused, and never resumes autonomously.
+- [x] Handle ESP32 ACK rejection and timeout in the command-result flow.
+- [x] Require UUID `request_id` values for move and STOP. Persist request ID, action, command ID, and latest result in SQLite for 24 hours; matching retries reuse the command, mismatched actions return 409, and interrupted dispatches become unknown without replay. Tests cover move/STOP retries, process restarts, ACK results, and action conflicts.
+- [x] Define stale-state and uncertain-dispatch recovery: an in-flight request found after restart returns `unknown` with its original command ID and is never resent. Expired records can be treated as new requests after 24 hours.
+- [x] Confirm Emergency Stop is outside Phase 3 scope by team decision. Phase 3 does not implement or claim a latched ESP32 Emergency Stop.
+- [x] Keep API routes from independently mutating low-level state; they dispatch through the robot manager.
+- [x] Keep motor actuation and hardware safety logic on the ESP32; the Pi sends semantic commands.
 
 ### Exit criteria
-- [ ] One authoritative service coordinates commands and mode state.
-- [ ] Conflicting commands are rejected or safely serialized according to the contract.
-- [ ] API responses distinguish known success from unknown outcome.
+- [x] One authoritative Pi service coordinates API/voice motor dispatch and its tracked mode.
+- [x] Conflicting commands are safely serialized through the shared manager lock; a concurrent move/STOP test verifies they do not overlap.
+- [x] API responses distinguish Pi dispatch from later ESP32 ACK, safety rejection, or timeout.
+
+**Phase 3 evidence (2026-11-05):** The shared Pi manager now supports an explicit mode request, waits for `ACK|sequence|OK` before switching, inhibits movement after an unconfirmed mode STOP, and keeps AUTO paused until the existing follow-start action enables it. User-requested STOP cancels Pi movement/follow timers and returns to AUTO paused. Movement dispatch requires a fresh sensor snapshot (maximum 750 ms), treats `FAR` as clear, blocks `NA`/missing/stale readings and sends STOP, uses the existing 300 mm threshold, and leaves ESP32 safety interlocks authoritative. Control-state versions prevent a movement waiting across a STOP/mode change from being dispatched afterward. Bounded follow pulses stop without canceling the explicitly started Auto session. After persistent request ID idempotency was added for move and STOP, the combined API and robot-manager suites passed 61/61. In-flight records found after restart return unknown and are never replayed. Tharun reports the integrated mode/STOP behavior is working. Emergency Stop was removed from Phase 3 scope by team decision; no latched Emergency Stop behavior is claimed.
 
 ## Phase 4 — REST API
 
