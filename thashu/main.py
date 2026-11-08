@@ -117,6 +117,7 @@ _roaming_motion_active = False
 _roaming_motion_direction = None
 _roaming_obstacle_event = False
 _roaming_reverse_attempts = 0
+_roaming_forward_pulses = 0
 _roaming_gaze_track_id = None
 _roaming_gaze_until = 0.0
 _roaming_next_gaze_at = 0.0
@@ -851,7 +852,8 @@ def _stop_roaming(reason):
 
 def _start_roaming():
     global _roaming_active, _roaming_phase, _roaming_next_at
-    global _roaming_reverse_attempts, _roaming_next_gaze_at, _roaming_obstacle_event
+    global _roaming_reverse_attempts, _roaming_forward_pulses
+    global _roaming_next_gaze_at, _roaming_obstacle_event
     if not motors.gpio.is_connected():
         print("[ROAM] Start rejected; ESP32 link is unavailable")
         return False
@@ -863,6 +865,7 @@ def _start_roaming():
     _roaming_phase = "evaluate"
     _roaming_next_at = time.monotonic()
     _roaming_reverse_attempts = 0
+    _roaming_forward_pulses = 0
     _roaming_next_gaze_at = time.monotonic()
     _roaming_obstacle_event = False
     print("[ROAM] Enabled: bounded sensor-gated motion; wake word or STOP ends roaming")
@@ -923,7 +926,8 @@ def _update_roaming_gaze(snapshot, now):
 def update_roaming(snapshot):
     """Perform short IDLE-only roaming pulses after checking fresh safety telemetry."""
     global _roaming_phase, _roaming_next_at, _roaming_motion_active
-    global _roaming_motion_direction, _roaming_reverse_attempts, _roaming_obstacle_event
+    global _roaming_motion_direction, _roaming_reverse_attempts, _roaming_forward_pulses
+    global _roaming_obstacle_event
     if not _roaming_active or runtime.current != RuntimeState.IDLE:
         return
     now = time.monotonic()
@@ -959,7 +963,14 @@ def update_roaming(snapshot):
     rear_clear = _roam_clear(sensors.get("rear_mm"))
     if front_clear:
         _roaming_reverse_attempts = 0
-        _roam_pulse("FORWARD", ROAM_FORWARD_PULSE_SECONDS)
+        _roaming_forward_pulses += 1
+        if _roaming_forward_pulses >= 4:
+            _roaming_forward_pulses = 0
+            turn = random.choice(("LEFT", "RIGHT"))
+            print(f"[ROAM] Clear path; taking a random {turn.lower()} turn")
+            _roam_pulse(turn, ROAM_TURN_PULSE_SECONDS)
+        else:
+            _roam_pulse("FORWARD", ROAM_FORWARD_PULSE_SECONDS)
         return
     if rear_clear and _roaming_reverse_attempts < 2:
         _roaming_reverse_attempts += 1
