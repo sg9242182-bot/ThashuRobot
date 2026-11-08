@@ -63,7 +63,11 @@ class _SettingsPageState extends State<SettingsPage> {
       );
       if (!mounted) return;
       setState(() => _message = message);
-      _tokenController.clear();
+      if (message == null || !message.startsWith('Could not') && !message.startsWith('Enter ')) {
+        _tokenController.clear();
+      }
+    } catch (error) {
+      if (mounted) setState(() => _message = 'Could not save connection: $error');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -83,6 +87,8 @@ class _SettingsPageState extends State<SettingsPage> {
         _tokenController.clear();
         _message = 'Saved Pi connection settings were removed from this phone.';
       });
+    } catch (error) {
+      if (mounted) setState(() => _message = 'Could not clear connection settings: $error');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
