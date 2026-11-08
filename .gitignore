@@ -14,3 +14,7 @@ models/
 # Local test/runtime artifacts
 .pytest_cache/
 .mypy_cache/
+# Flutter app sources and local Android build output
+!mobile/flutter/lib/models/
+!mobile/flutter/lib/models/*.dart
+/mobile/flutter/android/build/
