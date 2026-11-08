@@ -300,3 +300,15 @@ Example:
 ```
 
 Use the response's `command_id` to find its matching API log entry. A `dispatched` log still means the Pi wrote the command to the serial transport; it does not confirm ESP32 acknowledgement or physical movement.
+
+
+## Phase 12: HTTPS for phone access
+
+The Pi API defaults to loopback HTTP for local development. It refuses to bind
+to a non-loopback address unless both TLS files are configured. Set
+`THASHU_API_TLS_CERTFILE` and `THASHU_API_TLS_KEYFILE` to a certificate and
+matching private key before using a LAN address. Keep the private key outside
+the repository with owner-only permissions. Use a certificate whose Subject
+Alternative Name matches the hostname or IP used by the app. The Flutter client
+must trust the issuing CA/certificate; do not disable certificate validation.
+The robot continues to work offline on the local network.
