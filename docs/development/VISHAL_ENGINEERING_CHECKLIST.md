@@ -59,11 +59,11 @@ Create a maintainable, testable backend structure and reproducible local develop
 - [x] Confirm supported Python/runtime versions and Raspberry Pi OS assumptions from the repository. Pi Setup records Raspberry Pi OS Bookworm and Python 3.11.2; the API supports Python 3.10 or newer.
 - [x] Set up dependency management, environment-backed API token configuration, and automated test commands.
 - [x] Create and verify the virtual environment on the target Pi. Tharun ran the robot/API in the Raspberry Pi virtual environment and live health/status/command requests succeeded on 2026-11-08.
-- [ ] Keep API routes, robot orchestration, ESP32 communication, safety policy, telemetry, diagnostics, and logging in separate modules consistent with the existing repository structure. The broader diagnostics/logging separation still needs review.
+- [ ] Complete the API module/logging review. Source review on 2026-11-09 found `api/main.py` currently owns request models, `ApiServices`, queue/rate-limit helpers, HTTP middleware/routes, and WebSocket telemetry in one file; `RobotCommandManager`, `GPIOControl`, and validated config are separate. Decide and implement a narrow module split for the API service/telemetry boundary with tests; do not create diagnostics modules before a diagnostics contract exists.
 - [x] Keep the API token in environment configuration, outside source control.
 - [x] Centralize and validate backend environment settings (API host/port, API token/state DB, model/data/cache paths, Piper binary, face-match debug flag) in `thashu/core/config.py`; invalid ports, blank path overrides, and invalid debug values fail explicitly.
 - [x] Add structured JSON logs for move/stop outcomes with severity, timestamp, component, command ID, and sanitized error codes.
-- [ ] Extend structured logging across other backend services and request flows. API HTTP requests, robot-process API lifecycle, and ESP32 transport connection/rejection/fault events now emit JSON records. Voice, vision, and user-interaction output still includes console messages and needs a scoped logging review.
+- [ ] Extend structured logging beyond API/transport events. Source review on 2026-11-09 confirms `thashu/main.py` and `thashu/vision/vision_core.py` still use direct `print()` for command, runtime, recognition, and vision events. Scope an incremental migration that preserves readable terminal output and avoids logging face images, embeddings, API tokens, or remembered private content.
 - [x] Document startup/shutdown commands and handle unavailable serial hardware without crashing the API; status reports unavailable transport. Full startup behavior on the target Pi has not been verified.
 - [x] Add baseline API/protocol tests and document development test commands.
 
@@ -306,7 +306,7 @@ For each phase, record:
 | Phase | Status | Remaining item(s) |
 |---|---|---|
 | 0 — Architecture/contracts | Complete | Niteshvar's explicit API-contract agreement was confirmed by Tharun on 2026-11-09; implementation alignment is also evidenced by merged Flutter PR #9. |
-| 1 — Service foundation | In progress | Review broader API module separation and voice/vision logging; capture startup/shutdown against the deployed revision. |
+| 1 — Service foundation | In progress | Split API service/telemetry responsibilities from `api/main.py`, migrate voice/vision `print()` events to safe structured logs, and record Pi startup/shutdown revision. |
 | 2 — Serial protocol | In progress | Capture READY, raw telemetry, and heartbeat ACK with revisions. Pi status and STOP ACK now verified during the Phase 12 run. |
 | 3 — Robot manager/modes | In progress | Latched Emergency Stop requires a tested ESP32 protocol/firmware change before Pi support. |
 | 4 — REST API | Complete for component implementation | Live Pi/client verification is in Phase 9. |
