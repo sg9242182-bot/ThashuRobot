@@ -696,12 +696,14 @@ class ApiServices:
                     reason_code="TRANSPORT_STATE_UNAVAILABLE",
                 ))
 
-            freshness_observed_at = _utc_timestamp()
+            freshness_observed_at, freshness_monotonic = _diagnostic_clock_sample()
             try:
                 freshness_reader = getattr(transport, "get_sensor_freshness", None)
                 if not callable(freshness_reader):
                     raise RuntimeError("sensor freshness is unavailable")
-                freshness = await asyncio.to_thread(freshness_reader, 1.0)
+                freshness = await asyncio.to_thread(
+                    freshness_reader, 1.0, freshness_monotonic
+                )
                 if not isinstance(freshness, dict):
                     raise TypeError("sensor freshness has an invalid shape")
                 observed = freshness.get("observed")
@@ -785,6 +787,15 @@ class ApiServices:
 
 def _utc_timestamp():
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _diagnostic_clock_sample():
+    wall_before = datetime.now(timezone.utc)
+    monotonic_sample = time.monotonic()
+    wall_after = datetime.now(timezone.utc)
+    wall_sample = wall_before + (wall_after - wall_before) / 2
+    timestamp = wall_sample.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return timestamp, monotonic_sample
 
 
 services = ApiServices()
