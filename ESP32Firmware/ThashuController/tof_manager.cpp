@@ -3,18 +3,23 @@
 #include <Arduino.h>
 #include <Wire.h>
 
-namespace {
-constexpr uint8_t XSHUT_PINS[ToFManager::SENSOR_COUNT] = {4, 16, 17};
-constexpr uint8_t I2C_ADDRESSES[ToFManager::SENSOR_COUNT] = {0x30, 0x31, 0x32};
-constexpr uint8_t OUT_OF_RANGE_STATUS = 4;
+bool ToFManager::selectMuxChannel(uint8_t channel) {
+    if (channel > 7) return false;
+    Wire.beginTransmission(MUX_ADDRESS);
+    Wire.write(static_cast<uint8_t>(1U << channel));
+    return Wire.endTransmission() == 0;
+}
+
+bool ToFManager::deselectMux() {
+    Wire.beginTransmission(MUX_ADDRESS);
+    Wire.write(static_cast<uint8_t>(0));
+    return Wire.endTransmission() == 0;
 }
 
 bool ToFManager::begin() {
     Wire.begin(SDA_PIN, SCL_PIN);
 
     for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
-        pinMode(XSHUT_PINS[i], OUTPUT);
-        digitalWrite(XSHUT_PINS[i], LOW);
         hasData[i] = false;
         outOfRange[i] = false;
         valid[i] = false;
@@ -23,90 +28,120 @@ bool ToFManager::begin() {
         rangeStatus[i] = 255;
         lastReadingTime[i] = 0;
     }
+
+    // Keep the parent I2C bus isolated from all mux channels while the three
+    // front sensors are brought up and assigned their existing addresses.
+    if (!deselectMux()) return false;
+
+    for (uint8_t i = 0; i < 3; ++i) {
+        pinMode(FRONT_XSHUT_PINS[i], OUTPUT);
+        digitalWrite(FRONT_XSHUT_PINS[i], LOW);
+    }
     delay(STARTUP_DELAY_MS);
 
-    for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
-        if (!initializeSensor(static_cast<SensorId>(i), XSHUT_PINS[i], I2C_ADDRESSES[i])) {
+    for (uint8_t i = 0; i < 3; ++i) {
+        if (!initializeFrontSensor(static_cast<SensorId>(i),
+                                   FRONT_XSHUT_PINS[i],
+                                   FRONT_I2C_ADDRESSES[i])) {
+            deselectMux();
             return false;
         }
     }
 
-    // Start all sensors in timed continuous mode. This starts measurements
-    // without making update() wait for each ranging operation to finish.
-    for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
-        sensors[i].startRangeContinuous(CONTINUOUS_PERIOD_MS);
+    // Each rear sensor stays at its default 0x29 address on a dedicated mux
+    // channel, so no rear XSHUT wiring or address reassignment is required.
+    for (uint8_t i = 0; i < 3; ++i) {
+        if (!initializeRearSensor(static_cast<SensorId>(REAR_LEFT + i),
+                                  REAR_MUX_CHANNELS[i])) {
+            deselectMux();
+            return false;
+        }
     }
 
-    return true;
+    if (!deselectMux()) return false;
+    for (uint8_t i = 0; i < 3; ++i) {
+        sensors[i].startRangeContinuous(CONTINUOUS_PERIOD_MS);
+    }
+    for (uint8_t i = 0; i < 3; ++i) {
+        if (!selectMuxChannel(REAR_MUX_CHANNELS[i])) return false;
+        sensors[REAR_LEFT + i].startRangeContinuous(CONTINUOUS_PERIOD_MS);
+    }
+    return deselectMux();
 }
 
-bool ToFManager::initializeSensor(SensorId sensor, uint8_t xshutPin, uint8_t address) {
+bool ToFManager::initializeFrontSensor(SensorId sensor, uint8_t xshutPin,
+                                       uint8_t address) {
     const uint8_t index = static_cast<uint8_t>(sensor);
-
     digitalWrite(xshutPin, HIGH);
     delay(STARTUP_DELAY_MS);
 
-    if (!sensors[index].begin(0x29, false, &Wire)) {
-        return false;
-    }
-
-    if (!sensors[index].setAddress(address)) {
-        return false;
-    }
-
+    if (!sensors[index].begin(0x29, false, &Wire)) return false;
+    if (!sensors[index].setAddress(address)) return false;
     delay(STARTUP_DELAY_MS);
     return true;
 }
 
-void ToFManager::update() {
-    // Non-blocking: only read a sensor when its continuous measurement is ready.
-    for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
-        if (!sensors[i].isRangeComplete()) {
-            continue;
-        }
+bool ToFManager::initializeRearSensor(SensorId sensor, uint8_t muxChannel) {
+    if (!selectMuxChannel(muxChannel)) return false;
+    delay(STARTUP_DELAY_MS);
+    return sensors[static_cast<uint8_t>(sensor)].begin(0x29, false, &Wire);
+}
 
-        const uint16_t measuredDistance = sensors[i].readRangeResult();
-        const uint8_t status = sensors[i].readRangeStatus();
+void ToFManager::updateSensor(SensorId sensor) {
+    const uint8_t index = static_cast<uint8_t>(sensor);
+    if (index >= SENSOR_COUNT || !sensors[index].isRangeComplete()) return;
 
-        rangeStatus[i] = status;
+    const uint16_t measuredDistance = sensors[index].readRangeResult();
+    const uint8_t status = sensors[index].readRangeStatus();
+    rangeStatus[index] = status;
 
-        // Status 4 is the library's explicit no-target/out-of-range result.
-        // readRangeResult() returns 0xFFFF for status 4 by design, so classify
-        // it before treating the sentinel as an API read failure.
-        if (status == OUT_OF_RANGE_STATUS) {
-            lastReadingTime[i] = millis();
-            hasData[i] = true;
-            outOfRange[i] = true;
-            valid[i] = false;
-            obstacleDetected[i] = false;
-            distanceMm[i] = 0;
-            continue;
-        }
-
-        // A sentinel without status 4 means the I2C/API read failed. Keep
-        // the last successful sample and its original timestamp: a transient
-        // bus error won't create a false NA, but the sample still expires at
-        // READING_MAX_AGE_MS and then correctly blocks movement.
-        if (measuredDistance == 0xFFFFU) {
-            continue;
-        }
-
-        lastReadingTime[i] = millis();
-        hasData[i] = true;
-        outOfRange[i] = false;
-        distanceMm[i] = measuredDistance;
-
-        const uint16_t obstacleThresholdMm =
-            static_cast<uint16_t>(OBSTACLE_DISTANCE_CM) * 10U;
-        const bool inObstacleZone = measuredDistance <= obstacleThresholdMm;
-
-        // Status 2 reports a weak return. In this robot's validated setup,
-        // readings above the 30 cm stop threshold are usable for clear-path
-        // checks. At or inside the threshold, status 2 remains fail-safe.
-        valid[i] = (status == 0) || (status == 2 && !inObstacleZone);
-        obstacleDetected[i] =
-            (status == 0 || status == 2) && inObstacleZone;
+    // Status 4 is the library's explicit no-target/out-of-range result.
+    // readRangeResult() returns 0xFFFF for status 4, so classify it first.
+    if (status == OUT_OF_RANGE_STATUS) {
+        lastReadingTime[index] = millis();
+        hasData[index] = true;
+        outOfRange[index] = true;
+        valid[index] = false;
+        obstacleDetected[index] = false;
+        distanceMm[index] = 0;
+        return;
     }
+
+    // A sentinel without status 4 means the I2C/API read failed. Preserve the
+    // last successful sample; it still expires at READING_MAX_AGE_MS.
+    if (measuredDistance == 0xFFFFU) return;
+
+    lastReadingTime[index] = millis();
+    hasData[index] = true;
+    outOfRange[index] = false;
+    distanceMm[index] = measuredDistance;
+
+    const uint16_t obstacleThresholdMm =
+        static_cast<uint16_t>(OBSTACLE_DISTANCE_CM) * 10U;
+    const bool inObstacleZone = measuredDistance <= obstacleThresholdMm;
+
+    // Weak returns above the stop threshold can be used for clear-path checks.
+    // At or inside the threshold, retain fail-safe obstacle behavior.
+    valid[index] = (status == 0) || (status == 2 && !inObstacleZone);
+    obstacleDetected[index] =
+        (status == 0 || status == 2) && inObstacleZone;
+}
+
+void ToFManager::update() {
+    // Front sensors are directly on the parent bus; disconnect all mux
+    // channels before accessing them.
+    if (!deselectMux()) return;
+    for (uint8_t i = 0; i < 3; ++i) {
+        updateSensor(static_cast<SensorId>(i));
+    }
+
+    // Select one rear sensor at a time. The three modules can all retain their
+    // default 0x29 I2C address because only one downstream channel is visible.
+    for (uint8_t i = 0; i < 3; ++i) {
+        if (!selectMuxChannel(REAR_MUX_CHANNELS[i])) continue;
+        updateSensor(static_cast<SensorId>(REAR_LEFT + i));
+    }
+    deselectMux();
 }
 
 uint16_t ToFManager::getDistanceMm(SensorId sensor) const {
