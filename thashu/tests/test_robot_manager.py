@@ -34,6 +34,9 @@ class FakeTransport:
         self.waited_for.append((sequence, timeout))
         return self.ack
 
+    def is_connected(self):
+        return True
+
     def get_sensor_snapshot(self, max_age=0.75):
         return self.snapshot
 
@@ -84,6 +87,16 @@ class RobotCommandManagerTests(unittest.TestCase):
         self.manager.dispatch("stop")
         self.assertEqual(self.motor.commands, [("stop", None)])
         self.assertEqual(self.manager.mode, ControlMode.AUTO)
+
+    def test_normal_stop_preserves_manual_mode(self):
+        self.manager.switch_mode(ControlMode.MANUAL)
+        self.manager.stop_preserving_mode()
+        self.assertEqual(self.manager.mode, ControlMode.MANUAL)
+        self.assertFalse(self.manager.auto_active)
+        self.assertEqual(self.motor.commands, [
+            ("stop", None),
+            ("stop", None),
+        ])
 
     def test_move_switches_manager_into_manual_mode(self):
         self.assertEqual(self.manager.mode, ControlMode.AUTO)
