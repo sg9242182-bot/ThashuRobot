@@ -80,7 +80,7 @@ paths, serial permissions, and safe restart procedure.
 
 ## 5. Prepare app access later
 
-`127.0.0.1` works only on the Pi itself. Do not expose port 8000 to the public internet. Before the Flutter app connects, Tharun and Vishal need to arrange a private, encrypted connection and restrict access with the Pi firewall. Then set `THASHU_API_HOST=0.0.0.0` in the robot process environment, and provide Niteshvar the Pi's private-network address and a fresh test token through a secure channel. Rotate the test token after the test.
+`127.0.0.1` works only on the Pi itself. Do not expose port 8000 to the public internet. For private-LAN phone access, set `THASHU_API_HOST=0.0.0.0` and configure both TLS paths in the robot process environment. The certificate SAN must match the Pi hostname/IP entered in Flutter, and Flutter must trust its CA/certificate. Without TLS configured, the server refuses a non-loopback bind. Share any test token only through a secure channel.
 
 ## Backend environment settings
 
@@ -88,7 +88,9 @@ Settings are read and validated by `thashu/core/config.py`:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `THASHU_API_HOST` | `127.0.0.1` | API bind address; use `0.0.0.0` only after private-network/firewall setup. |
+| `THASHU_API_HOST` | `127.0.0.1` | API bind address. Non-loopback binds require TLS files. |
+| `THASHU_API_TLS_CERTFILE` | unset | TLS certificate path; required with key for non-loopback access. |
+| `THASHU_API_TLS_KEYFILE` | unset | Matching TLS private-key path; keep it outside the repo and restrict file permissions. |
 | `THASHU_API_PORT` | `8000` | API port, from 1 through 65535. |
 | `THASHU_API_TOKEN` | unset | Bearer token; control routes fail closed until set. |
 | `THASHU_API_STATE_DB` | OS-specific persistent user state path | SQLite command/idempotency records. |
@@ -103,3 +105,24 @@ Invalid ports, blank path overrides, or a face-match debug value other than `0`/
 ## Automatic startup
 
 Do not enable an automatic-start service until Tharun confirms the Pi's install location, service account, serial-device permissions, and private-network setup. Store the token in a root-readable environment file outside the repository; never put it in a committed service file.
+
+
+## HTTPS setup for private-LAN phone access
+
+Create or install a certificate and matching key outside the repository. The
+certificate must include the Pi's chosen private hostname or static LAN IP as
+a Subject Alternative Name. Set the runtime environment securely, for example
+in the systemd environment file:
+
+```ini
+THASHU_API_HOST=0.0.0.0
+THASHU_API_PORT=8000
+THASHU_API_TLS_CERTFILE=/etc/thashu/tls/pi-api.crt
+THASHU_API_TLS_KEYFILE=/etc/thashu/tls/pi-api.key
+```
+
+Restrict the private key to the robot service account. The Android app must
+trust the certificate chain or an explicitly pinned certificate; never turn
+off TLS hostname or certificate verification. Keep the API on the private LAN
+and firewall its port to trusted clients. No internet connection is required
+for the robot or this local API.
