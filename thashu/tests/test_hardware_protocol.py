@@ -83,6 +83,8 @@ class HardwareProtocolTests(unittest.TestCase):
         self.assertFalse(self.transport.has_ready_event())
         self.transport._observe_controller_event("EVENT|0|READY")
         self.assertTrue(self.transport.has_ready_event())
+        self.transport._disconnect("test disconnect")
+        self.assertFalse(self.transport.has_ready_event())
 
     def test_sensor_freshness_is_unknown_until_complete_frame(self):
         result = self.transport.get_sensor_freshness()
