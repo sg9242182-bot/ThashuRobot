@@ -315,10 +315,8 @@ class GPIOControl:
                                 self._ack_condition.notify_all()
                         if result.startswith("ERROR"):
                             print(f"[ESP32] {line}")
-                    if line == "EVENT|0|READY":
-                        with self._state_lock:
-                            self._controller_ready = True
                     if line.startswith(("EVENT|", "FAULT|")):
+                        self._observe_controller_event(line)
                         print(f"[ESP32] {line}")
                         self._events.put(line)
             except (serial.SerialException, OSError) as exc:
@@ -410,6 +408,11 @@ class GPIOControl:
     def is_connected(self):
         with self._state_lock:
             return self._serial is not None and self._serial.is_open
+
+    def _observe_controller_event(self, line):
+        if line == "EVENT|0|READY":
+            with self._state_lock:
+                self._controller_ready = True
 
     def has_ready_event(self):
         """Return whether READY was observed on the current serial connection."""
