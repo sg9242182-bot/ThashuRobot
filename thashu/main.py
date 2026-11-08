@@ -34,6 +34,7 @@ from core.robot_manager   import (
     stop_and_wait_for_ack,
 )
 from core.config import api_host, api_port
+from core.api_lifecycle import request_server_shutdown, wait_for_server_start
 from hardware.servo_tracking import ServoTracker
 from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, is_recognition_query
 from core.model_paths import model_path, project_path
@@ -147,6 +148,17 @@ def _start_api_server():
             daemon=True,
         )
         _api_thread.start()
+        if not wait_for_server_start(_api_server):
+            stopped = request_server_shutdown(_api_server, _api_thread)
+            _log_startup_event(
+                "api_start_failed", host=host, port=port, severity="error"
+            )
+            if not stopped:
+                _log_startup_event("api_shutdown_timeout", severity="warning")
+            else:
+                _api_server = None
+                _api_thread = None
+            return
         _log_startup_event("api_started", host=host, port=port)
     except Exception:
         _log_startup_event("api_start_failed", severity="exception")
@@ -168,9 +180,11 @@ def _log_startup_event(event, *, host=None, port=None, severity="info"):
 
 def _stop_api_server():
     if _api_server is not None:
-        _api_server.should_exit = True
-        if _api_thread is not None and _api_thread is not threading.current_thread():
-            _api_thread.join(timeout=5)
+        stopped = request_server_shutdown(_api_server, _api_thread, timeout=5)
+        _log_startup_event(
+            "api_stopped" if stopped else "api_shutdown_timeout",
+            severity="info" if stopped else "warning",
+        )
 
 
 atexit.register(_stop_api_server)

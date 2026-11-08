@@ -223,7 +223,7 @@ repository root:
 
 ```powershell
 python -m pip install -r api/requirements-test.txt
-python -m unittest api.tests.test_api thashu.tests.test_gpio_protocol thashu.tests.test_robot_manager
+python -m unittest api.tests.test_api thashu.tests.test_api_lifecycle thashu.tests.test_gpio_protocol thashu.tests.test_robot_manager
 ```
 
 The Pi protocol test reads the shared vectors from

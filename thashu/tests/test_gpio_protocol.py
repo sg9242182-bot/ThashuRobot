@@ -1,4 +1,5 @@
 import csv
+import json
 import queue
 import sys
 import threading
@@ -91,6 +92,20 @@ class PiEsp32ProtocolVectorTests(unittest.TestCase):
             "ERROR|OBSTACLE",
         )
 
+    def test_rejected_ack_is_logged_as_structured_sanitized_record(self):
+        transport = make_transport(7)
+
+        with self.assertLogs("thashu.esp32", level="WARNING") as captured:
+            transport._record_acknowledgement("ACK|7|ERROR|OBSTACLE")
+
+        record = json.loads(captured.output[0].split(":", 2)[2].strip())
+        self.assertEqual(record["component"], "esp32_transport")
+        self.assertEqual(record["event"], "command_rejected")
+        self.assertEqual(record["sequence"], 7)
+        self.assertEqual(record["error_code"], "OBSTACLE")
+        self.assertTrue(record["timestamp"].endswith("+00:00"))
+        self.assertNotIn("token", json.dumps(record).lower())
+
     def test_delayed_ack_received_while_waiting_is_correlated(self):
         transport = make_transport(1)
         result = {}
@@ -134,6 +149,31 @@ class PiEsp32ProtocolVectorTests(unittest.TestCase):
         self.assertEqual(snapshot["tof_center_mm"], 385)
         self.assertEqual(snapshot["tof_right_mm"], "FAR")
         self.assertIsNone(snapshot["rear_mm"])
+
+    def test_missing_and_stale_sensor_snapshots_are_unavailable(self):
+        transport = make_transport(1)
+        self.assertIsNone(transport.get_sensor_snapshot())
+
+        transport._update_sensor_snapshot(
+            "TEL|0|SENSORS|TOF_L|420|TOF_C|385|TOF_R|390|US_REAR|410"
+        )
+        self.assertIsNotNone(transport.get_sensor_snapshot(max_age=1.0))
+        transport._sensor_snapshot["received_at"] = time.monotonic() - 1.0
+        self.assertIsNone(transport.get_sensor_snapshot(max_age=0.1))
+
+    def test_malformed_sensor_frame_does_not_replace_last_valid_snapshot(self):
+        transport = make_transport(1)
+        valid = "TEL|0|SENSORS|TOF_L|420|TOF_C|385|TOF_R|390|US_REAR|410"
+        transport._update_sensor_snapshot(valid)
+        original = transport.get_sensor_snapshot(max_age=1.0)
+
+        transport._update_sensor_snapshot("TEL|0|SENSORS|TOF_L|420")
+        transport._update_sensor_snapshot(
+            "TEL|0|SENSORS|TOF_L|bad|TOF_C|385|TOF_R|390|US_REAR|410"
+        )
+
+        snapshot = transport.get_sensor_snapshot(max_age=1.0)
+        self.assertEqual(snapshot, original)
 
     def test_rejects_multiline_payload_without_writing(self):
         transport = make_transport(1)
@@ -197,6 +237,20 @@ class PiEsp32ProtocolVectorTests(unittest.TestCase):
         self.assertTrue(transport.is_connected())
         self.assertTrue(previous.closed)
         self.assertIs(transport._serial, reconnected)
+
+    def test_reconnect_backoff_grows_exponentially_and_is_capped(self):
+        delay = GPIOControl.RECONNECT_INTERVAL
+        sequence = [delay]
+        for _ in range(8):
+            delay = GPIOControl.next_reconnect_delay(delay)
+            sequence.append(delay)
+
+        self.assertEqual(sequence[:5], [1.0, 2.0, 4.0, 8.0, 16.0])
+        self.assertEqual(sequence[-1], GPIOControl.RECONNECT_MAX_INTERVAL)
+        self.assertEqual(
+            GPIOControl.next_reconnect_delay(GPIOControl.RECONNECT_MAX_INTERVAL),
+            GPIOControl.RECONNECT_MAX_INTERVAL,
+        )
 
     def test_receive_silence_disconnects_fake_serial_link(self):
         transport = make_transport(1)

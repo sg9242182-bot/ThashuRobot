@@ -1,4 +1,6 @@
 import glob
+import json
+import logging
 import os
 import queue
 import serial
@@ -6,6 +8,20 @@ import serial.tools.list_ports
 import threading
 import time
 from datetime import datetime, timezone
+
+
+logger = logging.getLogger("thashu.esp32")
+
+
+def _log_transport_event(event, *, severity="info", **fields):
+    """Emit one structured record for an ESP32 transport lifecycle event."""
+    record = {
+        "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+        "component": "esp32_transport",
+        "event": event,
+    }
+    record.update(fields)
+    getattr(logger, severity)("%s", json.dumps(record, separators=(",", ":"), sort_keys=True))
 
 
 class GPIOControl:
@@ -30,6 +46,7 @@ class GPIOControl:
 
     HEARTBEAT_INTERVAL = 0.100
     RECONNECT_INTERVAL = 1.0
+    RECONNECT_MAX_INTERVAL = 30.0
     DEFAULT_BAUD = 115200
     SERIAL_TIMEOUT = 0.2
     RX_SILENCE_TIMEOUT = 2.0
@@ -136,12 +153,14 @@ class GPIOControl:
                 self._port = port
                 self._last_heartbeat = 0.0
                 self._last_rx_monotonic = time.monotonic()
-            print(f"[GPIO] ESP32 connected on {port} @ {self._baud}")
+            _log_transport_event("connected", device=port, baud=self._baud)
             return True
         except (serial.SerialException, OSError) as exc:
             with self._state_lock:
                 self._serial = None
-            print(f"[GPIO] ESP32 connection unavailable: {exc}")
+            _log_transport_event(
+                "connection_unavailable", severity="warning", error_type=type(exc).__name__
+            )
             return False
 
     def _disconnect(self, reason="unknown", expected_serial=None):
@@ -158,7 +177,7 @@ class GPIOControl:
                 serial_conn.close()
             except Exception:
                 pass
-            print(f"[GPIO] ESP32 disconnected: {reason}")
+            _log_transport_event("disconnected", severity="warning", reason=reason)
         return serial_conn is not None
 
     # ------------------------------------------------------------------
@@ -265,7 +284,12 @@ class GPIOControl:
                 self._acknowledgements.pop(next(iter(self._acknowledgements)))
             self._ack_condition.notify_all()
         if result.startswith("ERROR"):
-            print(f"[ESP32] {line}")
+            _log_transport_event(
+                "command_rejected",
+                severity="warning",
+                sequence=sequence,
+                error_code=result.partition("|")[2] or "UNKNOWN",
+            )
 
     def wait_for_ack(self, sequence, timeout=0.75):
         """Wait for this process session's ACK; return OK or ERROR|reason."""
@@ -284,18 +308,27 @@ class GPIOControl:
     # ------------------------------------------------------------------
 
     def _transport_loop(self):
+        reconnect_delay = self.RECONNECT_INTERVAL
         while not self._stop_event.is_set():
             now = time.monotonic()
 
             if not self.is_connected():
-                if now - self._last_connect_attempt >= self.RECONNECT_INTERVAL:
+                if now - self._last_connect_attempt >= reconnect_delay:
                     self._last_connect_attempt = now
-                    self._connect()
+                    if self._connect():
+                        reconnect_delay = self.RECONNECT_INTERVAL
+                    else:
+                        reconnect_delay = self.next_reconnect_delay(reconnect_delay)
             elif now - self._last_heartbeat >= self.HEARTBEAT_INTERVAL:
                 self._last_heartbeat = now
                 self.heartbeat()
 
             self._stop_event.wait(0.01)
+
+    @classmethod
+    def next_reconnect_delay(cls, current_delay):
+        """Return capped exponential reconnect backoff in seconds."""
+        return min(max(cls.RECONNECT_INTERVAL, current_delay * 2), cls.RECONNECT_MAX_INTERVAL)
 
     def _reader_loop(self):
         rx_buffer = bytearray()
@@ -347,7 +380,9 @@ class GPIOControl:
                 self._disconnect(f"read failed: {exc}", expected_serial=serial_conn)
             except Exception as exc:
                 # A malformed inbound frame must not kill the reader thread.
-                print(f"[GPIO] ESP32 receive error: {exc}")
+                _log_transport_event(
+                    "receive_error", severity="error", error_type=type(exc).__name__
+                )
 
     def _consume_serial_bytes(self, chunk, rx_buffer, discarding_oversized_frame=False):
         """Assemble newline-delimited frames without retaining partial/oversized lines."""
@@ -380,7 +415,7 @@ class GPIOControl:
         try:
             line = frame.decode("ascii")
         except UnicodeDecodeError:
-            print("[GPIO] Ignoring non-ASCII ESP32 frame")
+            _log_transport_event("invalid_frame", severity="warning", reason="non_ascii")
             return
 
         received_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
@@ -391,7 +426,11 @@ class GPIOControl:
         if line.startswith("ACK|"):
             self._record_acknowledgement(line)
         if line.startswith(("EVENT|", "FAULT|")):
-            print(f"[ESP32] {line}")
+            _log_transport_event(
+                "firmware_fault" if line.startswith("FAULT|") else "firmware_event",
+                frame=line,
+                severity="error" if line.startswith("FAULT|") else "info",
+            )
             self._events.put(line)
 
     def _update_sensor_snapshot(self, line):

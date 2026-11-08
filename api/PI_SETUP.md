@@ -61,6 +61,23 @@ the robot process environment before starting it.
 
 Stop the robot and API together with `Ctrl+C`.
 
+## Recovery checks (development only)
+
+These steps help identify which process needs attention. They do not prove that
+the physical robot is safe, and they do not replace Tharun's robot checks.
+
+| Situation | Check and response |
+|---|---|
+| Pi reboot | Start the robot process using the setup steps above. The API starts inside it and uses the same `RobotCommandManager` and ESP32 transport. Check `/health` for API liveness and `/api/v1/status` for the reported transport state. The API does not replay commands left in flight; their stored result becomes `unknown`. |
+| ESP32 disconnected | `/api/v1/status` reports `disconnected` or `unavailable`; do not treat serial reconnect as controller readiness. The Pi retries serial discovery with a 1, 2, 4, 8, 16, then 30 second capped backoff. Movement remains subject to the manager's mode, ACK, and fresh-sensor checks. A disconnected link cannot confirm STOP; the ESP32 watchdog is a separate hardware safety layer. |
+| API startup failure | Read the robot process console for the structured `api_start_failed` event. The API does not log the Bearer token. Check the configured host/port and whether another process is using the port. Do not start a second API beside `thashu/main.py` while it owns the ESP32 serial connection. |
+| API process shutdown | Use `Ctrl+C` in the robot process terminal. The embedded API receives a graceful shutdown request and waits up to five seconds for its server thread. A structured `api_shutdown_timeout` warning means shutdown did not finish within that wait; inspect the process before restarting it. |
+| Configuration error | Review setting names and allowed values in the environment-variable table below. Correct the value in the process environment and restart. Never paste the token into logs, screenshots, GitHub, or chat. |
+
+Do not delete the SQLite state file during its 24-hour request retry window. Do
+not enable automatic restart or a system service until Tharun confirms the Pi
+paths, serial permissions, and safe restart procedure.
+
 ## 5. Prepare app access later
 
 `127.0.0.1` works only on the Pi itself. Do not expose port 8000 to the public internet. Before the Flutter app connects, Tharun and Vishal need to arrange a private, encrypted connection and restrict access with the Pi firewall. Then set `THASHU_API_HOST=0.0.0.0` in the robot process environment, and provide Niteshvar the Pi's private-network address and a fresh test token through a secure channel. Rotate the test token after the test.

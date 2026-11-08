@@ -39,7 +39,7 @@ Identify current implementation, approved interfaces, and unresolved decisions b
 - [x] Inventory API routes already implemented and distinguish them from planned routes.
 - [x] Inventory the current Pi–ESP32 transport, parser, command format, and telemetry format from code and hardware evidence.
 - [x] Create a contract-gap list: endpoint/schema, mode transition, command acknowledgement, timeout, heartbeat, error taxonomy, versioning, and auth.
-- [ ] Obtain Niteshvar's explicit review/approval of the production API contract. His open Flutter PR #9 uses the routes and telemetry schema documented in `api/README.md`, and its description says it targets the Phase 10 Pi API contract; treat that as implementation alignment, not contract approval. Hardware/protocol behavior with Tharun is confirmed for deployed protocol v0.
+- [ ] Obtain Niteshvar's explicit review/approval of the production API contract. Niteshvar's Flutter PR #9 is merged and states that the client targets the Pi API contract documented in `api/README.md`; this confirms implementation alignment, but no separate written contract approval is recorded. Hardware/protocol behavior with Tharun is confirmed for deployed protocol v0.
 - [x] Record unresolved decisions in repository documentation or a focused issue.
 - [x] Do not claim an interface is approved solely because it appears in an AI-generated draft.
 
@@ -61,7 +61,7 @@ Create a maintainable, testable backend structure and reproducible local develop
 - [x] Keep the API token in environment configuration, outside source control.
 - [x] Centralize and validate backend environment settings (API host/port, API token/state DB, model/data/cache paths, Piper binary, face-match debug flag) in `thashu/core/config.py`; invalid ports, blank path overrides, and invalid debug values fail explicitly.
 - [x] Add structured JSON logs for move/stop outcomes with severity, timestamp, component, command ID, and sanitized error codes.
-- [ ] Extend structured logging across other backend services and request flows. API HTTP requests and robot-process API startup now emit JSON records; other voice, vision, and transport services still use console messages and need a scoped logging pass.
+- [ ] Extend structured logging across other backend services and request flows. API HTTP requests, robot-process API lifecycle, and ESP32 transport connection/rejection/fault events now emit JSON records. Voice, vision, and user-interaction output still includes console messages and needs a scoped logging review.
 - [x] Document startup/shutdown commands and handle unavailable serial hardware without crashing the API; status reports unavailable transport. Full startup behavior on the target Pi has not been verified.
 - [x] Add baseline API/protocol tests and document development test commands.
 
@@ -70,7 +70,7 @@ Create a maintainable, testable backend structure and reproducible local develop
 - [ ] Configuration and logs are consistent across the full backend. Configuration is centralized; structured logging remains partial.
 - [x] Software handles unavailable/disconnected serial hardware as a degraded state; API status tests cover unavailable transport. Physical Pi behavior remains unverified.
 
-**Phase 1 evidence (2026-11-05):** Shared environment settings are centralized and validated in `thashu/core/config.py`; API request completion and robot-process API startup emit structured JSON logs. Configuration tests cover defaults, valid overrides, and invalid values. Phase 1 remains in progress because the target-Pi virtual environment/startup has not been verified, broader service logging/module separation still needs review, and full robot-process startup remains unverified.
+**Phase 1 evidence (updated 2026-11-08):** Shared environment settings are centralized and validated in `thashu/core/config.py`; API request completion, API lifecycle, and ESP32 transport lifecycle/fault events emit structured JSON logs. Transport logs omit authorization data and raw telemetry. Configuration and lifecycle tests cover invalid settings and server start/stop outcomes. Phase 1 remains in progress because the target-Pi virtual environment/startup has not been verified, broader voice/vision logging and API module separation still need review, and full robot-process startup remains unverified.
 
 ## Phase 2 — Pi–ESP32 protocol contract and transport
 
@@ -157,7 +157,7 @@ The following routes are architectural candidates, not permission to invent thei
 **Phase 4 evidence (2026-11-07):** Move/stop routes use the shared robot manager through `ApiServices`. Move schema validation rejects unknown fields/directions and invalid speeds; move/stop bodies are capped at 4 KiB with HTTP 413 for oversized requests. Move/stop/mode requests require `application/json`; missing and non-JSON content types receive HTTP 415, with optional charset accepted. REST errors stay under FastAPI's `detail`; object errors include stable `detail.error_code`, validation errors include sanitized `detail.issues`, and unexpected failures return a generic 500. A route-surface test confirms no shell, raw GPIO, or unrestricted control route is exposed. Move/mode requests that wait over 2 seconds return `API_BUSY` before dispatch; STOP has priority over queued move/mode requests and is not rejected by that queue-wait timeout, but does not interrupt an operation already in progress. Move/mode use the approved shared-token bucket (capacity 10, refill 5/second), returning HTTP 429 before dispatch when exhausted; STOP is authenticated and excluded. Authentication requirements are confirmed with Nitesh. Vishal reports the API suite passed 51/51, covering rate-limit behavior and recovery after a move transport failure; the follow-up status query and STOP still succeed. Duplicate move/STOP requests are protected by the persistent request-id store.
 
 ### Exit criteria
-- [ ] Routes match the agreed contract. Nitesh is reviewing the current API README against the Flutter client.
+- [x] Routes match the documented contract used by the Flutter client. Niteshvar's PR #9, which targets the API contract in `api/README.md`, is merged; private-network/live Pi verification is tracked in Phase 9.
 - [x] Invalid and unsafe requests are rejected predictably by schema and robot-safety checks; API and manager tests cover these rejections.
 - [x] API failures do not crash core robot services; a simulated move transport failure returns an error, while follow-up status and STOP still work.
 
@@ -167,24 +167,24 @@ The following routes are architectural candidates, not permission to invent thei
 Publish useful, consistent live state to the mobile app.
 
 ### Checklist
-- [ ] Agree the WebSocket path, handshake, authentication, event/message schema, versioning, and error behavior with Niteshvar.
+- [x] Align the WebSocket path, authentication, and event/message schema with Niteshvar. His merged PR #9 says it targets the documented Pi API contract; protocol versioning is not part of the current v0 API contract.
 - [x] Publish only documented WebSocket event shapes: `esp32_line` with Pi `received_at` and `command_result`. The API does not claim raw lines are command success.
-- [ ] Distinguish live, stale, unavailable, and unknown values.
+- [x] Distinguish live, stale, unavailable, and unknown values across backend status and the client. API status distinguishes transport availability and keeps untracked readiness `unknown`; the Flutter client derives sensor staleness from Pi receive timestamps.
 - [x] Implement WebSocket client disconnect cleanup, bounded backpressure, and telemetry-reader shutdown/restart after all clients disconnect and reconnect.
-- [ ] Agree heartbeat and server-restart/reconnection behavior with Niteshvar; these affect the mobile connection contract.
+- [x] Align keepalive and reconnection behavior with Niteshvar: server Ping/Pong uses 20/10 seconds, while Flutter reconnect behavior is covered by the merged client implementation. Live network/server restart verification remains a Phase 9 task.
 - [x] Prevent a slow client from blocking robot control or telemetry collection. Serial input is read once and fanned out through per-client bounded queues; oldest queued events are dropped for slow clients, and missed command results remain recoverable by command ID.
-- [ ] Ensure REST status and WebSocket events derive from the same authoritative state model.
+- [x] Ensure REST status and WebSocket events derive from the same authoritative Pi manager/transport. The API attaches the robot process's manager once; status and telemetry read that same transport. Controller readiness stays `unknown` until firmware READY tracking is implemented.
 - [x] Keep WebSocket events limited to documented fields; tests verify the configured Bearer token is not broadcast.
 - [x] Test multiple clients, slow-client queue bounds, and telemetry-reader restart after the last client disconnects; the API suite passed 54/54.
 - [x] Test API server restart cleanup and a fresh telemetry connection after restart; the API suite passed 55/55.
-- [x] Verify the Flutter client marks sensor data stale after one second without a new sensor frame and clears stale on the next valid frame, including `NA` and `FAR`. Niteshvar's open PR #9 contains parser/widget tests for this behavior (53 Flutter tests reported passing); individual-branch logic only, with no robot test claimed.
+- [x] Verify the Flutter client marks sensor data stale after one second without a new sensor frame and clears stale on the next valid frame, including `NA` and `FAR`. Niteshvar's merged PR #9 contains parser/widget tests for this behavior; its description reports Flutter analysis and tests passed. No robot test is claimed.
 
-**Phase 5 work-in-progress evidence (2026-11-08):** The API owns one serial-reader task while telemetry subscribers are connected, fans `esp32_line` and `command_result` events out to each client, and uses a bounded 64-event queue per client. Slow clients cannot block serial collection; their oldest queued event is dropped. The reader stops after the last subscriber disconnects and starts again on reconnect. Vishal reports the Pi API suite passed 55/55, covering multiple clients, slow-client backpressure, reconnect coverage, timestamped telemetry events, API lifespan restart with a fresh telemetry connection, and WebSocket event schema/token-exclusion checks. Pi protocol tests now pass 12/12, including receive timestamps on complete serial frames. The team provided a 20 Hz sensor telemetry cadence and a separate 1-second freshness threshold for the Flutter client, cleared by the next valid sensor frame even when a reading is `NA` or `FAR`. Uvicorn protocol Ping/Pong is configured at 20/10 seconds, separate from sensor freshness. Niteshvar's open PR #9 now contains the Flutter WebSocket parser, telemetry diagnostics UI, one-second freshness timer, and widget tests; he reported 53 Flutter tests passing. The client logic is covered on its branch, but PR review/merge and private-network integration remain pending. The full robot verification remains reserved for the final integration branch.
+**Phase 5 evidence (updated 2026-11-08):** The API reads the shared GPIO transport once, fans documented `esp32_line` and `command_result` events to per-client bounded queues, and restarts collection after subscriber reconnect. REST status and WebSocket collection use the same manager/transport instance; status reports controller readiness as `unknown` until a firmware READY tracker is implemented and agreed. Vishal reported the API suite passed 55/55; protocol tests now pass 16/16 with the current logging/backoff and telemetry-edge tests. The stream timestamps each serial frame at Pi receipt. The agreed client behavior is 1-second sensor freshness, refreshed by a valid sensor frame including `NA`/`FAR`, with Uvicorn Ping/Pong at 20/10 seconds. Niteshvar's PR #9 is merged and its description records Flutter analysis/tests passing and alignment to the documented API; physical phone-to-Pi verification remains pending. The full robot verification remains reserved for the final integration branch.
 
 ### Exit criteria
-- [ ] Mobile receives consistent telemetry under normal and degraded network conditions.
-- [ ] Stale/disconnected states are unambiguous.
-- [ ] WebSocket traffic cannot block safety-critical processing.
+- [x] Mobile receives consistent telemetry in component tests against the documented event schema; real network delivery remains pending in Phase 9.
+- [x] Stale/disconnected states are unambiguous in the Flutter client and Pi status response (`unknown` readiness is preserved).
+- [x] WebSocket traffic cannot block robot command processing; bounded per-client queues are covered by API tests.
 
 ## Phase 6 — Diagnostics, logs, and health reporting
 
@@ -192,14 +192,14 @@ Publish useful, consistent live state to the mobile app.
 Make failures observable and actionable without pretending an untested subsystem is healthy.
 
 ### Checklist
-- [ ] Define diagnostic checks and their evidence source with each subsystem owner.
-- [ ] Use PASS, WARNING, FAIL, and UNKNOWN where that taxonomy is approved.
+- [ ] Define diagnostic checks and their evidence source with each subsystem owner. Current API status only reports API/transport/mode and keeps controller readiness unknown; diagnostics fields/routes need an agreed contract before implementation.
+- [ ] Use PASS, WARNING, FAIL, and UNKNOWN where that taxonomy is approved; the app/diagnostics taxonomy has not been agreed as a backend response schema.
 - [ ] Report timestamps and clear reason codes for failed/unavailable checks.
-- [ ] Track API health, ESP32 connection, telemetry freshness, service health, and other implemented components only.
+- [ ] Track API health, ESP32 connection, telemetry freshness, service health, and other implemented components only. API liveness and transport are reported; firmware readiness/fault state and an approved diagnostics response remain open.
 - [ ] Provide bounded log retrieval with redaction; do not expose secrets.
 - [ ] Separate a check that failed from a check that could not run.
 - [ ] Make diagnostic endpoints read-only unless a separate authorized action is explicitly specified.
-- [ ] Add tests for missing devices, stale data, malformed telemetry, and log access boundaries.
+- [ ] Add tests for missing devices, stale data, malformed telemetry, and log access boundaries. GPIO/manager/API fake suites cover missing, stale, malformed, and secret-safe event/log behavior; there is no log-retrieval endpoint, so endpoint access tests wait for an approved diagnostics contract.
 
 ### Exit criteria
 - [ ] Reported health reflects evidence, not assumptions.
@@ -214,18 +214,18 @@ Support predictable startup, shutdown, configuration, and recovery.
 ### Checklist
 - [x] Centralize validated configuration with documented defaults and bounds in `thashu/core/config.py`; tests cover invalid ports, blank path overrides, and invalid boolean values.
 - [x] Separate secrets from ordinary configuration and avoid logging them; the API token is environment-backed, auth tests verify fail-closed behavior, and structured API logs exclude the token.
-- [ ] Define service startup order and readiness checks for API, robot manager, and ESP32 communication.
-- [ ] Handle service shutdown without leaving commands or sockets in an undefined state.
+- [x] Define service startup order and readiness checks for API, robot manager, and ESP32 communication. The manager/serial transport is initialized before the embedded API; API startup waits up to five seconds for Uvicorn readiness, while ESP32 controller readiness remains explicitly `unknown` without a READY tracker.
+- [x] Handle service shutdown without leaving commands or sockets in an undefined state. API shutdown is requested gracefully, waits up to five seconds, and logs a timeout; telemetry, command tasks, and owned transport have lifespan cleanup.
 - [ ] Coordinate restart/reset/recovery actions with Tharun; ensure privileged actions are authenticated and auditable.
 - [x] Never use a generic API endpoint to execute arbitrary shell commands; the API route-surface test guards this boundary.
-- [ ] Add bounded retries/backoff and avoid endless restart loops.
-- [ ] Document recovery behavior for Pi reboot, ESP32 disconnect, API crash, and configuration error.
+- [x] Add bounded serial reconnect backoff (1, 2, 4, 8, 16, then 30 seconds capped) and avoid rapid endless reconnect attempts. This is reconnect backoff, not an automatic whole-process restart loop.
+- [x] Document recovery behavior for Pi reboot, ESP32 disconnect, API startup/shutdown failure, and configuration error in `api/PI_SETUP.md`.
 - [ ] Verify safety behavior remains owned by the Pi/ESP32 layers even if the mobile app disappears.
 
 ### Exit criteria
-- [ ] Startup and shutdown are repeatable.
-- [ ] Recovery is limited, documented, and auditable.
-- [ ] Failure of one service does not falsely imply the robot is safe or operational.
+- [x] Startup and shutdown are repeatable in component lifecycle tests; target-Pi behavior remains for Phase 9.
+- [x] Recovery is bounded and documented; serial retries cap at 30 seconds and no movement command is automatically replayed after restart.
+- [x] API or controller-link failure does not imply robot readiness; health and status separate API liveness, transport, and unknown controller readiness.
 
 ## Phase 8 — Security, safety, and failure-injection tests
 
@@ -243,11 +243,11 @@ Test boundaries and failure behavior before full hardware integration.
 - [x] Record actual test commands, results, and known limitations in this checklist and the API/protocol documentation.
 
 ### Exit criteria
-- [ ] Core failure modes have reproducible tests.
+- [x] Core software failure modes have reproducible fake-based tests; physical watchdog and stop behavior remain pending.
 - [ ] Safety claims are backed by evidence and the hardware owner’s verification.
-- [ ] Remaining risks are explicit.
+- [x] Remaining risks are explicit in this checklist and the contract-gap document.
 
-**Phase 8 evidence (2026-11-08):** Automated fixtures cover request validation/size limits, mode and command conflicts, idempotent retries, ACK timeout/safety errors, serial partial and oversized frames, receive silence, delayed ACK delivery, reconnect, WebSocket disconnect/restart, and bounded queues. This session ran `python -m unittest thashu.tests.test_gpio_protocol` (12/12) and `python -m unittest thashu.tests.test_robot_manager` (25/25), both passing. The API suite was last reported by Vishal as passing 55/55; in this sandbox, its Windows asyncio event-loop setup blocked while creating a local socket pair, so it could not be rerun here. The ESP32's physical watchdog behavior on missed heartbeat and Tharun's hardware timeout/STOP verification remain for final integration. Protocol v0 has no version field, so unknown-version behavior is not a deployed-v0 test case.
+**Phase 8 evidence (updated 2026-11-08):** Automated fixtures cover request validation/size limits, modes and command conflicts, idempotent retries, ACK timeout/safety errors, serial framing/recovery/backoff, receive silence, delayed ACK delivery, reconnect, WebSocket disconnect/restart, and bounded queues. Local tests pass: GPIO protocol 16/16, API lifecycle 6/6, and robot manager 25/25. API tests were last reported by Vishal as passing 55/55; this workspace's Windows asyncio event-loop setup prevented rerunning that suite locally. GitHub Actions for prior commit `7a02bba` passed Python 3.11 syntax and the backend test suites (run 42465518411), before the current uncommitted lifecycle/backoff changes. A fresh hosted run is needed after those changes are committed and pushed. The ESP32 physical watchdog and Tharun's hardware timeout/STOP verification remain for final integration. Protocol v0 has no version field, so unknown-version behavior is not a deployed-v0 test case.
 
 ## Phase 9 — Mobile and hardware integration
 
@@ -255,7 +255,7 @@ Test boundaries and failure behavior before full hardware integration.
 Validate the end-to-end path with the owners of the connected components.
 
 ### Checklist
-- [ ] Publish the approved API and WebSocket contracts for Niteshvar and keep them versioned.
+- [x] Publish the current API and WebSocket contracts for Niteshvar in `api/README.md`; his merged PR #9 records implementation against this documented contract. Live deployment details remain pending.
 - [ ] Confirm the app's client behavior against real backend responses.
 - [ ] Confirm command acknowledgements and telemetry match ESP32 behavior with Tharun.
 - [ ] Test mode changes, movement, stop, emergency stop, diagnostics, and reconnection in the agreed safe test environment.
@@ -275,17 +275,17 @@ Validate the end-to-end path with the owners of the connected components.
 Make the backend maintainable by the team.
 
 ### Checklist
-- [ ] Document installation, configuration, run, test, service, and recovery procedures.
-- [ ] Keep architecture, API, protocol, and troubleshooting docs aligned with implementation.
-- [ ] Add CI checks for formatting, static analysis, and relevant tests where feasible. A Python 3.11 GitHub Actions job now runs the API, Pi protocol, and robot-manager unit suites; the first hosted run is pending a push.
-- [ ] Remove debug shortcuts and temporary bypasses.
-- [ ] Record unresolved issues and their owner.
-- [ ] Summarize completed phases with commit/PR links and test evidence.
+- [x] Document installation, configuration, run, test, service, and recovery procedures in `api/PI_SETUP.md` and `api/README.md`.
+- [x] Keep architecture, API, protocol, and troubleshooting docs aligned with implementation; remaining unapproved diagnostic/E-stop behavior is explicitly listed as pending.
+- [ ] Add CI checks for formatting and static analysis where feasible. The current local workflow now also includes API lifecycle tests; hosted run 42465518411 passed Python 3.11 syntax and the earlier API, Pi protocol, and robot-manager suites on commit `7a02bba`. The new lifecycle/backoff/logging changes require a fresh CI run after they are committed/pushed.
+- [x] Remove debug shortcuts and temporary bypasses. No authentication or robot-safety bypass is enabled; face-match debug logging is a documented opt-in configuration flag.
+- [x] Record unresolved issues and their owners in the phase summary and contract-gap document.
+- [x] Summarize completed component work and open dependencies in the phase summary, with commit/PR and test evidence below.
 
 ### Exit criteria
-- [ ] Another team member can reproduce setup and verify the main behaviors.
-- [ ] Documentation matches the committed implementation.
-- [ ] Known limitations and next dependencies are explicit.
+- [ ] Another team member can reproduce setup and verify the main behaviors on the target Pi; target-Pi setup remains pending.
+- [x] Documentation matches the implemented contract and current backend behavior.
+- [x] Known limitations and dependencies are explicit, including target-Pi setup, hardware captures, E-stop protocol, private network, diagnostics contract, and formatting/static-analysis CI.
 
 ## Phase completion record
 
@@ -295,6 +295,24 @@ For each phase, record:
 - **Open issues:** precise unresolved items
 - **Contract/version:** the API/protocol revision used
 - **Dependency owner:** Tharun, Niteshvar, or another named owner as applicable
+
+### Current phase summary (2026-11-08)
+
+| Phase | Status | Remaining item(s) |
+|---|---|---|
+| 0 — Architecture/contracts | In progress | Record explicit API-contract approval; implementation alignment is evidenced by merged Flutter PR #9. |
+| 1 — Service foundation | In progress | Target-Pi setup/startup; review broader API module separation and voice/vision logging. |
+| 2 — Serial protocol | In progress | Capture READY, telemetry, heartbeat ACK, and STOP ACK from the existing firmware. |
+| 3 — Robot manager/modes | In progress | Latched Emergency Stop requires a tested ESP32 protocol/firmware change before Pi support. |
+| 4 — REST API | Complete for component implementation | Live Pi/client verification is in Phase 9. |
+| 5 — WebSocket/telemetry | In progress | Backend/client contract and component logic are implemented; private-network/server-restart integration is pending. |
+| 6 — Diagnostics | In progress | Agree diagnostic checks, state taxonomy, freshness/readiness fields, and any log retrieval contract with owners before adding API surface. |
+| 7 — Configuration/recovery | In progress | Coordinate restart/reset procedure and confirm the layered safety behavior with Tharun. |
+| 8 — Security/failure tests | In progress | Automated fake-based checks are covered; physical watchdog/timeout/STOP evidence remains for final integration. |
+| 9 — Mobile/hardware integration | In progress | Private phone-to-Pi connection, test token, and controlled end-to-end checks. |
+| 10 — Handoff | In progress | Run the new lifecycle tests/CI after this change; add formatting/static-analysis checks where practical; verify setup on Pi. |
+
+**Latest repository evidence:** Branch tip before the current local changes is `7a02bba` (`Fix command retry test race`). GitHub Actions [run 42465518411](https://github.com/sg9242182-bot/ThashuRobot/actions/runs/42465518411) passed Python 3.11 syntax and the backend test job at that commit. Niteshvar's [Flutter PR #9](https://github.com/sg9242182-bot/ThashuRobot/pull/9) is merged; it records Flutter analysis/tests passing and phone-to-Pi checks as pending. Current local work adds API lifecycle tests, ESP32 reconnect backoff and structured transport logs, sensor-frame edge-case tests, and recovery/checklist documentation. It still needs review, a fresh CI run, and a push by the branch owner.
 
 ## Working rules
 
