@@ -1,6 +1,7 @@
 name: Phase 6 sensor freshness tests
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - phase-12-pi-api-https
