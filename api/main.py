@@ -53,9 +53,22 @@ class MoveRequest(BaseModel):
     speed: int = Field(default=200, ge=0, le=255, strict=True)
 
 
+class LeaseRenewalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: UUID
+
+
+class MovementLeaseResponse(BaseModel):
+    lease_id: str
+    status: Literal["active"]
+    expires_at: str
+
+
 class CommandResponse(BaseModel):
     request_id: str | None = None
     command_id: str
+    lease_id: str | None = None
     command: str
     status: Literal[
         "dispatching", "dispatched", "acknowledged", "safety_error",
@@ -87,7 +100,10 @@ def _replay_command_request(record, action, request_id):
             status_code=record["http_status"],
             detail=record["error"],
         )
-    return CommandResponse(**record["result"])
+    result = dict(record["result"])
+    if action.get("type") == "move":
+        result["lease_id"] = record["command_id"]
+    return CommandResponse(**result)
 
 
 class ModeSwitchRequest(BaseModel):
@@ -238,6 +254,12 @@ class ApiServices:
         self._telemetry_task = None
         self._command_tasks = set()
         self._result_retention_seconds = 24 * 60 * 60
+        self._movement_lease_lock = asyncio.Lock()
+        self._active_movement_lease = None
+        self._movement_lease_task = None
+        self._movement_lease_stop_pending = False
+        self._movement_lease_timeout_seconds = 0.5
+        self._mobile_client_test_override = None
 
     def attach_robot_manager(self, manager):
         """Use the robot process's existing manager and serial connection."""
@@ -273,7 +295,11 @@ class ApiServices:
 
     async def stop_all(self):
         manager = await self.robot_manager()
-        return await asyncio.to_thread(manager.stop_all)
+        stop = getattr(manager, "stop_preserving_mode", manager.stop_all)
+        sequence = await asyncio.to_thread(stop)
+        if sequence is not None:
+            await self.complete_movement_stop()
+        return sequence
 
     async def safety_stop(self):
         manager = await self.robot_manager()
@@ -312,7 +338,19 @@ class ApiServices:
                     updated_at REAL NOT NULL
                 )"""
             )
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS movement_lease_renewals (
+                    request_id TEXT PRIMARY KEY,
+                    lease_id TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                )"""
+            )
             now = time.time()
+            connection.execute(
+                "DELETE FROM movement_lease_renewals WHERE created_at < ?",
+                (now - self._result_retention_seconds,),
+            )
             connection.execute(
                 "DELETE FROM command_requests WHERE created_at < ?",
                 (now - self._result_retention_seconds,),
@@ -509,6 +547,214 @@ class ApiServices:
 
     def unsubscribe_telemetry(self, subscriber):
         self._telemetry_subscribers.discard(subscriber)
+
+    def mobile_client_connected(self):
+        """Return whether an authenticated mobile telemetry session is open."""
+        override = self._mobile_client_test_override
+        if override is not None:
+            return bool(override)
+        return bool(self._telemetry_subscribers)
+
+    def _persist_lease_renewal(self, request_id, lease_id):
+        with self._command_lock:
+            connection = self._database()
+            command = connection.execute(
+                "SELECT 1 FROM command_requests WHERE request_id = ?",
+                (request_id,),
+            ).fetchone()
+            if command is not None:
+                raise ValueError("REQUEST_ID_REUSED")
+            existing = connection.execute(
+                "SELECT lease_id FROM movement_lease_renewals WHERE request_id = ?",
+                (request_id,),
+            ).fetchone()
+            if existing is not None and existing["lease_id"] != lease_id:
+                raise ValueError("REQUEST_ID_REUSED")
+            now = time.time()
+            if existing is None:
+                connection.execute(
+                    """INSERT INTO movement_lease_renewals
+                       (request_id, lease_id, created_at, updated_at)
+                       VALUES (?, ?, ?, ?)""",
+                    (request_id, lease_id, now, now),
+                )
+            else:
+                connection.execute(
+                    "UPDATE movement_lease_renewals SET updated_at = ? WHERE request_id = ?",
+                    (now, request_id),
+                )
+
+    @staticmethod
+    def _lease_expiry_timestamp(remaining_seconds):
+        expiry = datetime.now(timezone.utc).timestamp() + max(0.0, remaining_seconds)
+        return datetime.fromtimestamp(expiry, timezone.utc).isoformat(
+            timespec="milliseconds"
+        ).replace("+00:00", "Z")
+
+    def _schedule_movement_lease_expiry(self, lease_id):
+        task = self._movement_lease_task
+        if task is not None and not task.done():
+            task.cancel()
+        self._movement_lease_task = asyncio.create_task(
+            self._expire_movement_lease(lease_id)
+        )
+
+    async def start_movement_lease(self, lease_id):
+        async with self._movement_lease_lock:
+            if self._movement_lease_stop_pending:
+                raise RuntimeError("LEASE_STOP_PENDING")
+            timeout = self._movement_lease_timeout_seconds
+            self._active_movement_lease = {
+                "lease_id": lease_id,
+                "expires_at_monotonic": time.monotonic() + timeout,
+            }
+            self._schedule_movement_lease_expiry(lease_id)
+            return MovementLeaseResponse(
+                lease_id=lease_id,
+                status="active",
+                expires_at=self._lease_expiry_timestamp(timeout),
+            )
+
+    async def can_start_movement(self):
+        expired_lease = None
+        async with self._movement_lease_lock:
+            if not self.mobile_client_connected() or self._movement_lease_stop_pending:
+                return False
+            lease = self._active_movement_lease
+            if lease is not None and time.monotonic() >= lease["expires_at_monotonic"]:
+                expired_lease = lease["lease_id"]
+                self._active_movement_lease = None
+                self._movement_lease_stop_pending = True
+            else:
+                return True
+        await self._dispatch_lease_stop(expired_lease)
+        return False
+
+    async def renew_movement_lease(self, lease_id, request_id):
+        expired_lease = None
+        async with self._movement_lease_lock:
+            lease = self._active_movement_lease
+            now = time.monotonic()
+            if (
+                lease is None
+                or lease["lease_id"] != lease_id
+                or self._movement_lease_stop_pending
+            ):
+                raise ValueError("LEASE_NOT_ACTIVE")
+            if now >= lease["expires_at_monotonic"]:
+                self._active_movement_lease = None
+                self._movement_lease_stop_pending = True
+                expired_lease = lease_id
+            elif not self.mobile_client_connected():
+                raise ValueError("APP_DISCONNECTED")
+            else:
+                self._persist_lease_renewal(request_id, lease_id)
+                timeout = self._movement_lease_timeout_seconds
+                lease["expires_at_monotonic"] = now + timeout
+                self._schedule_movement_lease_expiry(lease_id)
+                return MovementLeaseResponse(
+                    lease_id=lease_id,
+                    status="active",
+                    expires_at=self._lease_expiry_timestamp(timeout),
+                )
+        await self._dispatch_lease_stop(expired_lease)
+        raise ValueError("LEASE_NOT_ACTIVE")
+
+    async def invalidate_movement_lease(self):
+        async with self._movement_lease_lock:
+            self._active_movement_lease = None
+            self._movement_lease_stop_pending = True
+            task = self._movement_lease_task
+            self._movement_lease_task = None
+            if task is not None and task is not asyncio.current_task():
+                task.cancel()
+
+    async def complete_movement_stop(self):
+        async with self._movement_lease_lock:
+            self._movement_lease_stop_pending = False
+
+    async def _dispatch_lease_stop(self, lease_id):
+        try:
+            async with command_request_slot("stop"):
+                manager = await self.robot_manager()
+                stop = getattr(manager, "stop_preserving_mode", manager.stop_all)
+                sequence = await asyncio.to_thread(stop)
+                if sequence is None:
+                    raise RuntimeError("STOP_DISPATCH_FAILED")
+                request_id = f"lease-stop:{lease_id}"
+                command_id = str(uuid4())
+                self.register_command(
+                    command_id, "stop", manager.mode.value, request_id=request_id
+                )
+                self.start_ack_tracking(command_id, sequence)
+                _log_command_outcome(
+                    command_id=command_id,
+                    command="stop",
+                    outcome="lease_expired",
+                    http_status=202,
+                    control_mode=manager.mode.value,
+                )
+        except Exception:
+            logger.exception("Normal STOP dispatch failed after movement lease ended")
+            return False
+        await self.complete_movement_stop()
+        return True
+
+    async def _expire_movement_lease(self, lease_id):
+        try:
+            while True:
+                async with self._movement_lease_lock:
+                    lease = self._active_movement_lease
+                    if lease is None or lease["lease_id"] != lease_id:
+                        return
+                    remaining = lease["expires_at_monotonic"] - time.monotonic()
+                    if remaining <= 0:
+                        self._active_movement_lease = None
+                        self._movement_lease_stop_pending = True
+                        break
+                await asyncio.sleep(remaining)
+            await self._dispatch_lease_stop(lease_id)
+        except asyncio.CancelledError:
+            raise
+        finally:
+            if self._movement_lease_task is asyncio.current_task():
+                self._movement_lease_task = None
+
+    async def shutdown_movement_lease(self):
+        async with self._movement_lease_lock:
+            lease = self._active_movement_lease
+            self._active_movement_lease = None
+            self._movement_lease_stop_pending = lease is not None
+            task = self._movement_lease_task
+            self._movement_lease_task = None
+            if task is not None and task is not asyncio.current_task():
+                task.cancel()
+        if lease is not None:
+            await self._dispatch_lease_stop(lease["lease_id"])
+
+    async def stop_on_startup(self):
+        """Send normal STOP before serving after a Pi API process restart."""
+        manager = self._robot_manager
+        if manager is None:
+            return
+        try:
+            stop = getattr(manager, "stop_preserving_mode", manager.stop_all)
+            sequence = await asyncio.to_thread(stop)
+            transport = manager.motor.gpio
+            acknowledgement = (
+                await asyncio.to_thread(transport.wait_for_ack, sequence, 0.75)
+                if sequence is not None
+                else None
+            )
+            if acknowledgement != "OK":
+                manager.inhibit_motion()
+                logger.error("Startup STOP was not acknowledged; movement remains inhibited")
+        except Exception:
+            try:
+                manager.inhibit_motion()
+            except Exception:
+                pass
+            logger.exception("Startup STOP failed; movement remains inhibited")
 
     def _publish_telemetry_event(self, event):
         """Fan out without letting a slow WebSocket block serial reading."""
@@ -850,10 +1096,18 @@ class CommandBodySizeLimitMiddleware:
         self.max_bytes = max_bytes
 
     async def __call__(self, scope, receive, send):
+        request_path = scope.get("path", "")
+        is_lease_renewal = (
+            request_path.startswith("/api/v1/robot/commands/")
+            and request_path.endswith("/renew")
+        )
         if (
             scope["type"] != "http"
             or scope.get("method") != "POST"
-            or scope.get("path") not in self._COMMAND_PATHS
+            or (
+                request_path not in self._COMMAND_PATHS
+                and not is_lease_renewal
+            )
         ):
             await self.app(scope, receive, send)
             return
@@ -1055,6 +1309,22 @@ ROBOT_COMMAND_ERROR_RESPONSES = {
                             }
                         }
                     },
+                    "app_disconnected": {
+                        "value": {
+                            "detail": {
+                                "error": "app_disconnected",
+                                "error_code": "APP_DISCONNECTED",
+                            }
+                        }
+                    },
+                    "lease_not_active": {
+                        "value": {
+                            "detail": {
+                                "error": "lease_not_active",
+                                "error_code": "LEASE_NOT_ACTIVE",
+                            }
+                        }
+                    },
                 }
             }
         },
@@ -1191,9 +1461,11 @@ async def require_rate_limited_api_token(
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     await asyncio.to_thread(services.initialize_command_store)
+    await services.stop_on_startup()
     try:
         yield
     finally:
+        await services.shutdown_movement_lease()
         pending_commands = tuple(services._command_tasks)
         if pending_commands:
             await asyncio.gather(*pending_commands, return_exceptions=True)
@@ -1228,10 +1500,12 @@ _HTTP_STATUS_ERROR_CODES = {
 
 _ERROR_NAME_CODES = {
     "authentication_not_configured": "AUTHENTICATION_NOT_CONFIGURED",
+    "app_disconnected": "APP_DISCONNECTED",
     "command_not_found": "COMMAND_NOT_FOUND",
     "command_queue_busy": "API_BUSY",
     "invalid_command": "INVALID_COMMAND",
     "mode_switch_failed": "MODE_SWITCH_FAILED",
+    "lease_not_active": "LEASE_NOT_ACTIVE",
     "request_body_too_large": "PAYLOAD_TOO_LARGE",
     "request_id_conflict": "REQUEST_ID_REUSED",
     "rate_limited": "RATE_LIMITED",
@@ -1381,6 +1655,7 @@ async def switch_control_mode(request: ModeSwitchRequest):
     """Stop and confirm before selecting Manual or Auto; never starts motion."""
     request_id = str(uuid4())
     async with command_request_slot():
+        await services.invalidate_movement_lease()
         try:
             await services.switch_mode(request.mode)
         except ModeSwitchError as exc:
@@ -1414,6 +1689,7 @@ async def switch_control_mode(request: ModeSwitchRequest):
                 detail={"error": "robot_unavailable"},
             ) from exc
 
+        await services.complete_movement_stop()
         manager = await services.robot_manager()
         _log_command_outcome(
             command_id=request_id,
@@ -1454,6 +1730,17 @@ async def move(request: MoveRequest):
                 control_mode=response.control_mode,
             )
             return response
+
+        if not await services.can_start_movement():
+            if not services.mobile_client_connected():
+                raise HTTPException(
+                    status_code=503,
+                    detail={"error": "app_disconnected"},
+                )
+            raise HTTPException(
+                status_code=503,
+                detail={"error": "movement_lease_stop_pending"},
+            )
 
         manager = await services.robot_manager()
         record, created = services.reserve_command_request(
@@ -1549,6 +1836,7 @@ async def move(request: MoveRequest):
             manager.mode.value,
             request_id=request_id,
         )
+        await services.start_movement_lease(command_id)
         services.start_ack_tracking(command_id, sequence)
         _log_command_outcome(
             command_id=command_id,
@@ -1557,7 +1845,40 @@ async def move(request: MoveRequest):
             http_status=202,
             control_mode=manager.mode.value,
         )
-        return CommandResponse(**services.command_result(command_id))
+        result = services.command_result(command_id)
+        result["lease_id"] = command_id
+        return CommandResponse(**result)
+
+
+@app.post(
+    "/api/v1/robot/commands/{lease_id}/renew",
+    response_model=MovementLeaseResponse,
+    status_code=200,
+    tags=["robot"],
+    dependencies=[Depends(require_rate_limited_api_token)],
+)
+async def renew_movement_lease(lease_id: str, request: LeaseRenewalRequest):
+    """Renew a live movement lease without writing or replaying a motor command."""
+    if not services.mobile_client_connected():
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "app_disconnected"},
+        )
+    try:
+        return await services.renew_movement_lease(
+            lease_id, str(request.request_id)
+        )
+    except ValueError as exc:
+        error_code = str(exc)
+        if error_code == "REQUEST_ID_REUSED":
+            raise HTTPException(
+                status_code=409,
+                detail={"error": "request_id_conflict", "error_code": error_code},
+            ) from exc
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "lease_not_active", "error_code": "LEASE_NOT_ACTIVE"},
+        ) from exc
 
 
 @app.post(
@@ -1594,6 +1915,7 @@ async def stop(request: StopRequest):
             return _replay_command_request(record, action, request_id)
         command_id = record["command_id"]
 
+        await services.invalidate_movement_lease()
         try:
             sequence = await services.stop_all()
         except Exception as exc:
