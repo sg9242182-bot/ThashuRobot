@@ -226,7 +226,7 @@ python -m pip install -r api/requirements-test.txt
 python -m unittest api.tests.test_api thashu.tests.test_hardware_protocol thashu.tests.test_robot_manager thashu.tests.test_runtime_cleanup
 ```
 
-The current hardware-protocol unit test uses a fake serial transport to check command framing and sequence behavior. It does not execute the ESP32 parser or replace hardware verification. The separate shared-vector parser harness is not present on this branch.
+The hardware-protocol unit test uses a fake serial transport and `thashu/tests/protocol_vectors.json` to check Pi command framing and sequence behavior. It does not execute the ESP32 parser or replace hardware verification; the firmware does not yet consume this fixture in a parser test.
 
 ## Error responses for the Flutter client
 
