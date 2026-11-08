@@ -2,6 +2,7 @@ import csv
 import queue
 import sys
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -90,6 +91,31 @@ class PiEsp32ProtocolVectorTests(unittest.TestCase):
             "ERROR|OBSTACLE",
         )
 
+    def test_delayed_ack_received_while_waiting_is_correlated(self):
+        transport = make_transport(1)
+        result = {}
+        waiting = threading.Event()
+
+        def wait_for_ack():
+            waiting.set()
+            result["ack"] = transport.wait_for_ack(1, timeout=0.5)
+
+        waiter = threading.Thread(target=wait_for_ack)
+        waiter.start()
+        self.assertTrue(waiting.wait(timeout=0.2))
+        time.sleep(0.01)
+        transport._record_acknowledgement("ACK|1|OK")
+        waiter.join(timeout=1.0)
+
+        self.assertFalse(waiter.is_alive())
+        self.assertEqual(result.get("ack"), "OK")
+
+    def test_heartbeat_alive_ack_does_not_satisfy_command_ack(self):
+        transport = make_transport(1)
+        transport._record_acknowledgement("ACK|1|ALIVE")
+
+        self.assertIsNone(transport.wait_for_ack(1, timeout=0.001))
+
     def test_ignores_versioned_ack_frame(self):
         transport = make_transport(1)
         transport._record_acknowledgement(
@@ -171,6 +197,23 @@ class PiEsp32ProtocolVectorTests(unittest.TestCase):
         self.assertTrue(transport.is_connected())
         self.assertTrue(previous.closed)
         self.assertIs(transport._serial, reconnected)
+
+    def test_receive_silence_disconnects_fake_serial_link(self):
+        transport = make_transport(1)
+        transport._stop_event = threading.Event()
+        transport._last_rx_monotonic = time.monotonic() - GPIOControl.RX_SILENCE_TIMEOUT - 1
+        reader = threading.Thread(target=transport._reader_loop)
+        reader.start()
+        try:
+            deadline = time.monotonic() + 1.0
+            while transport.is_connected() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertFalse(transport.is_connected())
+            self.assertTrue(transport._serial is None)
+        finally:
+            transport._stop_event.set()
+            reader.join(timeout=1.0)
+        self.assertFalse(reader.is_alive())
 
 
 if __name__ == "__main__":

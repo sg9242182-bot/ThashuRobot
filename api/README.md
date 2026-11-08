@@ -218,11 +218,12 @@ local API-only development session, Uvicorn may be run separately only while
 the robot process is stopped; never let both processes open the ESP32 serial
 port at once.
 
-Run the API and Pi protocol-framing tests from the repository root:
+Install the test/runtime dependencies and run the backend unit suites from the
+repository root:
 
 ```powershell
-python -m unittest api.tests.test_api
-python -m unittest thashu.tests.test_gpio_protocol
+python -m pip install -r api/requirements-test.txt
+python -m unittest api.tests.test_api thashu.tests.test_gpio_protocol thashu.tests.test_robot_manager
 ```
 
 The Pi protocol test reads the shared vectors from

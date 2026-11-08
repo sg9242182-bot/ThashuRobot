@@ -1,0 +1,32 @@
+name: Pi backend tests
+
+"on":
+  push:
+  pull_request:
+
+jobs:
+  backend-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Raspberry Pi Python version
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: api/requirements-test.txt
+
+      - name: Install API and test dependencies
+        run: python -m pip install -r api/requirements-test.txt
+
+      - name: Check Python syntax
+        run: python -m compileall -q api thashu/core thashu/hardware
+
+      - name: Run backend and fake-transport tests
+        run: >-
+          python -m unittest
+          api.tests.test_api
+          thashu.tests.test_gpio_protocol
+          thashu.tests.test_robot_manager
