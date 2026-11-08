@@ -31,9 +31,6 @@ private:
     static constexpr uint8_t SDA_PIN = 21;
     static constexpr uint8_t SCL_PIN = 22;
     static constexpr uint8_t MUX_ADDRESS = 0x70;
-    static constexpr uint8_t REAR_MUX_CHANNELS[3] = {0, 1, 2};
-    static constexpr uint8_t FRONT_XSHUT_PINS[3] = {4, 16, 17};
-    static constexpr uint8_t FRONT_I2C_ADDRESSES[3] = {0x30, 0x31, 0x32};
     static constexpr uint8_t OUT_OF_RANGE_STATUS = 4;
     static constexpr uint8_t OBSTACLE_DISTANCE_CM = 30;
     static constexpr unsigned long STARTUP_DELAY_MS = 10;
