@@ -4,15 +4,15 @@ This guide is for Tharun to prepare the Pi when it is available. It installs and
 
 ## 1. Get the backend code
 
-Use the team's approved repository access and the `vishal-phase1` branch. From the repository root on the Pi:
+Use the reviewed backend revision. The current integration branch is `phase-12-pi-api-https`, based on current `main`; it contains the API, shared Pi runtime integration, and HTTPS configuration. From the repository root on the Pi:
 
 ```bash
 git status --short
-git switch vishal-phase1
-git pull
+git switch phase-12-pi-api-https
+git pull --ff-only origin phase-12-pi-api-https
 ```
 
-If the Pi already has uncommitted work, stop before switching branches or pulling and review it first.
+If the Pi has uncommitted work, stop before switching or pulling and review it first. Do not pull the older `vishal-phase1` branch for this integration.
 
 ## 2. Install the Python dependencies
 
