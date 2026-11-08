@@ -85,8 +85,8 @@ Make hardware communication explicit and reliable before exposing movement contr
 - [x] Validate incoming messages and reject unknown or out-of-range commands in the integrated ESP32 parser; Pi ACK handling matches the v0 sequence number.
 - [x] Ensure one authoritative robot manager path dispatches API movement commands to the motor service.
 - [x] Separate transport parsing from robot behavior and API code.
-- [x] Document the deployed v0 protocol and shared test vectors.
-- [ ] Add a Pi test that consumes the shared vectors. The current `test_hardware_protocol` test uses fake serial and does not read the vector file; no shared-vector parser harness is present on this branch.
+- [x] Document the deployed v0 protocol.
+- [ ] Add a language-neutral shared-vector file and connect Pi tests to it. The current repository tree has no shared vector file; `test_hardware_protocol` uses fake serial and checks command framing/sequence behavior without vectors.
 - [x] Do not invent pin mappings or assume the current motor driver; the integrated firmware remains the hardware source of truth.
 - [x] Record Tharun-reported v0 parser checks: HEARTBEAT, STOP, EYES, invalid EYES argument, unknown command, partial frames, oversized-frame discard, and recovery. Unsupported-version testing does not apply to v0.
 - [x] Verify live ESP32 telemetry and heartbeat on the Pi without reflashing. Tharun's 2026-11-08 run received 377 telemetry frames (mean interval 80 ms, longest 108 ms) and 20/20 HEARTBEAT ACKs (mean round trip 41.3 ms, maximum 66.6 ms). The API STOP command lookup also returned `acknowledged` with no error.
