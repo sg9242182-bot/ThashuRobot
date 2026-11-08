@@ -129,6 +129,24 @@ _FOLLOW_SELECTION_PHRASES = {
     "select the person on the right": "RIGHT",
 }
 
+_ROAM_START_PHRASES = {
+    "start roaming",
+    "start roaming mode",
+    "roaming mode",
+    "roam around",
+    "roam around the room",
+    "start exploring",
+    "explore the room",
+}
+_ROAM_STOP_PHRASES = {
+    "stop roaming",
+    "stop roaming mode",
+    "end roaming",
+    "cancel roaming",
+    "stop exploring",
+}
+
+
 
 def get_follow_command(user_input: str):
     """Return an exact, deterministic follow-mode command or None."""
@@ -138,6 +156,16 @@ def get_follow_command(user_input: str):
     if normalized in _FOLLOW_STOP_PHRASES:
         return "STOP"
     return _FOLLOW_SELECTION_PHRASES.get(normalized)
+
+
+def get_roaming_command(user_input: str):
+    """Return an exact, deterministic roaming-mode command or None."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", (user_input or "").lower()).strip()
+    if normalized in _ROAM_START_PHRASES:
+        return "START"
+    if normalized in _ROAM_STOP_PHRASES:
+        return "STOP"
+    return None
 
 
 _RECOGNITION_ENROLL_PHRASES = {
