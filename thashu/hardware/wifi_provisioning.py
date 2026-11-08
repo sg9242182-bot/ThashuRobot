@@ -223,7 +223,7 @@ async def run() -> None:
             if press_started is not None and now - press_started >= HOLD_SECONDS and now >= advertised_until:
                 STATE.arm()
                 advertised_until = now + WINDOW_SECONDS
-                advert = Advertisement("Thashu Setup", [SERVICE_UUID], timeout=int(WINDOW_SECONDS))
+                advert = Advertisement("Thashu Setup", [SERVICE_UUID], appearance=0, timeout=int(WINDOW_SECONDS))
                 await advert.register(bus, adapter)
                 print("[BLE SETUP] Pairing window open for 60 seconds.")
             if advertised_until and now >= advertised_until:
