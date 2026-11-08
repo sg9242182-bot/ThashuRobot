@@ -1,4 +1,5 @@
 import json
+import time
 import unittest
 from pathlib import Path
 
@@ -75,6 +76,46 @@ class HardwareProtocolTests(unittest.TestCase):
                 self.assertIsNotNone(sequence)
                 expected = vector["request_frame"].format(sequence=sequence) + chr(10)
                 self.assertEqual(self.fake.writes[-1], expected)
+
+    def test_sensor_freshness_is_unknown_until_complete_frame(self):
+        result = self.transport.get_sensor_freshness()
+        self.assertEqual(
+            result, {"observed": False, "fresh": None, "age_ms": None}
+        )
+
+    def test_complete_sensor_frame_with_far_and_na_is_fresh(self):
+        self.transport._update_sensor_snapshot(
+            "TEL|0|SENSORS|TOF_L|420|TOF_C|FAR|TOF_R|NA|US_REAR|730"
+        )
+        result = self.transport.get_sensor_freshness()
+        self.assertTrue(result["observed"])
+        self.assertTrue(result["fresh"])
+        self.assertIsInstance(result["age_ms"], int)
+        snapshot = self.transport.get_sensor_snapshot(max_age=1.0)
+        self.assertEqual(snapshot["tof_center_mm"], "FAR")
+        self.assertIsNone(snapshot["tof_right_mm"])
+
+    def test_stale_diagnostic_age_does_not_relax_safety_snapshot_age(self):
+        self.transport._update_sensor_snapshot(
+            "TEL|0|SENSORS|TOF_L|420|TOF_C|400|TOF_R|390|US_REAR|730"
+        )
+        with self.transport._state_lock:
+            self.transport._sensor_snapshot["received_at"] = time.monotonic() - 1.2
+
+        result = self.transport.get_sensor_freshness(max_age=1.0)
+        self.assertTrue(result["observed"])
+        self.assertFalse(result["fresh"])
+        self.assertGreaterEqual(result["age_ms"], 1200)
+        self.assertIsNone(self.transport.get_sensor_snapshot())
+
+    def test_incomplete_sensor_frame_does_not_create_freshness(self):
+        self.transport._update_sensor_snapshot(
+            "TEL|0|SENSORS|TOF_L|420|TOF_C|400|TOF_R|390"
+        )
+        self.assertEqual(
+            self.transport.get_sensor_freshness(),
+            {"observed": False, "fresh": None, "age_ms": None},
+        )
 
     def test_sequence_numbers_increase(self):
         self.transport.send("STOP")
