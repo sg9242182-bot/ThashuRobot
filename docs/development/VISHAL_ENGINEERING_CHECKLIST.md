@@ -220,11 +220,11 @@ Support predictable startup, shutdown, configuration, and recovery.
 - [x] Separate secrets from ordinary configuration and avoid logging them; the API token is environment-backed, auth tests verify fail-closed behavior, and structured API logs exclude the token.
 - [x] Define service startup order and readiness checks for API, robot manager, and ESP32 communication. The manager/serial transport is initialized before the embedded API; API startup waits up to five seconds for Uvicorn readiness, while ESP32 controller readiness remains explicitly `unknown` without a READY tracker.
 - [x] Handle service shutdown without leaving commands or sockets in an undefined state. API shutdown is requested gracefully, waits up to five seconds, and logs a timeout; telemetry, command tasks, and owned transport have lifespan cleanup.
-- [ ] Coordinate restart/reset/recovery actions with Tharun; ensure privileged actions are authenticated and auditable.
+- [x] Coordinate recovery behavior with Tharun: no remote reset is in scope; normal STOP stays authenticated and audited. Tharun agreed to a 250 ms manual-lease renewal cadence with a provisional 500 ms expiry; Nitesh's Flutter implementation confirmation and hardware stopping-distance test remain pending.
 - [x] Never use a generic API endpoint to execute arbitrary shell commands; the API route-surface test guards this boundary.
 - [x] Add bounded serial reconnect backoff (1, 2, 4, 8, 16, then 30 seconds capped) and avoid rapid endless reconnect attempts. This is reconnect backoff, not an automatic whole-process restart loop.
 - [x] Document recovery behavior for Pi reboot, ESP32 disconnect, API startup/shutdown failure, and configuration error in `api/PI_SETUP.md`.
-- [ ] Verify safety behavior remains owned by the Pi/ESP32 layers even if the mobile app disappears.
+- [ ] Verify safety behavior remains owned by the Pi/ESP32 layers even if the mobile app disappears. Backend code now gates move/renew on an authenticated telemetry connection, expires the manual lease and dispatches normal STOP; fake test and CI results, app disconnect/restart checks, and the restrained stopping-distance test are pending.
 
 ### Exit criteria
 - [x] Startup and shutdown are repeatable in component lifecycle tests; target-Pi behavior remains for Phase 9.
@@ -312,7 +312,7 @@ For each phase, record:
 | 4 — REST API | Complete for component implementation | Live Pi/client verification is in Phase 9. |
 | 5 — WebSocket/telemetry | In progress | Backend/client contract and component logic are implemented; private-network/server-restart integration is pending. |
 | 6 — Diagnostics | Complete | Approved contract and read-only diagnostics endpoint implemented; GitHub Actions run 42512821791 passed 73 API/protocol tests. Flutter client work is tracked in Phase 9. |
-| 7 — Configuration/recovery | In progress | Coordinate restart/reset procedure and confirm the layered safety behavior with Tharun. |
+| 7 — Configuration/recovery | In progress | Backend movement lease and startup STOP are implemented on `phase-12-pi-api-https`; rerun tests/CI, then verify app/Pi disconnect and restart behavior. The 500 ms lease timeout remains provisional pending Tharun's restrained low-speed stopping-distance test; the flashed firmware revision is unknown. |
 | 8 — Security/failure tests | In progress | Automated fake-based checks are covered; STOP ACK passed on Pi. Physical watchdog and movement-timeout evidence remains. |
 | 9 — Mobile/hardware integration | In progress | Pi-local REST health/status/auth/mode/STOP checks passed; phone-to-Pi HTTPS/WebSocket, API movement, telemetry recovery, and app diagnostics remain. |
 | 10 — Handoff | In progress | Run tests/CI for this integration revision, add formatting/static analysis where practical, and verify a second-person setup. |
