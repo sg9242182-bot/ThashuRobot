@@ -204,12 +204,19 @@ class FakeRobotManager:
         self.state_version += 1
         return sequence
 
-    def stop_all(self):
+    def stop_preserving_mode(self):
         sequence = self.motor.stop()
-        self.mode = main.ControlMode.AUTO
         self.auto_active = False
         self.state_version += 1
         return sequence
+
+    def stop_all(self):
+        return self.stop_preserving_mode()
+
+    def inhibit_motion(self):
+        self.motion_inhibited = True
+        self.auto_active = False
+        self.state_version += 1
 
     def start_auto(self):
         if self.mode != main.ControlMode.AUTO:
@@ -232,11 +239,13 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
 
     def make_services(self, factory, db_path):
         service = main.ApiServices(factory, state_db_path=db_path)
+        service._mobile_client_test_override = True
         self.services_for_cleanup.append(service)
         return service
 
     async def asyncTearDown(self):
         for service in self.services_for_cleanup:
+            await service.shutdown_movement_lease()
             pending = tuple(service._command_tasks)
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
@@ -448,6 +457,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, "dispatched")
         self.assertEqual(response.control_mode, "MANUAL")
         self.assertTrue(response.timestamp)
+        self.assertEqual(response.lease_id, response.command_id)
         manager = await main.services.robot_manager()
         motor = manager.motor
         self.assertEqual(motor.commands, [
@@ -782,6 +792,127 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(retry.exception.detail, first.exception.detail)
         self.assertEqual(len(manager.motor.commands), count_after_first)
 
+    async def test_move_is_blocked_when_no_authenticated_telemetry_client_is_connected(self):
+        from fastapi import HTTPException
+
+        main.services._mobile_client_test_override = False
+        with self.assertRaises(HTTPException) as failure:
+            await self.endpoint("/api/v1/robot/move")(
+                main.MoveRequest(
+                    request_id=UUID("abababab-abab-4bab-8bab-abababababab"),
+                    direction="forward",
+                    speed=100,
+                )
+            )
+        self.assertEqual(failure.exception.status_code, 503)
+        self.assertEqual(failure.exception.detail["error_code"], "APP_DISCONNECTED")
+        manager = await main.services.robot_manager()
+        self.assertEqual(manager.motor.commands, [])
+
+    async def test_lease_renewal_extends_live_lease_without_redispatch_even_on_retry(self):
+        await main.services.switch_mode("MANUAL")
+        moved = await self.endpoint("/api/v1/robot/move")(
+            main.MoveRequest(
+                request_id=UUID("12121212-1212-4121-8121-121212121212"),
+                direction="forward",
+                speed=100,
+            )
+        )
+        manager = await main.services.robot_manager()
+        command_count = len(manager.motor.commands)
+        renew = self.endpoint("/api/v1/robot/commands/{lease_id}/renew")
+        request = main.LeaseRenewalRequest(
+            request_id=UUID("13131313-1313-4131-8131-131313131313")
+        )
+        first = await renew(moved.command_id, request)
+        await asyncio.sleep(0.01)
+        retry = await renew(moved.command_id, request)
+
+        self.assertEqual(first.lease_id, moved.command_id)
+        self.assertEqual(first.status, "active")
+        self.assertGreater(retry.expires_at, first.expires_at)
+        self.assertEqual(len(manager.motor.commands), command_count)
+
+    async def test_expired_or_stopped_lease_cannot_be_revived(self):
+        from fastapi import HTTPException
+
+        await main.services.switch_mode("MANUAL")
+        main.services._movement_lease_timeout_seconds = 0.02
+        moved = await self.endpoint("/api/v1/robot/move")(
+            main.MoveRequest(
+                request_id=UUID("14141414-1414-4141-8141-141414141414"),
+                direction="forward",
+                speed=100,
+            )
+        )
+        manager = await main.services.robot_manager()
+        await asyncio.sleep(0.05)
+        self.assertEqual(manager.mode, main.ControlMode.MANUAL)
+        self.assertEqual(manager.motor.commands[-1], ("stop", None))
+        command_count = len(manager.motor.commands)
+
+        with self.assertRaises(HTTPException) as failure:
+            await self.endpoint("/api/v1/robot/commands/{lease_id}/renew")(
+                moved.command_id,
+                main.LeaseRenewalRequest(
+                    request_id=UUID("15151515-1515-4151-8151-151515151515")
+                ),
+            )
+        self.assertEqual(failure.exception.status_code, 409)
+        self.assertEqual(failure.exception.detail["error_code"], "LEASE_NOT_ACTIVE")
+        self.assertEqual(len(manager.motor.commands), command_count)
+
+    async def test_stop_cancels_lease_before_dispatch_and_preserves_selected_mode(self):
+        from fastapi import HTTPException
+
+        await main.services.switch_mode("MANUAL")
+        moved = await self.endpoint("/api/v1/robot/move")(
+            main.MoveRequest(
+                request_id=UUID("16161616-1616-4161-8161-161616161616"),
+                direction="forward",
+                speed=100,
+            )
+        )
+        manager = await main.services.robot_manager()
+        stop_response = await self.endpoint("/api/v1/robot/stop")(
+            main.StopRequest(
+                request_id=UUID("17171717-1717-4171-8171-171717171717")
+            )
+        )
+        command_count = len(manager.motor.commands)
+        self.assertEqual(stop_response.control_mode, "MANUAL")
+        self.assertIsNone(main.services._active_movement_lease)
+        self.assertEqual(manager.mode, main.ControlMode.MANUAL)
+
+        with self.assertRaises(HTTPException) as failure:
+            await self.endpoint("/api/v1/robot/commands/{lease_id}/renew")(
+                moved.command_id,
+                main.LeaseRenewalRequest(
+                    request_id=UUID("18181818-1818-4181-8181-181818181818")
+                ),
+            )
+        self.assertEqual(failure.exception.detail["error_code"], "LEASE_NOT_ACTIVE")
+        self.assertEqual(len(manager.motor.commands), command_count)
+
+    async def test_app_disconnect_expires_lease_with_normal_stop_without_mode_change(self):
+        await main.services.switch_mode("MANUAL")
+        main.services._movement_lease_timeout_seconds = 0.02
+        await self.endpoint("/api/v1/robot/move")(
+            main.MoveRequest(
+                request_id=UUID("19191919-1919-4191-8191-191919191919"),
+                direction="forward",
+                speed=100,
+            )
+        )
+        manager = await main.services.robot_manager()
+        main.services._mobile_client_test_override = False
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(manager.motor.commands[-1], ("stop", None))
+        self.assertEqual(manager.mode, main.ControlMode.MANUAL)
+        self.assertFalse(manager.auto_active)
+        self.assertIsNone(main.services._active_movement_lease)
+
     async def test_stop_dispatches_dedicated_stop(self):
         manager = await main.services.robot_manager()
         await main.services.switch_mode("MANUAL")
@@ -790,7 +921,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(response.command, "stop")
         self.assertEqual(response.status, "dispatched")
-        self.assertEqual(response.control_mode, "AUTO")
+        self.assertEqual(response.control_mode, "MANUAL")
         self.assertEqual(response.request_id, "abababab-abab-4bab-8bab-abababababab")
         self.assertTrue(response.timestamp)
         manager = await main.services.robot_manager()
@@ -960,7 +1091,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
                     speed=100,
                 )
             )
-        self.assertEqual(blocked.exception.status_code, 409)
+        self.assertEqual(blocked.exception.status_code, 503)
         self.assertEqual(manager.motor.commands, [
             ("stop", None),
             ("stop", None),
@@ -1193,7 +1324,12 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
 
     def test_openapi_documents_command_body_limit(self):
         schema = main.app.openapi()
-        for path in ("/api/v1/robot/move", "/api/v1/robot/stop", "/api/v1/robot/mode"):
+        for path in (
+            "/api/v1/robot/move",
+            "/api/v1/robot/commands/{lease_id}/renew",
+            "/api/v1/robot/stop",
+            "/api/v1/robot/mode",
+        ):
             with self.subTest(path=path):
                 operation = schema["paths"][path]["post"]
                 self.assertIn("413", operation["responses"])
@@ -1220,6 +1356,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             ("GET", "/api/v1/robot/commands/{command_id}"),
             ("POST", "/api/v1/robot/mode"),
             ("POST", "/api/v1/robot/move"),
+            ("POST", "/api/v1/robot/commands/{lease_id}/renew"),
             ("POST", "/api/v1/robot/stop"),
         })
         websocket_paths = {
@@ -1259,7 +1396,11 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         credentials = HTTPAuthorizationCredentials(
             scheme="Bearer", credentials="test-token"
         )
-        for path in ("/api/v1/robot/move", "/api/v1/robot/mode"):
+        for path in (
+            "/api/v1/robot/move",
+            "/api/v1/robot/commands/{lease_id}/renew",
+            "/api/v1/robot/mode",
+        ):
             route = next(route for route in main.app.routes if route.path == path)
             calls = {dependency.call for dependency in route.dependant.dependencies}
             self.assertIn(main.require_rate_limited_api_token, calls)
