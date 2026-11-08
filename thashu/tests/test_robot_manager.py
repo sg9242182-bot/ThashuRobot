@@ -22,6 +22,7 @@ from core.robot_manager import (
 class FakeTransport:
     def __init__(self, ack="OK", snapshot=None):
         self.ack = ack
+        self.connected = True
         self.waited_for = []
         self.snapshot = snapshot or {
             "tof_left_mm": 500,
@@ -35,7 +36,7 @@ class FakeTransport:
         return self.ack
 
     def is_connected(self):
-        return True
+        return self.connected
 
     def get_sensor_snapshot(self, max_age=0.75):
         return self.snapshot
@@ -74,6 +75,13 @@ class RobotCommandManagerTests(unittest.TestCase):
     def setUp(self):
         self.motor = FakeMotor(sequence=17)
         self.manager = RobotCommandManager(self.motor)
+
+    def test_dispatch_blocks_when_esp32_transport_is_disconnected(self):
+        self.motor.gpio.connected = False
+        with self.assertRaises(RobotSafetyError) as failure:
+            self.manager.dispatch("forward", 100)
+        self.assertEqual(failure.exception.error_code, "ESP32_UNAVAILABLE")
+        self.assertEqual(self.motor.commands, [("stop", None)])
 
     def test_dispatches_allowed_move_with_requested_speed(self):
         self.assertEqual(self.manager.dispatch("forward", 100), 17)
