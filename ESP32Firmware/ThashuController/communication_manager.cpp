@@ -9,15 +9,21 @@ bool parseLong(const char* text, long& value) {
     if (!text || !*text) return false;
     char* end = nullptr;
     value = strtol(text, &end, 10);
-    return *end == '\0';
+    return *end == '\\0';
 }
 }
 
 void CommunicationManager::begin(MotorManager& motorManager, SafetyManager& safetyManager,
-                                  EyeManager& eyeManager, ServoManager& servoManager, ToFManager& tofManager, UltrasonicManager& rearUltrasonic) {
-    motors = &motorManager; safety = &safetyManager; eyes = &eyeManager; servos = &servoManager; tof = &tofManager; rear = &rearUltrasonic;
+                                  EyeManager& eyeManager, ServoManager& servoManager,
+                                  ToFManager& tofManager) {
+    motors = &motorManager;
+    safety = &safetyManager;
+    eyes = &eyeManager;
+    servos = &servoManager;
+    tof = &tofManager;
     Serial.println("EVENT|0|READY");
     Serial.println("INFO|MOTOR_MAP|M0=Motor1(front-left)|M1=Motor2(rear-left)|M2=Motor3(front-right)|M3=Motor4(rear-right)");
+    Serial.println("INFO|SENSOR_MAP|TOF_L=front-left|TOF_C=front-center|TOF_R=front-right|US_REAR=nearest-of-rear-ToF-L/C/R-mm");
 }
 
 void CommunicationManager::reportFault(const char* subsystem, const char* detail) {
@@ -125,10 +131,10 @@ void CommunicationManager::readCommands() {
     size_t consumed = 0;
     while (Serial.available() && consumed++ < COMMAND_BUFFER_SIZE) {
         const char c = (char)Serial.read();
-        if (c == '\n') {
+        if (c == '\\n') {
             if (!discardingCommand && commandLength) {
-                commandBuffer[commandLength] = '\0';
-                if (commandLength && commandBuffer[commandLength-1] == '\r') commandBuffer[commandLength-1] = '\0';
+                commandBuffer[commandLength] = '\\0';
+                if (commandLength && commandBuffer[commandLength-1] == '\\r') commandBuffer[commandLength-1] = '\\0';
                 handle(commandBuffer);
             }
             commandLength = 0; discardingCommand = false;
@@ -143,19 +149,49 @@ void CommunicationManager::sendTelemetry() {
     if (millis() - lastTelemetryMs < 50) return;
     lastTelemetryMs = millis();
     Serial.print("TEL|0|SENSORS");
-    const ToFManager::SensorId ids[] = {ToFManager::FRONT_LEFT, ToFManager::FRONT_CENTER, ToFManager::FRONT_RIGHT};
+    const ToFManager::SensorId frontIds[] = {
+        ToFManager::FRONT_LEFT, ToFManager::FRONT_CENTER, ToFManager::FRONT_RIGHT
+    };
     const char* labels[] = {"|TOF_L|", "|TOF_C|", "|TOF_R|"};
     for (uint8_t i = 0; i < 3; ++i) {
         Serial.print(labels[i]);
-        if (!tof->isFresh(ids[i])) Serial.print("NA");
-        else if (tof->isValid(ids[i])) Serial.print(tof->getDistanceMm(ids[i]));
-        else if (tof->isOutOfRange(ids[i])) Serial.print("FAR");
+        const ToFManager::SensorId id = frontIds[i];
+        if (!tof->isFresh(id)) Serial.print("NA");
+        else if (tof->isValid(id) || tof->isObstacleDetected(id)) Serial.print(tof->getDistanceMm(id));
+        else if (tof->isOutOfRange(id)) Serial.print("FAR");
         else Serial.print("NA");
     }
+
+    // Preserve the existing four-pair telemetry frame so the Pi parser keeps
+    // working. US_REAR is now the nearest rear ToF distance in millimetres.
+    const ToFManager::SensorId rearIds[] = {
+        ToFManager::REAR_LEFT, ToFManager::REAR_CENTER, ToFManager::REAR_RIGHT
+    };
+    bool rearReady = true;
+    bool rearAllFar = true;
+    bool haveRearDistance = false;
+    uint16_t nearestRearMm = 0xFFFFU;
+    for (uint8_t i = 0; i < 3; ++i) {
+        const ToFManager::SensorId id = rearIds[i];
+        if (!tof->isFresh(id)) {
+            rearReady = false;
+            break;
+        }
+        if (tof->isOutOfRange(id)) continue;
+        if (!tof->isValid(id) && !tof->isObstacleDetected(id)) {
+            rearReady = false;
+            break;
+        }
+        rearAllFar = false;
+        haveRearDistance = true;
+        if (tof->getDistanceMm(id) < nearestRearMm) {
+            nearestRearMm = tof->getDistanceMm(id);
+        }
+    }
     Serial.print("|US_REAR|");
-    if (!rear->isFresh()) Serial.print("NA");
-    else if (rear->isValid()) Serial.print((long)(rear->getDistanceCm() * 10.0f));
-    else if (rear->isOutOfRange()) Serial.print("FAR");
+    if (!rearReady) Serial.print("NA");
+    else if (!haveRearDistance && rearAllFar) Serial.print("FAR");
+    else if (haveRearDistance) Serial.print(nearestRearMm);
     else Serial.print("NA");
     Serial.println();
 }
