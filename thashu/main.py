@@ -100,7 +100,7 @@ _last_idle_recognized_person = None
 _last_idle_recognized_at = 0.0
 _motion_timer = None
 _motion_generation = 0
-_motion_lock = threading.Lock()
+_motion_lock = threading.RLock()
 _shutdown_event = threading.Event()
 _shutdown_lock = threading.Lock()
 _shutdown_complete = False
@@ -409,6 +409,105 @@ def stop_motion():
         return motors.stop()
 
 
+_api_server = None
+_api_thread = None
+
+
+def _cancel_motion_sources():
+    """Cancel voice/follow motion before API mode changes and STOP commands."""
+    global _auto_face_track_id, _follow_start_pending, _follow_region_pending
+    global _follow_search_active, _follow_motion_active
+    global _motion_timer, _motion_generation
+
+    with _motion_lock:
+        _follow_start_pending = False
+        _follow_region_pending = None
+        _follow_search_active = False
+        _auto_face_track_id = None
+        follow_logic.stop()
+        servo_tracker.stop_search()
+        _motion_generation += 1
+        if _motion_timer is not None:
+            _motion_timer.cancel()
+            _motion_timer = None
+        _follow_motion_active = False
+
+
+def _start_api_server():
+    """Start the mobile API on this process's existing motor/serial transport."""
+    global _api_server, _api_thread
+
+    try:
+        import ipaddress
+        import sys
+        from pathlib import Path
+
+        repo_root = str(Path(__file__).resolve().parents[1])
+        if repo_root not in sys.path:
+            sys.path.insert(0, repo_root)
+
+        import uvicorn
+        from api.config import get_api_tls_files
+        from api.main import app, services
+        from core.config import api_host, api_port
+        from core.robot_manager import RobotCommandManager
+
+        host = api_host()
+        port = api_port()
+        certfile, keyfile = get_api_tls_files()
+        try:
+            loopback = host.lower() == "localhost" or ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            loopback = False
+        if not loopback and not (certfile and keyfile):
+            raise ValueError(
+                "Refusing non-loopback API without TLS; set both TLS certificate and key paths"
+            )
+
+        manager = RobotCommandManager(
+            motor=motors,
+            command_lock=_motion_lock,
+            before_mode_switch=_cancel_motion_sources,
+            before_external_stop=_cancel_motion_sources,
+        )
+        services.attach_robot_manager(manager)
+        config = uvicorn.Config(
+            app,
+            host=host,
+            port=port,
+            log_level="info",
+            ws_ping_interval=20.0,
+            ws_ping_timeout=10.0,
+            ssl_certfile=certfile,
+            ssl_keyfile=keyfile,
+        )
+        _api_server = uvicorn.Server(config)
+        _api_thread = threading.Thread(
+            target=_api_server.run,
+            name="thashu-api",
+            daemon=True,
+        )
+        _api_thread.start()
+        scheme = "https" if certfile and keyfile else "http"
+        print(f"[API] Started at {scheme}://{host}:{port}; shares ESP32 transport")
+    except Exception as exc:
+        print(f"[API] Startup failed ({type(exc).__name__}); robot voice/runtime remains available")
+
+
+def _stop_api_server():
+    """Stop Uvicorn cleanly before closing the shared ESP32 transport."""
+    global _api_server, _api_thread
+    if _api_server is not None:
+        _api_server.should_exit = True
+    if _api_thread is not None and _api_thread is not threading.current_thread():
+        _api_thread.join(timeout=5.0)
+        if _api_thread.is_alive():
+            print("[API] Server thread did not stop within 5 seconds")
+    _api_thread = None
+    _api_server = None
+
+
+
 def _shutdown_runtime(reason="process exit"):
     """Stop motion first, then close owned workers and device resources once."""
     global _shutdown_complete
@@ -445,6 +544,11 @@ def _shutdown_runtime(reason="process exit"):
         audio.stop()
     except Exception as exc:
         print(f"[SYSTEM] Audio shutdown warning: {exc}")
+
+    try:
+        _stop_api_server()
+    except Exception as exc:
+        print(f"[SYSTEM] API shutdown warning: {exc}")
 
     try:
         motors.gpio.close()
@@ -840,6 +944,7 @@ def main():
     global _memory_delete_pending, _memory_pending
     global _last_idle_recognized_person, _last_idle_recognized_at
     print("[SYSTEM] Jarvis started")
+    _start_api_server()
 
     # Start systems
     audio.start()
