@@ -4,15 +4,16 @@ This guide is for Tharun to prepare the Pi when it is available. It installs and
 
 ## 1. Get the backend code
 
-Use the team's approved repository access and the `phase-10` branch. From the repository root on the Pi:
+Use the canonical `main` branch after the API integration has been merged. From the repository root on the Pi:
 
 ```bash
-git status --short
-git switch phase-10
-git pull
+git status --short --branch
+git fetch origin
+git switch main
+git pull --ff-only origin main
 ```
 
-If the Pi already has uncommitted work, stop before switching branches or pulling and review it first.
+If the Pi has uncommitted work, stop before switching or pulling and review it first. Do not run directly from `vishal-phase1`; that branch contains older robot runtime files.
 
 ## 2. Install the Python dependencies
 
