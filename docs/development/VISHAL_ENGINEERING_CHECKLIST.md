@@ -196,7 +196,7 @@ Publish useful, consistent live state to the mobile app.
 Make failures observable and actionable without pretending an untested subsystem is healthy.
 
 ### Checklist
-- [ ] Define diagnostic checks and their evidence source with each subsystem owner. Current API status only reports API/transport/mode and keeps controller readiness unknown; diagnostics fields/routes need an agreed contract before implementation.
+- [ ] Define diagnostic checks and their evidence source with each subsystem owner. Current API status only reports API/transport/mode and keeps controller readiness unknown; diagnostics fields/routes need an agreed contract before implementation. A review draft is in [`VISHAL_DIAGNOSTICS_CONTRACT_DRAFT.md`](VISHAL_DIAGNOSTICS_CONTRACT_DRAFT.md); Tharun and Niteshvar approval is pending.
 - [ ] Use PASS, WARNING, FAIL, and UNKNOWN where that taxonomy is approved; the app/diagnostics taxonomy has not been agreed as a backend response schema.
 - [ ] Report timestamps and clear reason codes for failed/unavailable checks.
 - [ ] Track API health, ESP32 connection, telemetry freshness, service health, and other implemented components only. API liveness and transport are reported; firmware readiness/fault state and an approved diagnostics response remain open.
