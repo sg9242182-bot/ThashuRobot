@@ -117,8 +117,8 @@ class _SettingsPageState extends State<SettingsPage> {
                   autocorrect: false,
                   decoration: const InputDecoration(
                     labelText: 'Pi API address',
-                    hintText: 'http://192.168.1.20:8000',
-                    helperText: 'Use the Pi address on the same Wi-Fi or phone hotspot.',
+                    hintText: 'https://thashu.local:8000',
+                    helperText: 'Use the Pi HTTPS address on the same Wi-Fi or phone hotspot.',
                   ),
                 ),
                 const SizedBox(height: 12),
