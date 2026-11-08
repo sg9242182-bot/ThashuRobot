@@ -63,7 +63,7 @@ class HardwareProtocolTests(unittest.TestCase):
     def test_servo_protocol(self):
         servo = ServoTracker()
         servo.center()
-        self.assertTrue(any("|SERVO|PAN_TILT|90|90\n" in line for line in self._writes()))
+        self.assertTrue(any("|SERVO|MOVE|90|90|220\n" in line for line in self._writes()))
 
     def test_shared_protocol_v0_vectors(self):
         vector_path = Path(__file__).with_name("protocol_vectors.json")
