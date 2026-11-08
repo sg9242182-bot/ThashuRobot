@@ -12,7 +12,7 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Annotated, Callable, Literal, Union
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.encoders import jsonable_encoder
@@ -99,6 +99,51 @@ class ModeSwitchRequest(BaseModel):
 class ModeSwitchResponse(BaseModel):
     mode: Literal["AUTO", "MANUAL"]
     status: Literal["switched"]
+
+
+class DiagnosticCheckBase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["PASS", "WARNING", "FAIL", "UNKNOWN"]
+    observed_at: str
+    reason_code: str = Field(pattern=r"^[A-Z][A-Z0-9_]*$")
+
+
+class ApiLivenessCheck(DiagnosticCheckBase):
+    name: Literal["api_liveness"]
+    source: Literal["diagnostics_request"]
+
+
+class Esp32TransportCheck(DiagnosticCheckBase):
+    name: Literal["esp32_transport"]
+    source: Literal["gpio_control_connection_state"]
+
+
+class SensorTelemetryCheck(DiagnosticCheckBase):
+    name: Literal["sensor_telemetry"]
+    source: Literal["complete_sensor_tel_received_at"]
+    age_ms: int | None = Field(ge=0, strict=True)
+
+
+class ControllerReadinessCheck(DiagnosticCheckBase):
+    name: Literal["controller_readiness"]
+    source: Literal["esp32_ready_event_tracker"]
+
+
+DiagnosticsCheck = Annotated[
+    Union[
+        ApiLivenessCheck,
+        Esp32TransportCheck,
+        SensorTelemetryCheck,
+        ControllerReadinessCheck,
+    ],
+    Field(discriminator="name"),
+]
+
+
+class DiagnosticsResponse(BaseModel):
+    observed_at: str
+    checks: list[DiagnosticsCheck]
 
 
 class PriorityCommandQueue:
@@ -586,6 +631,139 @@ class ApiServices:
             "controller_readiness": "unknown",
         }
 
+    async def diagnostics(self):
+        """Build a read-only diagnostic snapshot from observable Pi state."""
+        checks = [
+            ApiLivenessCheck(
+                name="api_liveness",
+                status="PASS",
+                observed_at=_utc_timestamp(),
+                source="diagnostics_request",
+                reason_code="API_RESPONDING",
+            )
+        ]
+
+        try:
+            manager = await self.robot_manager()
+            transport = manager.motor.gpio
+        except Exception:
+            transport = None
+
+        if transport is None:
+            checks.extend([
+                Esp32TransportCheck(
+                    name="esp32_transport",
+                    status="UNKNOWN",
+                    observed_at=_utc_timestamp(),
+                    source="gpio_control_connection_state",
+                    reason_code="TRANSPORT_STATE_UNAVAILABLE",
+                ),
+                SensorTelemetryCheck(
+                    name="sensor_telemetry",
+                    status="UNKNOWN",
+                    observed_at=_utc_timestamp(),
+                    source="complete_sensor_tel_received_at",
+                    reason_code="TELEMETRY_STATE_UNAVAILABLE",
+                    age_ms=None,
+                ),
+                ControllerReadinessCheck(
+                    name="controller_readiness",
+                    status="UNKNOWN",
+                    observed_at=_utc_timestamp(),
+                    source="esp32_ready_event_tracker",
+                    reason_code="READY_NOT_OBSERVED",
+                ),
+            ])
+        else:
+            transport_observed_at = _utc_timestamp()
+            try:
+                connected = await asyncio.to_thread(transport.is_connected)
+                if not isinstance(connected, bool):
+                    raise TypeError("connection state is not boolean")
+                checks.append(Esp32TransportCheck(
+                    name="esp32_transport",
+                    status="PASS" if connected else "WARNING",
+                    observed_at=transport_observed_at,
+                    source="gpio_control_connection_state",
+                    reason_code="TRANSPORT_CONNECTED" if connected else "TRANSPORT_DISCONNECTED",
+                ))
+            except Exception:
+                checks.append(Esp32TransportCheck(
+                    name="esp32_transport",
+                    status="UNKNOWN",
+                    observed_at=transport_observed_at,
+                    source="gpio_control_connection_state",
+                    reason_code="TRANSPORT_STATE_UNAVAILABLE",
+                ))
+
+            freshness_observed_at = _utc_timestamp()
+            try:
+                freshness_reader = getattr(transport, "get_sensor_freshness", None)
+                if not callable(freshness_reader):
+                    raise RuntimeError("sensor freshness is unavailable")
+                freshness = await asyncio.to_thread(freshness_reader, 1.0)
+                if not isinstance(freshness, dict):
+                    raise TypeError("sensor freshness has an invalid shape")
+                observed = freshness.get("observed")
+                fresh = freshness.get("fresh")
+                age_ms = freshness.get("age_ms")
+                if observed is False:
+                    telemetry_status, telemetry_reason, age_ms = (
+                        "UNKNOWN", "TELEMETRY_NOT_OBSERVED", None
+                    )
+                elif (
+                    observed is True
+                    and isinstance(fresh, bool)
+                    and isinstance(age_ms, int)
+                    and not isinstance(age_ms, bool)
+                    and age_ms >= 0
+                ):
+                    telemetry_status, telemetry_reason = (
+                        ("PASS", "TELEMETRY_FRESH")
+                        if fresh
+                        else ("WARNING", "TELEMETRY_STALE")
+                    )
+                else:
+                    raise TypeError("sensor freshness cannot be measured")
+                checks.append(SensorTelemetryCheck(
+                    name="sensor_telemetry",
+                    status=telemetry_status,
+                    observed_at=freshness_observed_at,
+                    source="complete_sensor_tel_received_at",
+                    reason_code=telemetry_reason,
+                    age_ms=age_ms,
+                ))
+            except Exception:
+                checks.append(SensorTelemetryCheck(
+                    name="sensor_telemetry",
+                    status="UNKNOWN",
+                    observed_at=freshness_observed_at,
+                    source="complete_sensor_tel_received_at",
+                    reason_code="TELEMETRY_STATE_UNAVAILABLE",
+                    age_ms=None,
+                ))
+
+            readiness_observed_at = _utc_timestamp()
+            try:
+                readiness_reader = getattr(transport, "has_ready_event", None)
+                if not callable(readiness_reader):
+                    ready_status, ready_reason = "UNKNOWN", "READY_TRACKING_NOT_IMPLEMENTED"
+                elif await asyncio.to_thread(readiness_reader):
+                    ready_status, ready_reason = "PASS", "READY_OBSERVED"
+                else:
+                    ready_status, ready_reason = "UNKNOWN", "READY_NOT_OBSERVED"
+            except Exception:
+                ready_status, ready_reason = "UNKNOWN", "READY_NOT_OBSERVED"
+            checks.append(ControllerReadinessCheck(
+                name="controller_readiness",
+                status=ready_status,
+                observed_at=readiness_observed_at,
+                source="esp32_ready_event_tracker",
+                reason_code=ready_reason,
+            ))
+
+        return DiagnosticsResponse(observed_at=_utc_timestamp(), checks=checks)
+
     async def read_message(self):
         try:
             manager = await self.robot_manager()
@@ -603,6 +781,10 @@ class ApiServices:
             return line, received_at.replace("+00:00", "Z")
         except Exception:
             return None
+
+
+def _utc_timestamp():
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 services = ApiServices()
@@ -1147,6 +1329,17 @@ async def health():
 async def get_status():
     """Report API and serial transport state without implying controller readiness."""
     return await services.status()
+
+
+@app.get(
+    "/api/v1/diagnostics",
+    response_model=DiagnosticsResponse,
+    tags=["diagnostics"],
+    dependencies=[Depends(require_api_token)],
+)
+async def get_diagnostics():
+    """Return read-only diagnostic checks from currently observable Pi state."""
+    return await services.diagnostics()
 
 
 @app.get(
