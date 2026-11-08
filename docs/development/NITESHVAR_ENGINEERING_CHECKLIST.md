@@ -203,7 +203,7 @@ Prove the mobile client works against the actual Pi API and document how to run 
 - [x] Run formatter and static analysis.
 - [x] Run unit/widget tests and fix regressions.
 - [x] Test against local fake transport and widget fixtures before live hardware.
-- [ ] With the team, test connection loss, Pi restart, WebSocket loss, API errors, mode transitions, and stop behavior.
+- [ ] With the team, test connection loss, Pi restart, WebSocket loss, API errors, mode transitions, and stop behavior. The new Phase 12 runtime connection settings have not yet been built/analyzed/tested or exercised against the Pi; prior Flutter evidence predates that change.
 - [x] Confirm the API contract version/commit used for testing.
 - [x] Build the current Android debug APK.
 - [x] Install and launch the current APK on the physical Android phone.
@@ -263,8 +263,8 @@ For each phase, record:
 
 ### Phase 7 — Settings, diagnostics, Competition Mode, Developer Mode
 
-- **Status:** Complete — frontend-only scope; no new API calls or credentials were added.
-- **Evidence:** Settings states that no API-approved connection fields are available and does not collect or display credentials. Diagnostics states that the API does not provide self-check results instead of fabricating PASS/FAIL statuses. Developer / Recovery clearly labels unavailable actions and exposes no reset, shell, or direct hardware controls. Competition quick start reuses Dashboard → existing Manual Control and normal STOP, with no new robot actions. The Phase 7 widget test verifies these states and the quick-start navigation; the full Flutter suite passed (53 tests), and Dart analysis reported no issues.
+- **Status:** Complete for the original PR #9 screen scope; runtime Pi connection setup was added later on `phase-12-pi-api-https` and needs fresh Flutter validation.
+- **Evidence:** The original Phase 7 build displayed unavailable connection settings and did not collect credentials. The later Phase 12 integration replaces that placeholder with HTTPS-only Pi address/token settings, secure storage, and REST/WebSocket client initialization. Diagnostics still does not invent unavailable API checks; Developer / Recovery exposes no reset, shell, or direct hardware controls; Competition quick start reuses the existing Manual Control and STOP flow. The 53-test/analyze/APK evidence predates the later connection-settings integration and does not validate it.
 - **Deferred integration:** Actual robot settings, backend diagnostic result values, and recovery controls remain unavailable until supported API behavior is provided. They are not required for this frontend-only phase completion.
 - **Dependency owner:** Vishal — future configuration, diagnostic, or recovery API support. Niteshvar — Flutter UI.
 
