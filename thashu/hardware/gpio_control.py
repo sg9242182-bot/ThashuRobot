@@ -139,6 +139,8 @@ class GPIOControl:
                 self._port = port
                 self._last_heartbeat = 0.0
                 self._last_rx_monotonic = time.monotonic()
+                self._sensor_snapshot = None
+                self._controller_ready = False
             print(f"[GPIO] ESP32 connected on {port} @ {self._baud}")
             return True
         except (serial.SerialException, OSError) as exc:
@@ -156,6 +158,7 @@ class GPIOControl:
             serial_conn = self._serial
             self._serial = None
             self._controller_ready = False
+            self._sensor_snapshot = None
 
         if serial_conn is not None:
             try:
@@ -412,7 +415,15 @@ class GPIOControl:
     def _observe_controller_event(self, line):
         if line == "EVENT|0|READY":
             with self._state_lock:
+                # A new READY event starts a new controller epoch. Sensor data
+                # received before this event cannot authorize a fresh move.
+                self._controller_ready = False
+                self._sensor_snapshot = None
                 self._controller_ready = True
+        elif line.startswith("FAULT|"):
+            with self._state_lock:
+                self._controller_ready = False
+                self._sensor_snapshot = None
 
     def has_ready_event(self):
         """Return whether READY was observed on the current serial connection."""
