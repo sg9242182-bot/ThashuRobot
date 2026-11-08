@@ -78,3 +78,17 @@ def face_match_debug_enabled() -> bool:
     if value not in {"0", "1"}:
         raise ValueError("THASHU_FACE_MATCH_DEBUG must be 0 or 1")
     return value == "1"
+
+
+def api_tls_certfile() -> str | None:
+    value = os.environ.get("THASHU_API_TLS_CERTFILE")
+    if value is not None and not value.strip():
+        raise ValueError("THASHU_API_TLS_CERTFILE must not be empty")
+    return str(Path(value).expanduser()) if value else None
+
+
+def api_tls_keyfile() -> str | None:
+    value = os.environ.get("THASHU_API_TLS_KEYFILE")
+    if value is not None and not value.strip():
+        raise ValueError("THASHU_API_TLS_KEYFILE must not be empty")
+    return str(Path(value).expanduser()) if value else None
