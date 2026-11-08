@@ -1,83 +1,81 @@
 # Pi Diagnostics Contract — Review Draft
 
-**Status: PROPOSAL ONLY — not approved for implementation.**
+**Status:** Route, access, status vocabulary, and no-remote-logs decision approved by Vishal. **Response field names and schema are proposed; confirm with the Flutter client before route implementation.**
 
-This draft prepares the Phase 6 decisions. It does not change the existing API
-or authorize a new route. Current API behavior remains the contract in
-[`api/README.md`](../../api/README.md).
+This document does not add or authorize a route. Current API behavior remains the contract in [`api/README.md`](../../api/README.md).
 
-## What the backend can currently prove
+## Approved constraints
 
-- `GET /health` proves that the FastAPI process answered the request. It is a
-  liveness check, not proof that the robot or ESP32 is ready.
-- `GET /api/v1/status` reports API liveness, ESP32 transport as
-  `connected`, `disconnected`, or `unavailable`, the Pi control mode, and
-  `controller_readiness: "unknown"` because the API does not track
-  `EVENT|0|READY` or firmware fault state.
-- `WS /api/v1/telemetry` sends timestamped raw ESP32 lines and command-result
-  events. Flutter derives sensor freshness from received sensor frames using
-  the agreed one-second interval. The Pi status response does not currently
-  expose parsed sensor freshness.
-- Move and STOP outcomes are recorded in structured API logs. The logs are not
-  available through an HTTP endpoint.
+- Add a read-only, Bearer-authenticated `GET /api/v1/diagnostics`.
+- Use per-check statuses `PASS`, `WARNING`, `FAIL`, and `UNKNOWN`.
+- Keep existing public `GET /health` and `GET /api/v1/status` unchanged.
+- Do not add remote log retrieval. Keep detailed logs on the Pi for local troubleshooting. Any future remote log feature needs a separate bounded, redacted contract.
+- Report only evidence the Pi actually tracks: API liveness, ESP32 transport connectivity, telemetry freshness, and controller readiness only when an ESP32 READY signal has been observed.
+- A connected serial port is not proof of controller readiness. Do not represent unimplemented checks as passing.
 
-## Decisions requested
+## Current evidence
 
-Please confirm or edit each proposal before backend implementation:
+- `GET /health` confirms the FastAPI process answered. It does not prove the robot or ESP32 is ready.
+- `GET /api/v1/status` reports API liveness, ESP32 transport as `connected`, `disconnected`, or `unavailable`, the Pi control mode, and `controller_readiness: "unknown"`. The API does not currently track READY events.
+- `WS /api/v1/telemetry` sends timestamped raw ESP32 lines and command-result events. Flutter currently derives sensor freshness from received sensor frames with the agreed one-second interval. The API does not yet track parsed sensor freshness for a diagnostics response.
+- Move and STOP outcomes are logged locally. There is no remote log endpoint.
 
-1. **Diagnostics route and access:** Should the API add a read-only,
-   Bearer-authenticated `GET /api/v1/diagnostics` route? Existing `/health` and
-   `/api/v1/status` remain unchanged and public.
-2. **Check statuses:** Proposed values are `PASS`, `WARNING`, `FAIL`, and
-   `UNKNOWN`.
-   - `PASS`: the check ran and its documented evidence met the healthy rule.
-   - `WARNING`: the check ran and found a degraded condition that does not
-     establish a complete failure.
-   - `FAIL`: the check ran and its evidence met a documented failure rule.
-   - `UNKNOWN`: the check could not run or available evidence cannot decide.
-3. **Initial checks and evidence:** Proposed initial checks are:
-   - `api`: successful local process response.
-   - `esp32_transport`: the existing transport connection state.
-   - `controller_readiness`: only a tracked firmware READY/FAULT event; until
-     that tracker exists, report `UNKNOWN` with reason
-     `READINESS_NOT_TRACKED`.
-   - `sensor_telemetry`: only a parsed sensor frame timestamped at Pi receipt;
-     use the agreed one-second freshness interval. Do not treat `NA` or `FAR`
-     as a stale stream. If the Pi cannot parse/track the stream, report
-     `UNKNOWN`, not `PASS`.
-   - Do not report voice, camera, model, or other subsystem health until that
-     subsystem exposes an explicit check and its owner agrees on the evidence.
-4. **Response shape:** Proposed envelope:
+## Proposed response schema — awaiting Flutter confirmation
 
-   ```json
-   {
-     "observed_at": "<UTC ISO 8601>",
-     "checks": [
-       {
-         "name": "esp32_transport",
-         "status": "WARNING",
-         "reason_code": "TRANSPORT_DISCONNECTED",
-         "checked_at": "<UTC ISO 8601>"
-       }
-     ]
-   }
-   ```
+There is no overall status. Each check has its own evidence and status so one unknown check cannot be hidden by an aggregate result.
 
-   Should each check also include `age_ms` or `last_success_at` when relevant?
-   Reason codes should be stable machine-readable values; no exception text,
-   tokens, private user content, face identity, image, or embedding is included.
-5. **Logs:** Recommended for the first mobile API contract: do not expose log
-   retrieval over HTTP. Keep operational logs on the Pi for its administrator,
-   with redaction and bounded local retention. Confirm whether the app needs a
-   remote log view; if yes, agree its authorization, filtering, size cap, and
-   redaction before implementing it.
-6. **Owners:** Tharun confirms which firmware READY/FAULT and sensor evidence
-   the Pi may rely on. Niteshvar confirms whether the app needs this route,
-   response shape, and remote log access.
+```json
+{
+  "observed_at": "2026-11-08T12:00:00Z",
+  "checks": [
+    {
+      "name": "api_liveness",
+      "status": "PASS",
+      "observed_at": "2026-11-08T12:00:00Z",
+      "source": "diagnostics_request",
+      "reason_code": "API_RESPONDING"
+    },
+    {
+      "name": "esp32_transport",
+      "status": "PASS",
+      "observed_at": "2026-11-08T12:00:00Z",
+      "source": "gpio_control_connection_state",
+      "reason_code": "TRANSPORT_CONNECTED"
+    },
+    {
+      "name": "sensor_telemetry",
+      "status": "PASS",
+      "observed_at": "2026-11-08T12:00:00Z",
+      "source": "pi_received_sensor_tel",
+      "reason_code": "TELEMETRY_FRESH",
+      "age_ms": 180
+    },
+    {
+      "name": "controller_readiness",
+      "status": "UNKNOWN",
+      "observed_at": "2026-11-08T12:00:00Z",
+      "source": "esp32_ready_event_tracker",
+      "reason_code": "READY_NOT_OBSERVED"
+    }
+  ]
+}
+```
+
+### Proposed status rules
+
+- API liveness: `PASS` when the API handles the request.
+- ESP32 transport: `PASS` when connected; `WARNING` when disconnected; `UNKNOWN` when the transport state cannot be read. This check says nothing about controller readiness.
+- Sensor telemetry: `PASS` when a valid sensor `TEL` frame was received within 1,000 ms; `WARNING` when the last valid frame is older than 1,000 ms; `UNKNOWN` if no valid frame was observed or freshness cannot be measured. `NA` and `FAR` readings still count as fresh frames.
+- Controller readiness: `UNKNOWN` with `READY_NOT_OBSERVED` until an ESP32 READY event is received. A serial connection alone never changes this check to `PASS`.
+- `age_ms` is present for telemetry only; should Flutter accept this optional field?
+
+## Confirm before implementation
+
+Please confirm the names `observed_at`, `checks`, `name`, `status`, `source`, `reason_code`, and telemetry-only `age_ms`, plus the example check names and status rules above. If Flutter prefers different names or enum spelling, update this proposal first. No route or response model should be implemented until the schema is confirmed.
 
 ## Approval record
 
-- Tharun: pending
-- Niteshvar: pending
-- Backend implementation: blocked until route, statuses, evidence rules, and
-  log-access decision are approved.
+- Vishal: route, authentication, read-only behavior, status vocabulary, no-remote-logs decision, evidence limits, and one-second telemetry freshness confirmed.
+- Niteshvar / Flutter response-schema confirmation: pending.
+- Backend route implementation: pending Flutter schema confirmation.
+- Tharun / firmware READY evidence: pending for readiness tracking; until then readiness must stay `UNKNOWN`.
