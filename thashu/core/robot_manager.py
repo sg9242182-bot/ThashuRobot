@@ -137,6 +137,10 @@ class RobotCommandManager:
 
     def _require_clear_sensors(self, command):
         transport = getattr(self.motor, "gpio", None)
+        is_connected = getattr(transport, "is_connected", None)
+        if not callable(is_connected) or not is_connected():
+            self._stop_for_sensor_failure()
+            raise RobotSafetyError("ESP32_UNAVAILABLE")
         get_snapshot = getattr(transport, "get_sensor_snapshot", None)
         try:
             snapshot = (
@@ -223,8 +227,8 @@ class RobotCommandManager:
             self._state_version += 1
             return sequence
 
-    def stop_all(self):
-        """Cancel Pi-side motion sources, then send STOP and select Auto paused."""
+    def stop_preserving_mode(self):
+        """Cancel motion sources and send normal STOP without changing mode."""
         with self._command_lock:
             if self._before_external_stop is not None:
                 self._before_external_stop()
@@ -234,9 +238,19 @@ class RobotCommandManager:
                 self._motion_inhibited = True
                 self._state_version += 1
                 raise RobotUnavailableError("motor transport is unavailable")
-            self._mode = ControlMode.AUTO
             self._state_version += 1
             return sequence
+
+    def stop_all(self):
+        """Compatibility wrapper for the normal mode-preserving STOP."""
+        return self.stop_preserving_mode()
+
+    def inhibit_motion(self):
+        """Fail closed when startup cannot confirm a motor STOP."""
+        with self._command_lock:
+            self._auto_active = False
+            self._motion_inhibited = True
+            self._state_version += 1
 
     def stop_pulse(self):
         """End one bounded autonomous/manual pulse without cancelling its mode."""
@@ -265,7 +279,7 @@ class RobotCommandManager:
                 raise ValueError("stop does not accept a speed")
             action = self.motor.stop
             args = ()
-            next_mode = ControlMode.AUTO
+            next_mode = None
         elif command in self._MOVES:
             if speed is None:
                 speed = self.motor.speed
@@ -286,7 +300,6 @@ class RobotCommandManager:
                     self._motion_inhibited = True
                     self._state_version += 1
                     raise RobotUnavailableError("motor transport is unavailable")
-                self._mode = ControlMode.AUTO
                 self._state_version += 1
                 return sequence
 
