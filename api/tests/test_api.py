@@ -443,7 +443,11 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(retry.command_id, original.command_id)
         self.assertEqual(retry.request_id, original.request_id)
-        self.assertEqual(retry.status, "dispatched")
+        self.assertIn(retry.status, {"dispatched", "acknowledged"})
+        self.assertEqual(
+            retry.status,
+            main.services.command_result(original.command_id)["status"],
+        )
         self.assertEqual(len(manager.motor.commands), count_after_first)
 
     async def test_move_retry_returns_latest_acknowledged_result(self):
