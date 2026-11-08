@@ -59,7 +59,9 @@ Command IDs and retry records are stored in SQLite for 24 hours at
 persistent storage. To choose another location, set `THASHU_API_STATE_DB` in
 the robot process environment before starting it.
 
-Stop the robot and API together with `Ctrl+C`.
+Stop the robot and API together with `Ctrl+C`. The API invalidates any active
+movement lease and sends normal STOP during graceful shutdown. The startup STOP
+and lease timeout preserve the selected mode; they do not perform a reset.
 
 ## Recovery checks (development only)
 
@@ -68,8 +70,9 @@ the physical robot is safe, and they do not replace Tharun's robot checks.
 
 | Situation | Check and response |
 |---|---|
-| Pi reboot | Start the robot process using the setup steps above. The API starts inside it and uses the same `RobotCommandManager` and ESP32 transport. Check `/health` for API liveness and `/api/v1/status` for the reported transport state. The API does not replay commands left in flight; their stored result becomes `unknown`. |
-| ESP32 disconnected | `/api/v1/status` reports `disconnected` or `unavailable`; do not treat serial reconnect as controller readiness. The Pi retries serial discovery with a 1, 2, 4, 8, 16, then 30 second capped backoff. Movement remains subject to the manager's mode, ACK, and fresh-sensor checks. A disconnected link cannot confirm STOP; the ESP32 watchdog is a separate hardware safety layer. |
+| Pi reboot | The API starts inside the robot process and sends normal STOP before serving requests, without changing the selected mode. Movement leases are in memory and are lost; persisted in-flight commands become `unknown` and are never replayed. If startup STOP is not acknowledged, movement remains inhibited. Require a fresh move request after restart; never restore a prior lease. |
+| ESP32 disconnected/restarted | `/api/v1/status` reports `disconnected` or `unavailable`; do not treat serial reconnect as controller readiness. The Pi retries serial discovery with a 1, 2, 4, 8, 16, then 30 second capped backoff. Disconnect and a new `EVENT|0|READY` clear the old sensor snapshot. Movement remains blocked until the serial link is open and a new complete sensor frame passes freshness checks. A disconnected link cannot confirm STOP; the ESP32 watchdog is a separate hardware safety layer. |
+| Mobile app disconnect | No authenticated telemetry WebSocket means the API rejects new move and lease-renewal requests. An active manual movement lease expires after a provisional 500 ms without renewal and the Pi sends normal STOP. It does not change mode or issue a reset. A reconnect does not revive the lease; a fresh move request is required. |
 | API startup failure | Read the robot process console for the structured `api_start_failed` event. The API does not log the Bearer token. Check the configured host/port and whether another process is using the port. Do not start a second API beside `thashu/main.py` while it owns the ESP32 serial connection. |
 | API process shutdown | Use `Ctrl+C` in the robot process terminal. The embedded API receives a graceful shutdown request and waits up to five seconds for its server thread. A structured `api_shutdown_timeout` warning means shutdown did not finish within that wait; inspect the process before restarting it. |
 | Configuration error | Review setting names and allowed values in the environment-variable table below. Correct the value in the process environment and restart. Never paste the token into logs, screenshots, GitHub, or chat. |
@@ -196,8 +199,17 @@ until the output is recorded.
    telemetry/staleness result. Keep tokens and private credentials out of the
    report.
 
-**Verification status:** the plan is approved, but Pi setup and Android HTTPS /
-telemetry checks are still pending. This workstation has no `adb` command or
+**Movement lease:** Flutter should renew a lease every 250 ms while a manual
+movement control is held. The Pi expires the lease after 500 ms without a
+successful renewal and sends normal STOP. The 500 ms value is provisional and
+must not be called hardware-safe until Tharun completes the restrained
+low-speed stopping-distance test. A renewal retry can refresh only a still-live
+lease; it cannot revive an expired or STOP-cancelled lease.
+
+**Verification status:** the lease, startup-stop, app-disconnect, restart, and
+Android HTTPS/telemetry behaviors require fresh CI and live verification. The
+robot's flashed firmware revision is not confirmed.
+ This workstation has no `adb` command or
 connected Android device, so the live phone test must be run on the project
 phone. Android's normal trust uses preinstalled system CAs; no app trust change
 is planned. Tailscale documents MagicDNS and certificate provisioning, and
