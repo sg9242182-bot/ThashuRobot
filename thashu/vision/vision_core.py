@@ -1,8 +1,32 @@
+import json
+import logging
 import os
 import threading
 import time
+from datetime import datetime, timezone
 
 from core.model_paths import data_path, model_path
+
+
+_vision_logger = logging.getLogger("thashu.vision")
+_vision_logger.setLevel(logging.INFO)
+_vision_logger.propagate = False
+if not _vision_logger.handlers:
+    _vision_handler = logging.StreamHandler()
+    _vision_handler.setFormatter(logging.Formatter("%(message)s"))
+    _vision_logger.addHandler(_vision_handler)
+
+
+def _log_vision_event(event: str, **fields) -> None:
+    """Emit one JSON log record containing only explicitly selected metadata."""
+    record = {
+        "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+        "severity": "INFO",
+        "component": "pi_vision",
+        "event": event,
+        **fields,
+    }
+    _vision_logger.info("%s", json.dumps(record, separators=(",", ":"), sort_keys=True))
 
 
 class VisionCore:
@@ -49,7 +73,7 @@ class VisionCore:
         self.person_detector = person_detector
         self.person_tracker = person_tracker
         self.face_backend = face_backend
-        print("[FACE RECOGNITION] Backend: dlib (128-D CPU descriptors)")
+        _log_vision_event("recognizer_initialized", backend="dlib", descriptor_dimensions=128)
         self.recognizer = recognizer
         self.database = database
         self.tracker = tracker
@@ -81,7 +105,7 @@ class VisionCore:
         self._person_detection_candidates = []
         self._next_person_candidate_id = 0
 
-        print("[VISION] Initialized")
+        _log_vision_event("initialized")
 
     def on_runtime_state_changed(self, payload):
         """Run perception only in IDLE, pausing inference during voice/AI work."""
@@ -95,14 +119,14 @@ class VisionCore:
             if not was_enabled:
                 with self._lock:
                     self._tracker_reset_pending = True
-                print("[VISION] Processing resumed in IDLE; camera and models retained")
+                _log_vision_event("processing_resumed")
             self._processing_enabled.set()
             return
 
         if was_enabled:
-            print(f"[VISION] Processing paused at {target_state}")
+            _log_vision_event("processing_paused")
         else:
-            print(f"[VISION] Processing remains paused during {target_state}")
+            _log_vision_event("processing_remains_paused")
         self._processing_enabled.clear()
         with self._lock:
             self.current_faces = []
@@ -132,7 +156,7 @@ class VisionCore:
                 daemon=True,
             )
             self._thread.start()
-        print("[VISION] Started (camera worker active)")
+        _log_vision_event("started")
         return self
 
     def stop(self):
@@ -161,9 +185,9 @@ class VisionCore:
             if thread is self._thread and (thread is None or not thread.is_alive()):
                 self._thread = None
             elif thread is not None and thread.is_alive():
-                print("[VISION] Worker is still stopping; refusing duplicate start")
+                _log_vision_event("worker_still_stopping")
 
-        print("[VISION] Stopped")
+        _log_vision_event("stopped")
 
     def get_state(self) -> dict:
         """Return perception and short-lived tracking metadata, never actuators."""
@@ -376,10 +400,7 @@ class VisionCore:
         recog_interval = 0.75
         debug_match = os.environ.get("THASHU_FACE_MATCH_DEBUG", "").strip() == "1"
         if debug_match:
-            print(
-                "[FACE MATCH TEST] enabled; thresholds are diagnostic only "
-                "(no threshold changes)"
-            )
+            _log_vision_event("face_match_diagnostics_enabled")
         last_recog = 0.0
 
         while self._running:
@@ -495,7 +516,7 @@ class VisionCore:
                         track_id = next(iter(tracked))
                     if track_id is None:
                         if debug_match:
-                            print("[FACE MATCH TEST] skipped: face has no stable track ID")
+                            _log_vision_event("face_match_skipped_unstable_track")
                         continue
 
                     face_img = frame[y1:y2, x1:x2]
@@ -506,13 +527,7 @@ class VisionCore:
                     if embedding is None:
                         recognized, _score = None, -1.0
                         if debug_match:
-                            reason = getattr(
-                                self.recognizer, "last_failure_reason", None
-                            ) or "unspecified_embedding_failure"
-                            print(
-                                "[FACE MATCH TEST] rejected before database match: "
-                                + reason
-                            )
+                            _log_vision_event("face_match_skipped_embedding_unavailable")
                     elif debug_match:
                         recognized, _score = self.database.match(
                             embedding, diagnostics=True
@@ -523,15 +538,7 @@ class VisionCore:
                         if callable(compare_scores):
                             comparisons = compare_scores(embedding)
                             if comparisons:
-                                summary = "; ".join(
-                                    f"{name}[{count}]: max={legacy:.3f}, "
-                                    f"centroid={prototype:.3f}"
-                                    for name, count, legacy, prototype in comparisons
-                                )
-                                print(
-                                    "[FACE MATCH TEST] scoring comparison "
-                                    "(centroid is diagnostic only): " + summary
-                                )
+                                _log_vision_event("face_match_comparison_completed")
                     else:
                         recognized, _score = self.database.match(embedding)
                     with self._lock:
@@ -576,23 +583,23 @@ class VisionCore:
                                         enrollment["required_samples"]
                                         - len(enrollment["samples"]),
                                     )
-                                    print(
-                                        "[VISION] Rejected overlapping enrollment view: "
-                                        f"{other_name}={overlap_score:.3f}; "
-                                        f"replacement still needed "
-                                        f"({len(enrollment['samples'])}/"
-                                        f"{enrollment['required_samples']}, need {needed})"
+                                    _log_vision_event(
+                                        "enrollment_view_rejected_overlap",
+                                        accepted_samples=len(enrollment["samples"]),
+                                        required_samples=enrollment["required_samples"],
+                                        replacement_samples_needed=needed,
                                     )
                                 else:
                                     enrollment["samples"].append(embedding.copy())
                                     sample_count = len(enrollment["samples"])
-                                    print(
-                                        "[VISION] Enrollment face samples "
-                                        f"{sample_count}/{enrollment['required_samples']}"
+                                    _log_vision_event(
+                                        "enrollment_sample_accepted",
+                                        accepted_samples=sample_count,
+                                        required_samples=enrollment["required_samples"],
                                     )
                                     if sample_count >= enrollment["required_samples"]:
                                         enrollment["status"] = "ready"
-                                        print("[VISION] Face enrollment capture ready")
+                                        _log_vision_event("enrollment_capture_ready")
 
                     with self._lock:
                         if not self._processing_enabled.is_set():
@@ -615,9 +622,11 @@ class VisionCore:
                                 if self.face_backend == "dlib"
                                 else "similarity gates passed"
                             )
-                            print(
-                                f"[FACE MATCH TEST] {gate_label}; "
-                                f"temporal confirmation {votes}/3 for {recognized}"
+                            _log_vision_event(
+                                "face_match_temporal_confirmation",
+                                gate=gate_label,
+                                votes=votes,
+                                required_votes=3,
                             )
                         old_published_name = self.current_names.get(track_id, "Unknown")
                         self.current_names[track_id] = published_name
@@ -637,9 +646,9 @@ class VisionCore:
                             published_name != old_published_name
                             and published_name != "Unknown"
                         ):
-                            print(f"[VISION] Recognized enrolled person: {published_name}")
+                            _log_vision_event("identity_recognized")
                         elif old_published_name != "Unknown" and published_name == "Unknown":
-                            print("[VISION] Identity confidence lost; reporting Unknown")
+                            _log_vision_event("identity_confidence_lost")
 
                         enrollment_active = getattr(self, "_enrollment", None) is not None
                         if (
@@ -664,12 +673,12 @@ class VisionCore:
                                 adapt_identity, embedding
                             ):
                                 self._last_adaptive_sample_at[adapt_identity] = time.monotonic()
-                                print(
-                                    "[VISION] Added one high-confidence adaptation sample "
-                                    f"for {adapt_identity}"
-                                )
+                                _log_vision_event("high_confidence_adaptation_sample_added")
                         except Exception as exc:
-                            print(f"[VISION] Skipped automatic face sample: {exc}")
+                            _log_vision_event(
+                                "high_confidence_adaptation_sample_skipped",
+                                error_type=type(exc).__name__,
+                            )
 
                 last_recog = now
 
@@ -703,29 +712,26 @@ class VisionCore:
 
             if len(current_people) != previous_person_count:
                 if previous_person_count == 0 and current_people:
-                    print(
-                        "[VISION] Upper body detected "
-                        f"(count={len(current_people)}, "
-                        f"tracks={[person['track_id'] for person in current_people]})"
+                    _log_vision_event(
+                        "upper_body_detection_started", count=len(current_people)
                     )
                 elif not current_people:
-                    print("[VISION] No upper bodies detected")
+                    _log_vision_event("upper_body_detection_cleared")
                 else:
-                    print(
-                        "[VISION] Upper-body count changed: "
-                        f"{previous_person_count} -> {len(current_people)}"
+                    _log_vision_event(
+                        "upper_body_count_changed",
+                        previous_count=previous_person_count,
+                        count=len(current_people),
                     )
 
             if face_count != previous_count:
                 if previous_count == 0 and face_count > 0:
-                    centers = [
-                        ((x1 + x2) // 2, (y1 + y2) // 2)
-                        for x1, y1, x2, y2 in faces
-                    ]
-                    print(f"[VISION] Face detected (count={face_count}, centers={centers})")
+                    _log_vision_event("face_detection_started", count=face_count)
                 elif face_count == 0:
-                    print("[VISION] No faces detected")
+                    _log_vision_event("face_detection_cleared")
                 else:
-                    print(f"[VISION] Face count changed: {previous_count} -> {face_count}")
+                    _log_vision_event(
+                        "face_count_changed", previous_count=previous_count, count=face_count
+                    )
 
             time.sleep(0.08)

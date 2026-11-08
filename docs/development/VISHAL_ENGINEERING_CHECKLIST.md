@@ -63,13 +63,13 @@ Create a maintainable, testable backend structure and reproducible local develop
 - [x] Keep the API token in environment configuration, outside source control.
 - [x] Centralize and validate backend environment settings (API host/port, API token/state DB, model/data/cache paths, Piper binary, face-match debug flag) in `thashu/core/config.py`; invalid ports, blank path overrides, and invalid debug values fail explicitly.
 - [x] Add structured JSON logs for move/stop outcomes with severity, timestamp, component, command ID, and sanitized error codes.
-- [ ] Extend structured logging beyond API/transport events. Source review on 2026-11-09 confirms `thashu/main.py` and `thashu/vision/vision_core.py` still use direct `print()` for command, runtime, recognition, and vision events. Scope an incremental migration that preserves readable terminal output and avoids logging face images, embeddings, API tokens, or remembered private content.
+- [ ] Extend structured logging beyond API/transport events. `thashu/vision/vision_core.py` now emits timestamped JSON lifecycle, detection, enrollment, and recognition-category events without face identity, coordinates, images, embeddings, or error messages. Direct `print()` migration in `thashu/main.py` remains; do it incrementally and preserve readable terminal output without logging API tokens or remembered private content.
 - [x] Document startup/shutdown commands and handle unavailable serial hardware without crashing the API; status reports unavailable transport. Full startup behavior on the target Pi has not been verified.
 - [x] Add baseline API/protocol tests and document development test commands.
 
 ### Exit criteria
 - [x] API backend starts in local development and inside the target Pi robot process; live `/health`, `/api/v1/status`, mode, and STOP requests succeeded on 2026-11-08.
-- [ ] Configuration and logs are consistent across the full backend. Configuration is centralized; structured logging remains partial.
+- [ ] Configuration and logs are consistent across the full backend. Configuration is centralized; API/transport and VisionCore structured logging are implemented, while `thashu/main.py` logging and API module separation remain.
 - [x] Software handles unavailable/disconnected serial hardware as a degraded state; API status tests cover unavailable transport. Physical Pi behavior remains unverified.
 
 **Phase 1 evidence (updated 2026-11-08):** The target Pi virtual environment and embedded robot/API process were exercised. Tharun's live checks returned HTTP 200 for health and status, with ESP32 transport `connected`; authenticated mode and STOP requests also succeeded. Configuration/lifecycle tests on the backend source branch cover invalid settings and server start/stop outcomes. Phase 1 remains in progress because broader voice/vision logging and API module separation need review, and startup/shutdown should be recorded against the exact deployed revision.

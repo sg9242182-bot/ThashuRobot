@@ -1,3 +1,4 @@
+import json
 import threading
 import time
 import unittest
@@ -97,6 +98,21 @@ def make_vision(detector=None):
 
 
 class VisionLifecycleTests(unittest.TestCase):
+    def test_lifecycle_logs_are_structured_and_contain_no_face_data(self):
+        with self.assertLogs("thashu.vision", level="INFO") as captured:
+            vision, *_ = make_vision()
+            vision.on_runtime_state_changed({"to": "THINKING"})
+
+        records = [json.loads(record.getMessage()) for record in captured.records]
+        self.assertEqual(records[0]["component"], "pi_vision")
+        self.assertEqual(records[0]["event"], "recognizer_initialized")
+        self.assertTrue(records[0]["timestamp"].endswith("+00:00"))
+        self.assertEqual(records[-1]["event"], "processing_paused")
+        for record in records:
+            self.assertEqual(record["severity"], "INFO")
+            self.assertFalse({"name", "face", "embedding", "image", "token"} & record.keys())
+        vision.stop()
+
     def test_pause_stops_inference_then_resume_reuses_models(self):
         vision, camera, detector, recognizer, tracker = make_vision()
         try:
