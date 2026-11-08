@@ -63,18 +63,24 @@ class WifiProvisioningClient {
       await FlutterBluePlus.stopScan();
       await device.connect();
       final services = await device.discoverServices();
-      final service = services.where(
-        (entry) => entry.uuid.toString().toLowerCase() == serviceUuid,
-      ).firstOrNull;
+      final service = _firstOrNull(
+        services.where(
+          (entry) => entry.uuid.toString().toLowerCase() == serviceUuid,
+        ),
+      );
       if (service == null) {
         throw StateError('The Thashu setup service was not found.');
       }
-      final credentials = service.characteristics.where(
-        (entry) => entry.uuid.toString().toLowerCase() == credentialsUuid,
-      ).firstOrNull;
-      final status = service.characteristics.where(
-        (entry) => entry.uuid.toString().toLowerCase() == statusUuid,
-      ).firstOrNull;
+      final credentials = _firstOrNull(
+        service.characteristics.where(
+          (entry) => entry.uuid.toString().toLowerCase() == credentialsUuid,
+        ),
+      );
+      final status = _firstOrNull(
+        service.characteristics.where(
+          (entry) => entry.uuid.toString().toLowerCase() == statusUuid,
+        ),
+      );
       if (credentials == null || status == null) {
         throw StateError('The Thashu setup characteristics are incomplete.');
       }
@@ -114,6 +120,11 @@ class WifiProvisioningClient {
         await device.disconnect();
       }
     }
+  }
+
+  T? _firstOrNull<T>(Iterable<T> values) {
+    final iterator = values.iterator;
+    return iterator.moveNext() ? iterator.current : null;
   }
 
   Future<void> _requestBluetoothPermissions() async {
