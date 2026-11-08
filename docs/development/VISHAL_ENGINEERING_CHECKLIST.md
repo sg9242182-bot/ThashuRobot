@@ -203,12 +203,12 @@ Make failures observable and actionable without pretending an untested subsystem
 - [x] Keep remote log retrieval out of scope. Detailed logs stay on the Pi for local troubleshooting.
 - [x] Distinguish failed checks from unavailable or unobserved checks using the approved reason codes and UNKNOWN status.
 - [x] Keep `GET /api/v1/diagnostics` read-only and Bearer-authenticated.
-- [x] Add tests for missing/unavailable state, stale telemetry, READY tracking, and the route's authenticated read-only surface. The tests have been added; hosted execution is the next verification step. `GPIOControl.get_sensor_freshness(max_age=1.0)` preserves the stricter 200 ms safety snapshot rule and leaves WebSocket `received_at` unchanged.
+- [x] Add tests for missing/unavailable state, stale telemetry, READY tracking, and the route's authenticated read-only surface. GitHub Actions run 42512821791 passed the combined API and Pi hardware-protocol suites: 73 tests passed on commit `8eff718`. `GPIOControl.get_sensor_freshness(max_age=1.0)` preserves the stricter 200 ms safety snapshot rule and leaves WebSocket `received_at` unchanged.
 
 ### Exit criteria
-- [ ] Reported health reflects evidence, not assumptions; run the diagnostics/API tests and review their results.
-- [ ] Unknown/unavailable is not silently reported as PASS; verify the response against tests.
-- [ ] Diagnostic responses are bounded and safe to expose; verify no log or secret data is returned.
+- [x] Reported health reflects evidence, not assumptions; the diagnostics tests cover connected, disconnected, fresh, stale, unobserved, and unavailable states.
+- [x] Unknown/unavailable is not silently reported as PASS; tests verify the UNKNOWN mappings and required nullable sensor `age_ms`.
+- [x] Diagnostic responses are bounded and safe to expose; the route returns only four fixed checks and no logs, tokens, or free-form exception details.
 
 ## Phase 7 — Configuration, service management, and recovery
 
@@ -311,13 +311,13 @@ For each phase, record:
 | 3 — Robot manager/modes | Complete | Emergency Stop was removed from Phase 3 scope; remaining mode, STOP, and command-lifecycle work is complete per the checklist and Tharun's report. |
 | 4 — REST API | Complete for component implementation | Live Pi/client verification is in Phase 9. |
 | 5 — WebSocket/telemetry | In progress | Backend/client contract and component logic are implemented; private-network/server-restart integration is pending. |
-| 6 — Diagnostics | In progress | Contract approved and read-only diagnostics route implemented; run backend tests/CI and have Niteshvar implement the Flutter diagnostics client. Remote log retrieval is out of scope. |
+| 6 — Diagnostics | Complete | Approved contract and read-only diagnostics endpoint implemented; GitHub Actions run 42512821791 passed 73 API/protocol tests. Flutter client work is tracked in Phase 9. |
 | 7 — Configuration/recovery | In progress | Coordinate restart/reset procedure and confirm the layered safety behavior with Tharun. |
 | 8 — Security/failure tests | In progress | Automated fake-based checks are covered; STOP ACK passed on Pi. Physical watchdog and movement-timeout evidence remains. |
 | 9 — Mobile/hardware integration | In progress | Pi-local REST health/status/auth/mode/STOP checks passed; phone-to-Pi HTTPS/WebSocket, API movement, telemetry recovery, and app diagnostics remain. |
 | 10 — Handoff | In progress | Run tests/CI for this integration revision, add formatting/static analysis where practical, and verify a second-person setup. |
 
-**Latest repository evidence (updated 2026-11-09):** The API integration is being carried on `phase-12-pi-api-https`, based on current `main`. The Pi-local run verified `/health`, `/api/v1/status`, an unauthenticated 401, MANUAL/AUTO mode switches, and STOP dispatch followed by an acknowledged command result. The HTTPS-only Flutter settings form now stores the Pi origin/token securely and wires REST/WebSocket clients at startup. Flutter dependency resolution/build and phone-to-Pi verification remain pending. Vishal approved Tailscale MagicDNS + Caddy with generic hostname `thashu-robot`; keep FastAPI on loopback and expose only Caddy on the Pi's Tailscale IP. Pi configuration and Android HTTPS/WebSocket telemetry checks are still pending. Tharun reports the robot movement test passed, but the posted output does not establish that Flutter or the API `/move` route was used. Niteshvar's [Flutter PR #9](https://github.com/sg9242182-bot/ThashuRobot/pull/9) is merged and reports Flutter analysis/tests passing. Phone-to-Pi HTTPS/WebSocket verification, authenticated API movement evidence, latched E-stop, an approved diagnostics contract, and privileged recovery controls remain open. The current Phase 12 branch still needs fresh automated test/CI evidence after its integration changes.
+**Latest repository evidence (updated 2026-11-09):** The API integration is being carried on `phase-12-pi-api-https`, based on current `main`. The Pi-local run verified `/health`, `/api/v1/status`, an unauthenticated 401, MANUAL/AUTO mode switches, and STOP dispatch followed by an acknowledged command result. The HTTPS-only Flutter settings form now stores the Pi origin/token securely and wires REST/WebSocket clients at startup. Flutter dependency resolution/build and phone-to-Pi verification remain pending. Vishal approved Tailscale MagicDNS + Caddy with generic hostname `thashu-robot`; keep FastAPI on loopback and expose only Caddy on the Pi's Tailscale IP. Pi configuration and Android HTTPS/WebSocket telemetry checks are still pending. Tharun reports the robot movement test passed, but the posted output does not establish that Flutter or the API `/move` route was used. Niteshvar's [Flutter PR #9](https://github.com/sg9242182-bot/ThashuRobot/pull/9) is merged and reports Flutter analysis/tests passing. Phone-to-Pi HTTPS/WebSocket verification, authenticated API movement evidence, Flutter diagnostics client integration, and privileged recovery controls remain open. The Phase 6 diagnostics contract and backend endpoint are implemented and covered by passing CI. The current Phase 12 branch still needs fresh automated test/CI evidence after its integration changes.
 
 ## Working rules
 
