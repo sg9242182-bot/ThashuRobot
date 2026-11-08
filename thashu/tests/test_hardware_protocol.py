@@ -73,7 +73,7 @@ class HardwareProtocolTests(unittest.TestCase):
             with self.subTest(vector=vector["name"]):
                 sequence = self.transport.send(vector["payload"])
                 self.assertIsNotNone(sequence)
-                expected = vector["request_frame"].format(sequence=sequence) + "\\n"
+                expected = vector["request_frame"].format(sequence=sequence) + chr(10)
                 self.assertEqual(self.fake.writes[-1], expected)
 
     def test_sequence_numbers_increase(self):
