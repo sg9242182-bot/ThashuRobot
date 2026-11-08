@@ -1,4 +1,4 @@
-name: Phase 6 diagnostics and sensor tests
+name: Pi backend diagnostics and safety tests
 
 on:
   workflow_dispatch:
@@ -10,8 +10,13 @@ on:
       - "api/tests/test_api.py"
       - "api/requirements.txt"
       - "api/requirements-test.txt"
+      - "thashu/core/api_lifecycle.py"
+      - "thashu/core/robot_manager.py"
       - "thashu/hardware/gpio_control.py"
+      - "thashu/tests/test_api_lifecycle.py"
+      - "thashu/tests/test_gpio_protocol.py"
       - "thashu/tests/test_hardware_protocol.py"
+      - "thashu/tests/test_robot_manager.py"
       - ".github/workflows/phase6-sensor-freshness.yml"
   pull_request:
     paths:
@@ -19,12 +24,17 @@ on:
       - "api/tests/test_api.py"
       - "api/requirements.txt"
       - "api/requirements-test.txt"
+      - "thashu/core/api_lifecycle.py"
+      - "thashu/core/robot_manager.py"
       - "thashu/hardware/gpio_control.py"
+      - "thashu/tests/test_api_lifecycle.py"
+      - "thashu/tests/test_gpio_protocol.py"
       - "thashu/tests/test_hardware_protocol.py"
+      - "thashu/tests/test_robot_manager.py"
       - ".github/workflows/phase6-sensor-freshness.yml"
 
 jobs:
-  sensor-freshness:
+  backend-safety:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -35,7 +45,7 @@ jobs:
           python-version: "3.11"
       - name: Install backend test dependencies
         run: python -m pip install -r api/requirements-test.txt
-      - name: Test diagnostics API, protocol, and sensor freshness
-        run: python -m unittest api.tests.test_api thashu.tests.test_hardware_protocol
+      - name: Test API, lifecycle, robot manager, and serial protocol
+        run: python -m unittest api.tests.test_api thashu.tests.test_api_lifecycle thashu.tests.test_robot_manager thashu.tests.test_hardware_protocol thashu.tests.test_gpio_protocol
         env:
           PYTHONPATH: thashu
