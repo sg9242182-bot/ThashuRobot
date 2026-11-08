@@ -1184,7 +1184,14 @@ After the first warm-up trial produced an incomplete multi-part answer, updated 
 
 Phase 12 — Mobile Control
 
-Status: NOT STARTED
+Status: IN PROGRESS
+
+Initial Phase 12 tranche (2026-11-08):
+- Draft PR #12 adds secure Pi address/token settings, restores saved REST and telemetry clients at app startup, and wires them to Dashboard, Manual Control, and Diagnostics.
+- The Pi address/token are stored locally with platform secure storage. Saved connection URLs are HTTPS-only.
+- Android app-wide cleartext HTTP was rejected by automatic security review; no HTTP exception was added. The Pi API needs a trusted HTTPS certificate and stable address before phone integration can be validated.
+- Restart, shutdown, reset, and Emergency Stop remain unavailable because no approved API routes/contracts are present. Manual movement, status, telemetry, and normal STOP use existing API clients and still require device verification.
+- No Flutter build, analysis, or device tests were run for this tranche.
 
 Target:
 
