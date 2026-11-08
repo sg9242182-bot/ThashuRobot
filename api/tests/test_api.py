@@ -104,6 +104,8 @@ class FakeTransport:
             "tof_right_mm": 500,
             "rear_mm": 500,
         }
+        self.sensor_freshness = {"observed": False, "fresh": None, "age_ms": None}
+        self.ready_observed = False
 
     def wait_for_ack(self, _sequence, timeout=0.75):
         return self.ack_result
@@ -113,6 +115,12 @@ class FakeTransport:
 
     def is_connected(self):
         return self.connected
+
+    def get_sensor_freshness(self, max_age=1.0):
+        return dict(self.sensor_freshness)
+
+    def has_ready_event(self):
+        return self.ready_observed
 
     def read_line(self, _timeout=0.0):
         return self.messages.pop(0) if self.messages else ""
@@ -321,6 +329,93 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             "controller_readiness": "unknown",
             "control_mode": "AUTO",
         })
+
+    async def test_diagnostics_is_authenticated_read_only_and_uses_approved_schema(self):
+        result = await self.endpoint("/api/v1/diagnostics")()
+        payload = result.model_dump()
+        self.assertEqual(set(payload), {"observed_at", "checks"})
+        self.assertTrue(payload["observed_at"].endswith("Z"))
+        self.assertEqual(
+            [check["name"] for check in payload["checks"]],
+            [
+                "api_liveness",
+                "esp32_transport",
+                "sensor_telemetry",
+                "controller_readiness",
+            ],
+        )
+        checks = {check["name"]: check for check in payload["checks"]}
+        self.assertEqual(checks["api_liveness"]["status"], "PASS")
+        self.assertEqual(checks["api_liveness"]["reason_code"], "API_RESPONDING")
+        self.assertEqual(checks["esp32_transport"]["status"], "PASS")
+        self.assertEqual(checks["sensor_telemetry"]["status"], "UNKNOWN")
+        self.assertIsNone(checks["sensor_telemetry"]["age_ms"])
+        self.assertEqual(
+            checks["controller_readiness"]["reason_code"], "READY_NOT_OBSERVED"
+        )
+        self.assertTrue(all(check["observed_at"].endswith("Z") for check in checks.values()))
+        self.assertTrue(all(
+            "age_ms" not in check
+            for name, check in checks.items()
+            if name != "sensor_telemetry"
+        ))
+        manager = await main.services.robot_manager()
+        self.assertEqual(manager.motor.commands, [])
+
+        route = next(
+            route for route in main.app.routes
+            if getattr(route, "path", None) == "/api/v1/diagnostics"
+        )
+        self.assertIn(
+            main.require_api_token,
+            [dependency.call for dependency in route.dependant.dependencies],
+        )
+        self.assertIn("/api/v1/diagnostics", main.app.openapi()["paths"])
+
+    async def test_diagnostics_reports_stale_sensor_disconnection_and_observed_ready(self):
+        manager = await main.services.robot_manager()
+        transport = manager.motor.gpio
+        transport.connected = False
+        transport.sensor_freshness = {
+            "observed": True,
+            "fresh": False,
+            "age_ms": 1001,
+        }
+        transport.ready_observed = True
+
+        payload = (await self.endpoint("/api/v1/diagnostics")()).model_dump()
+        checks = {check["name"]: check for check in payload["checks"]}
+        self.assertEqual(checks["esp32_transport"]["status"], "WARNING")
+        self.assertEqual(
+            checks["esp32_transport"]["reason_code"], "TRANSPORT_DISCONNECTED"
+        )
+        self.assertEqual(checks["sensor_telemetry"]["status"], "WARNING")
+        self.assertEqual(checks["sensor_telemetry"]["reason_code"], "TELEMETRY_STALE")
+        self.assertEqual(checks["sensor_telemetry"]["age_ms"], 1001)
+        self.assertEqual(checks["controller_readiness"]["status"], "PASS")
+        self.assertEqual(
+            checks["controller_readiness"]["reason_code"], "READY_OBSERVED"
+        )
+
+    async def test_diagnostics_reports_unknown_when_robot_manager_is_unavailable(self):
+        old = main.services
+        main.services = self.make_services(
+            lambda: (_ for _ in ()).throw(OSError("offline")), ":memory:"
+        )
+        try:
+            payload = (await self.endpoint("/api/v1/diagnostics")()).model_dump()
+            checks = {check["name"]: check for check in payload["checks"]}
+            self.assertEqual(checks["api_liveness"]["status"], "PASS")
+            self.assertEqual(checks["esp32_transport"]["status"], "UNKNOWN")
+            self.assertEqual(
+                checks["esp32_transport"]["reason_code"],
+                "TRANSPORT_STATE_UNAVAILABLE",
+            )
+            self.assertEqual(checks["sensor_telemetry"]["status"], "UNKNOWN")
+            self.assertIsNone(checks["sensor_telemetry"]["age_ms"])
+            self.assertEqual(checks["controller_readiness"]["status"], "UNKNOWN")
+        finally:
+            main.services = old
 
     async def test_status_reports_unavailable_transport_without_crashing(self):
         old = main.services
@@ -1121,6 +1216,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         }
         self.assertEqual(http_routes, {
             ("GET", "/api/v1/status"),
+            ("GET", "/api/v1/diagnostics"),
             ("GET", "/api/v1/robot/commands/{command_id}"),
             ("POST", "/api/v1/robot/mode"),
             ("POST", "/api/v1/robot/move"),
