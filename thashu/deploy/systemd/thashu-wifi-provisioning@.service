@@ -1,0 +1,21 @@
+[Unit]
+Description=Thashu physical-button-gated Bluetooth Wi-Fi provisioning
+After=bluetooth.service NetworkManager.service
+Wants=bluetooth.service NetworkManager.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/%i/ThashuRobot/thashu
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/%i/.venvs/thashu/bin/python -m hardware.wifi_provisioning
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=false
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=/etc/NetworkManager/system-connections
+
+[Install]
+WantedBy=multi-user.target
