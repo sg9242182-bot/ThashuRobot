@@ -1,0 +1,38 @@
+{
+  "protocol": "Thashu Pi-ESP32 serial protocol",
+  "revision": "v0",
+  "line_ending": "LF",
+  "note": "Golden frames for Pi transmitters and the integrated ESP32 parser. Sequence placeholders are decimal integers allocated by the sender.",
+  "commands": [
+    {
+      "name": "heartbeat",
+      "payload": "HEARTBEAT",
+      "request_frame": "CMD|{sequence}|HEARTBEAT",
+      "response_frame": "ACK|{sequence}|ALIVE"
+    },
+    {
+      "name": "stop",
+      "payload": "STOP",
+      "request_frame": "CMD|{sequence}|STOP",
+      "response_frame": "ACK|{sequence}|OK"
+    },
+    {
+      "name": "forward motor",
+      "payload": "MOTOR|FORWARD|180",
+      "request_frame": "CMD|{sequence}|MOTOR|FORWARD|180",
+      "response_frame": "ACK|{sequence}|OK"
+    },
+    {
+      "name": "eyes happy",
+      "payload": "EYES|HAPPY",
+      "request_frame": "CMD|{sequence}|EYES|HAPPY",
+      "response_frame": "ACK|{sequence}|OK"
+    },
+    {
+      "name": "servo center",
+      "payload": "SERVO|PAN_TILT|90|90",
+      "request_frame": "CMD|{sequence}|SERVO|PAN_TILT|90|90",
+      "response_frame": "ACK|{sequence}|OK"
+    }
+  ]
+}
