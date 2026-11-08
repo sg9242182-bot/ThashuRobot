@@ -1836,8 +1836,27 @@ async def move(request: MoveRequest):
             manager.mode.value,
             request_id=request_id,
         )
-        await services.start_movement_lease(command_id)
         services.start_ack_tracking(command_id, sequence)
+        try:
+            await services.start_movement_lease(command_id)
+        except Exception:
+            await services.invalidate_movement_lease()
+            try:
+                await services.stop_all()
+            except Exception:
+                logger.exception("Fail-safe STOP failed after movement lease setup error")
+            fail(
+                503,
+                {
+                    "error": "movement_lease_unavailable",
+                    "error_code": "LEASE_STOP_PENDING",
+                    "command_id": command_id,
+                },
+                outcome="failed",
+                error_code="LEASE_STOP_PENDING",
+                state="unknown",
+                control_mode=manager.mode.value,
+            )
         _log_command_outcome(
             command_id=command_id,
             command=request.direction,
@@ -1856,6 +1875,7 @@ async def move(request: MoveRequest):
     status_code=200,
     tags=["robot"],
     dependencies=[Depends(require_rate_limited_api_token)],
+    responses={**ROBOT_COMMAND_ERROR_RESPONSES, **MOVE_MODE_RATE_LIMIT_RESPONSES},
 )
 async def renew_movement_lease(lease_id: str, request: LeaseRenewalRequest):
     """Renew a live movement lease without writing or replaying a motor command."""
