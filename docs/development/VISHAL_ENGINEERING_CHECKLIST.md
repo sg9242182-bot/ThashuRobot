@@ -301,16 +301,16 @@ For each phase, record:
 | Phase | Status | Remaining item(s) |
 |---|---|---|
 | 0 — Architecture/contracts | In progress | Record explicit API-contract approval; implementation alignment is evidenced by merged Flutter PR #9. |
-| 1 — Service foundation | In progress | Target-Pi setup/startup; review broader API module separation and voice/vision logging. |
-| 2 — Serial protocol | In progress | Capture READY, telemetry, heartbeat ACK, and STOP ACK from the existing firmware. |
+| 1 — Service foundation | In progress | Review broader API module separation and voice/vision logging; capture startup/shutdown against the deployed revision. |
+| 2 — Serial protocol | In progress | Capture READY, raw telemetry, and heartbeat ACK with revisions. Pi status and STOP ACK now verified during the Phase 12 run. |
 | 3 — Robot manager/modes | In progress | Latched Emergency Stop requires a tested ESP32 protocol/firmware change before Pi support. |
 | 4 — REST API | Complete for component implementation | Live Pi/client verification is in Phase 9. |
 | 5 — WebSocket/telemetry | In progress | Backend/client contract and component logic are implemented; private-network/server-restart integration is pending. |
 | 6 — Diagnostics | In progress | Agree diagnostic checks, state taxonomy, freshness/readiness fields, and any log retrieval contract with owners before adding API surface. |
 | 7 — Configuration/recovery | In progress | Coordinate restart/reset procedure and confirm the layered safety behavior with Tharun. |
-| 8 — Security/failure tests | In progress | Automated fake-based checks are covered; physical watchdog/timeout/STOP evidence remains for final integration. |
-| 9 — Mobile/hardware integration | In progress | Private phone-to-Pi connection, test token, and controlled end-to-end checks. |
-| 10 — Handoff | In progress | Run the new lifecycle tests/CI after this change; add formatting/static-analysis checks where practical; verify setup on Pi. |
+| 8 — Security/failure tests | In progress | Automated fake-based checks are covered; STOP ACK passed on Pi. Physical watchdog and movement-timeout evidence remains. |
+| 9 — Mobile/hardware integration | In progress | Pi-local REST health/status/auth/mode/STOP checks passed; phone-to-Pi HTTPS/WebSocket, API movement, telemetry recovery, and app diagnostics remain. |
+| 10 — Handoff | In progress | Run tests/CI for this integration revision, add formatting/static analysis where practical, and verify a second-person setup. |
 
 **Latest repository evidence (updated 2026-11-08):** The API integration is being carried on `phase-12-pi-api-https`, based on current `main`. The Pi-local run verified `/health`, `/api/v1/status`, an unauthenticated 401, MANUAL/AUTO mode switches, and STOP dispatch followed by an acknowledged command result. Tharun reports the robot movement test passed, but the posted output does not establish that Flutter or the API `/move` route was used. Niteshvar's [Flutter PR #9](https://github.com/sg9242182-bot/ThashuRobot/pull/9) is merged and reports Flutter analysis/tests passing. Phone-to-Pi HTTPS/WebSocket verification, authenticated API movement evidence, latched E-stop, an approved diagnostics contract, and privileged recovery controls remain open. The current Phase 12 branch still needs fresh automated test/CI evidence after its integration changes.
 
