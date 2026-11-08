@@ -307,7 +307,7 @@ For each phase, record:
 |---|---|---|
 | 0 — Architecture/contracts | Complete | Niteshvar's explicit API-contract agreement was confirmed by Tharun on 2026-11-09; implementation alignment is also evidenced by merged Flutter PR #9. |
 | 1 — Service foundation | In progress | Split API service/telemetry responsibilities from `api/main.py`, migrate voice/vision `print()` events to safe structured logs, and record Pi startup/shutdown revision. |
-| 2 — Serial protocol | In progress | Capture READY, raw telemetry, and heartbeat ACK with revisions. Pi status and STOP ACK now verified during the Phase 12 run. |
+| 2 — Serial protocol | In progress | Run the new shared-vector Pi test; capture `EVENT|0|READY` and firmware/backend revisions. Prior telemetry, heartbeat, and STOP results are accepted. |
 | 3 — Robot manager/modes | In progress | Latched Emergency Stop requires a tested ESP32 protocol/firmware change before Pi support. |
 | 4 — REST API | Complete for component implementation | Live Pi/client verification is in Phase 9. |
 | 5 — WebSocket/telemetry | In progress | Backend/client contract and component logic are implemented; private-network/server-restart integration is pending. |
