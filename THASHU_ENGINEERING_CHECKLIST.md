@@ -1182,33 +1182,49 @@ Cold-inference optimization candidate added on phase-10: `warmup_model()` runs o
 
 After the first warm-up trial produced an incomplete multi-part answer, updated both AI system prompts to direct the model to cover every requested item briefly. This prompt adjustment is unvalidated on the Pi; keep answer-quality acceptance open and verify several normal and multi-part questions before accepting.
 
-Phase 12 — Mobile Control
+Phase 12 — Mobile Control and Secure Pi API
 
-Status: NOT STARTED
+Status: IN PROGRESS
 
-Target:
+Current branch: `phase-12-pi-api-https`, based on current `main`.
 
-\[ ] Manual movement.
+Implemented on this branch (not yet Pi-validated):
 
-\[ ] Robot status.
+\[x] Bring Vishal's API routes, service layer, request idempotency, telemetry handling, and API/manager unit tests onto the current `main` base.
 
-\[ ] Restart.
+\[x] Add `RobotCommandManager` around the existing Pi motor controller; API startup attaches the manager to the already-running `MotorController` and serial connection.
 
-\[ ] Shutdown.
+\[x] Start and stop Uvicorn with the robot runtime; stop the API before closing the shared ESP32 transport.
 
-\[ ] Reset.
+\[x] Keep the API loopback-only by default and refuse a non-loopback bind unless both TLS certificate and private-key paths are configured.
 
-\[ ] Error/diagnostic status.
+\[x] Document private-LAN HTTPS setup and certificate trust requirements. No certificate or private key is committed.
 
-\[ ] Sensor telemetry where useful.
+Verification still required:
 
-Acceptance:
+\[ ] Review API imports/dependency compatibility against the Raspberry Pi 4 environment.
 
-\[ ] Mobile commands use the same robot supervisor.
+\[ ] Install the updated runtime requirements in the Pi virtual environment and start the robot/API without opening a second serial transport.
 
-\[ ] Mobile control cannot bypass hardware safety.
+\[ ] Verify `/health`, `/api/v1/status`, authentication failures, MANUAL/AUTO mode switching, bounded movement dispatch, STOP priority, request-ID replay, and command result lookup on the Pi.
 
-\[ ] Recovery controls work reliably.
+\[ ] Configure a certificate with a SAN matching the app URL; confirm HTTPS and WebSocket TLS from the Android app with certificate validation enabled.
+
+\[ ] Verify telemetry and command-result recovery after API restart; confirm the ESP32 firmware remains unchanged.
+
+\[ ] Complete the phone-to-Pi checks on a trusted private network and record the Pi/API revision. Physical movement tests require the separately agreed safe procedure.
+
+Phase 12 acceptance:
+
+\[ ] Mobile commands use the same robot supervisor and serial transport.
+
+\[ ] Mobile control cannot bypass Pi or ESP32 safety checks.
+
+\[ ] HTTPS works from the Flutter app with certificate verification enabled.
+
+\[ ] API and telemetry recover reliably after restart without replaying uncertain movement.
+
+\[ ] Status, command outcomes, and diagnostics match the agreed app contract.
 
 \---
 
