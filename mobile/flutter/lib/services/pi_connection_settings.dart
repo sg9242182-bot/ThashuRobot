@@ -22,7 +22,7 @@ class PiConnectionSettings {
     final uri = Uri.tryParse(normalized);
     if (uri == null ||
         !uri.hasAuthority ||
-        (uri.scheme != 'http' && uri.scheme != 'https') ||
+        uri.scheme != 'https' ||
         uri.userInfo.isNotEmpty ||
         uri.path.isNotEmpty ||
         uri.hasQuery ||
@@ -30,7 +30,7 @@ class PiConnectionSettings {
       throw ArgumentError.value(
         baseUrl,
         'baseUrl',
-        'Enter the Pi origin, such as http://192.168.1.20:8000.',
+        'Enter the HTTPS Pi origin, such as https://thashu.local:8000.',
       );
     }
 
