@@ -223,13 +223,10 @@ repository root:
 
 ```powershell
 python -m pip install -r api/requirements-test.txt
-python -m unittest api.tests.test_api thashu.tests.test_api_lifecycle thashu.tests.test_gpio_protocol thashu.tests.test_robot_manager
+python -m unittest api.tests.test_api thashu.tests.test_hardware_protocol thashu.tests.test_robot_manager thashu.tests.test_runtime_cleanup
 ```
 
-The Pi protocol test reads the shared vectors from
-`testdata/pi_esp32_protocol_vectors.csv`. It verifies Pi command framing and
-sequence handling; it does not execute the ESP32 parser or replace hardware
-verification.
+The current hardware-protocol unit test uses a fake serial transport to check command framing and sequence behavior. It does not execute the ESP32 parser or replace hardware verification. The separate shared-vector parser harness is not present on this branch.
 
 ## Error responses for the Flutter client
 
