@@ -9,7 +9,7 @@ bool parseLong(const char* text, long& value) {
     if (!text || !*text) return false;
     char* end = nullptr;
     value = strtol(text, &end, 10);
-    return *end == '\\0';
+    return *end == '\0';
 }
 }
 
@@ -131,10 +131,10 @@ void CommunicationManager::readCommands() {
     size_t consumed = 0;
     while (Serial.available() && consumed++ < COMMAND_BUFFER_SIZE) {
         const char c = (char)Serial.read();
-        if (c == '\\n') {
+        if (c == '\n') {
             if (!discardingCommand && commandLength) {
-                commandBuffer[commandLength] = '\\0';
-                if (commandLength && commandBuffer[commandLength-1] == '\\r') commandBuffer[commandLength-1] = '\\0';
+                commandBuffer[commandLength] = '\0';
+                if (commandLength && commandBuffer[commandLength-1] == '\r') commandBuffer[commandLength-1] = '\0';
                 handle(commandBuffer);
             }
             commandLength = 0; discardingCommand = false;
