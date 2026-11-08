@@ -2,15 +2,13 @@
 #include "safety_manager.h"
 #include "communication_manager.h"
 #include "tof_manager.h"
-#include "ultrasonic_manager.h"
 #include "eye_manager.h"
 #include "servo_manager.h"
 
 #include <Arduino.h>
 
 MotorManager motors;
-ToFManager frontTof;
-UltrasonicManager rearUltrasonic;
+ToFManager tof;
 SafetyManager safety;
 CommunicationManager communication;
 EyeManager eyes;
@@ -31,12 +29,12 @@ void setup() {
         Serial.println("FAULT|0|SERVO|INIT");
         while (true) { motors.stop(); delay(100); }
     }
-    if (!safety.begin(motors, frontTof, rearUltrasonic, eyes, servos)) {
+    if (!safety.begin(motors, tof, eyes, servos)) {
         Serial.println("FAULT|0|SAFETY|SENSOR_INIT");
         while (true) { motors.stop(); delay(100); }
     }
     eyes.setExpression(EXPR_IDLE);
-    communication.begin(motors, safety, eyes, servos, frontTof, rearUltrasonic);
+    communication.begin(motors, safety, eyes, servos, tof);
 }
 
 void loop() {
