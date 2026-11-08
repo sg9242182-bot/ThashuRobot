@@ -200,11 +200,10 @@ persistent local storage and do not delete it during an active 24-hour retry
 window.
 
 Use Swagger's **Authorize** button with the token before trying the protected
-routes. Keep the server bound to localhost during development. For mobile
-access, set `THASHU_API_HOST=0.0.0.0` in the robot process environment only
-after the Pi is reachable through the team's private network and its firewall
-is restricted. Use the Pi's private-network address in Flutter; do not expose
-port 8000 to the public internet or commit the token to the repo.
+routes. Keep the API bound to `127.0.0.1:8000`. For approved mobile access,
+follow the Tailscale + Caddy setup in `api/PI_SETUP.md`: Caddy listens on the
+Pi's Tailscale IP and proxies to the loopback API. Do not set
+`THASHU_API_HOST=0.0.0.0`, expose port 8000, or commit the token to the repo.
 
 Install the API dependencies from the repository root:
 
@@ -301,28 +300,19 @@ Use the response's `command_id` to find its matching API log entry. A `dispatche
 
 ## Phase 12: HTTPS for phone access
 
-**Deployment is pending.** The robot needs to work offline across changing
-Wi-Fi networks and phone hotspots, and the team has not chosen a stable
-hostname or certificate source. Keep the API on its loopback default; do not
-bind it to a network interface until the hostname and an Android-trusted
-certificate are agreed and verified. The network-bind TLS-file guard only
-checks that certificate/key paths are present; it cannot establish Android
-trust.
+**Approved design:** use Tailscale MagicDNS and Caddy. Name the Pi
+`thashu-robot` in the tailnet. Caddy obtains its HTTPS certificate from the
+local Tailscale daemon and proxies requests to the API on `127.0.0.1:8000`.
+Bind Caddy to the Pi's Tailscale IP, restrict tailnet access to approved phones,
+and do not use port forwarding or Funnel. The Flutter app continues to use
+normal Android certificate validation and the existing routes/Bearer-token
+behavior.
 
-The Pi API defaults to loopback HTTP for local development. It refuses to bind
-to a non-loopback address unless both TLS files are configured and
-`THASHU_API_TLS_ANDROID_TRUST_CONFIRMED=1`. This last setting is an explicit
-operator attestation; it does not itself verify Android trust. Leave it at its
-default `0` until the team approves and verifies the hostname and certificate.
-Set `THASHU_API_TLS_CERTFILE` and `THASHU_API_TLS_KEYFILE` to a certificate and
-matching private key before using a LAN address. Keep the private key outside
-the repository with owner-only permissions. Use a certificate whose Subject
-Alternative Name matches the stable hostname the phone resolves on the chosen
-private network. The hostname and certificate issuer have not yet been assigned.
-The Flutter client currently uses Android's normal certificate validation, so
-the certificate chain must be trusted by the phone's system CA store. A private
-or self-signed CA requires an explicit, tested app trust configuration. Never
-disable certificate or hostname validation. See [Android Network Security
-Configuration](https://developer.android.com/privacy-and-security/security-config)
-and `api/PI_SETUP.md` for the setup steps. The robot continues to work offline
-on the local network.
+**Deployment and phone testing remain pending.** Keep FastAPI on loopback;
+leave `THASHU_API_TLS_CERTFILE`, `THASHU_API_TLS_KEYFILE` unset and
+`THASHU_API_TLS_ANDROID_TRUST_CONFIRMED=0`. Do not expose API port 8000. The
+complete Pi and Android setup/verification steps are in `api/PI_SETUP.md`.
+Tailscale HTTPS certificate hostnames are published in Certificate
+Transparency logs, so use a generic machine name. The robot's local behavior
+remains available offline; phone access over Tailscale requires tailnet
+connectivity.

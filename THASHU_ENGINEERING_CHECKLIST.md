@@ -1210,13 +1210,15 @@ Implementation present on this branch:
 
 \[x] Document private-LAN HTTPS setup and certificate trust requirements. No certificate or private key is committed.
 
-HTTPS deployment decision (2026-11-08; Tharun): **PENDING.** The robot must
-work offline across changing Wi-Fi networks and phone hotspots; no stable
-hostname or certificate source has been selected. Keep the API on loopback and
-leave `THASHU_API_TLS_ANDROID_TRUST_CONFIRMED=0`. Do not bind to a network
-interface until the hostname and Android-trusted certificate plan are agreed
-and checked. The approval setting is an operator attestation, not an automatic
-certificate trust test.
+HTTPS deployment plan (2026-11-08; approved by Vishal): use Tailscale MagicDNS
+and Caddy with the generic Pi name `thashu-robot`. Caddy obtains its
+Android-trusted certificate through the Pi's Tailscale daemon and proxies to
+the API on `127.0.0.1:8000`; bind Caddy to the Pi's Tailscale IP and restrict
+access to approved tailnet phones. Keep the API loopback-only, leave
+`THASHU_API_TLS_ANDROID_TRUST_CONFIRMED=0`, and do not expose port 8000. Pi
+configuration and Android HTTPS/telemetry verification remain pending. The
+setup procedure is in `api/PI_SETUP.md`; Tailscale certificate hostnames are
+published in Certificate Transparency logs, so the robot name must stay generic.
 
 \[x] Add Flutter runtime Pi address/token settings using HTTPS-only validation and platform secure storage; initialize REST and WebSocket clients from saved settings, add Android internet permission, and expose settings in the app. Integrated from Niteshvar's Phase 12 connection setup branch; Flutter dependency resolution/build and device verification remain pending.
 
@@ -1244,11 +1246,11 @@ Still required:
 
 \[ ] Resolve Flutter dependencies and commit the generated lockfile; run Flutter analysis/tests and build the Android APK on the app toolchain.
 
-\[ ] Configure a certificate whose SAN matches the app URL; verify HTTPS and WebSocket TLS from Android with certificate validation enabled.
+\[ ] Configure Caddy to use the Tailscale-provisioned certificate for `thashu-robot.<tailnet-name>.ts.net`; verify HTTPS and WebSocket TLS from Android with certificate validation enabled.
 
 \[ ] Verify telemetry and command-result behavior after API restart, including that uncertain in-flight commands are not replayed.
 
-\[ ] Complete the phone-to-Pi checks on a trusted private network and record the API/firmware revisions. No internet connection is required on that private network.
+\[ ] Complete the phone-to-Pi checks over the authorized tailnet and record the API/firmware revisions. Local robot operation must remain available when the tailnet is unavailable.
 
 Phase 12 acceptance:
 

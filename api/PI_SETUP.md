@@ -95,9 +95,9 @@ Settings are read and validated by `thashu/core/config.py`:
 | Variable | Default | Purpose |
 |---|---|---|
 | `THASHU_API_HOST` | `127.0.0.1` | API bind address. Non-loopback binds require TLS files. |
-| `THASHU_API_TLS_CERTFILE` | unset | TLS certificate path; required with key for non-loopback access. |
-| `THASHU_API_TLS_KEYFILE` | unset | Matching TLS private-key path; keep it outside the repo and restrict file permissions. |
-| `THASHU_API_TLS_ANDROID_TRUST_CONFIRMED` | `0` | Explicit operator approval required for non-loopback binds after the hostname and Android certificate trust are confirmed. |
+| `THASHU_API_TLS_CERTFILE` | unset | Direct Uvicorn TLS certificate path; leave unset when using the approved Caddy proxy. |
+| `THASHU_API_TLS_KEYFILE` | unset | Matching direct Uvicorn TLS key; leave unset with Caddy. |
+| `THASHU_API_TLS_ANDROID_TRUST_CONFIRMED` | `0` | Direct non-loopback Uvicorn bind attestation; leave `0` with Caddy and the loopback API. |
 | `THASHU_API_PORT` | `8000` | API port, from 1 through 65535. |
 | `THASHU_API_TOKEN` | unset | Bearer token; control routes fail closed until set. |
 | `THASHU_API_STATE_DB` | OS-specific persistent user state path | SQLite command/idempotency records. |
@@ -107,63 +107,103 @@ Settings are read and validated by `thashu/core/config.py`:
 | `THASHU_VOICE_CACHE_DIR` | `$XDG_DATA_HOME/thashu/voice_responses` | Generated voice cache. |
 | `THASHU_FACE_MATCH_DEBUG` | `0` | Enables extra face-match debug output when set to `1`. |
 
-Invalid ports, blank path overrides, or a face-match debug value other than `0`/`1` stop startup/use with a configuration error.
+Invalid ports, blank path overrides, a TLS trust confirmation other than `0`/`1`, or a face-match debug value other than `0`/`1` stop startup/use with a configuration error.
 
 ## Automatic startup
 
 Do not enable an automatic-start service until Tharun confirms the Pi's install location, service account, serial-device permissions, and private-network setup. Store the token in a root-readable environment file outside the repository; never put it in a committed service file.
 
 
-## HTTPS setup for private-LAN phone access
+## HTTPS setup and Android verification
 
-**Deployment status (2026-11-08): pending.** Tharun confirmed that the robot
-must work offline across different Wi-Fi networks and phone hotspots, and the
-team has not selected a stable hostname or certificate source. Keep
-`THASHU_API_HOST` at its loopback default. Do not bind the API to a network
-interface until the hostname is agreed and the certificate is confirmed to be
-trusted by Android. The instructions below are for a future approved setup.
+**Approved plan (2026-11-08):** Tailscale plus Caddy, with the Pi named
+`thashu-robot` in the tailnet. The final URL uses the tailnet's actual DNS name:
+`https://thashu-robot.<tailnet-name>.ts.net`. The hostname is stable across
+home Wi-Fi and phone hotspots because it resolves through Tailscale, not the
+Pi's changing local-network address. The Pi and each test phone must be signed
+in to the authorized tailnet. MagicDNS and Tailscale HTTPS certificates must be
+enabled by a tailnet administrator.
 
-First agree on a stable hostname that the phone can resolve through the
-team's private network. The hostname is not assigned in this repository yet;
-`thashu.local` is only an example and must not be used unless the chosen network
-actually resolves it. Do not choose a temporary DHCP address as the app URL.
+The API stays on `127.0.0.1:8000` over HTTP. Caddy listens on the Pi's Tailscale
+IP at HTTPS port 443 and reverse-proxies to `127.0.0.1:8000`. Do not change the
+API host to `0.0.0.0`, expose port 8000, or enable Tailscale Funnel. Keep
+`THASHU_API_TLS_CERTFILE`, `THASHU_API_TLS_KEYFILE` unset and
+`THASHU_API_TLS_ANDROID_TRUST_CONFIRMED=0`; Caddy handles external TLS. The
+routes and Bearer-token requirements remain unchanged.
 
-The Flutter app currently uses Android's normal certificate validation. Use a
-certificate chain trusted by the phone's system CA store and include the exact
-hostname in its Subject Alternative Name (SAN). A self-signed certificate or
-private CA is not automatically trusted by current Android app defaults; if
-the team chooses one, Niteshvar must add and test the agreed CA trust/pinning in
-the app before the phone can connect. Never disable hostname or certificate
-validation. See [Android Network Security Configuration](https://developer.android.com/privacy-and-security/security-config).
+### Pi setup (run after Tailscale and Caddy are installed)
 
-After the team assigns the hostname and certificate source:
+1. Install Tailscale on Raspberry Pi OS and the authorized Android phones using
+   the [official Linux](https://tailscale.com/docs/install/linux) and
+   [Android](https://tailscale.com/docs/install/android) instructions, then
+   join them to the same tailnet. In the Tailscale admin DNS settings, enable
+   MagicDNS and HTTPS certificates. Rename the Pi to the generic machine name
+   `thashu-robot`; record the exact full `*.ts.net` hostname and Tailscale IP
+   shown for that Pi. Tailscale certificate names are published in the public
+   Certificate Transparency log, so use no personal or sensitive name.
+2. Keep the robot API configured with `THASHU_API_HOST=127.0.0.1` and
+   `THASHU_API_PORT=8000`. Leave API TLS file paths unset. Confirm the runtime
+   starts the API on loopback before adding the proxy.
+3. Tailscale provisions a Let's Encrypt certificate for the Pi's full
+   `*.ts.net` name. The certificate private key is generated and kept in the
+   Pi's local Tailscale state; Caddy retrieves the certificate/key from the
+   local Tailscale daemon and renews it automatically. Allow the Caddy service
+   account to fetch it by setting `TS_PERMIT_CERT_UID=caddy` in
+   `/etc/default/tailscaled`, then restart `tailscaled`. Do not copy certificate
+   keys into this repository or the Flutter app.
+4. Install Caddy using its [official Debian/Raspberry Pi OS
+   package](https://caddyserver.com/docs/install). Configure
+   `/etc/caddy/Caddyfile`, replacing the placeholders with the Pi's
+   actual MagicDNS name and Tailscale IP:
 
-1. Obtain a server certificate for that exact hostname, with its full chain and
-   matching private key.
-2. Install the certificate and key outside the repository, for example under
-   `/etc/thashu/tls/`. Restrict the private key so only the robot service
-   account can read it.
-3. Set the API bind and TLS paths in the robot process environment (or its
-   protected service environment file):
-
-```ini
-THASHU_API_HOST=0.0.0.0
-THASHU_API_PORT=8000
-THASHU_API_TLS_CERTFILE=/etc/thashu/tls/pi-api.crt
-THASHU_API_TLS_KEYFILE=/etc/thashu/tls/pi-api.key
-THASHU_API_TLS_ANDROID_TRUST_CONFIRMED=0
+```caddyfile
+thashu-robot.<tailnet-name>.ts.net {
+    bind 100.x.y.z
+    reverse_proxy 127.0.0.1:8000
+}
 ```
 
-4. Restrict port 8000 to the team's private network in the Pi firewall; do not
-   use public port forwarding.
-5. Enter `https://<agreed-hostname>:8000` in the Flutter app. Confirm that the
-   certificate is valid for this hostname and that `/health` and
-   `/api/v1/status` load before attempting any control action.
+5. Validate and reload Caddy using the Pi's service procedure. Restrict tailnet
+   access to the approved phones with Tailscale access policy. Do not add a
+   router port-forward or use Funnel. Confirm that Caddy listens on the Tailscale
+   IP only and the API listens on loopback only.
+6. In Flutter connection settings, enter
+   `https://thashu-robot.<tailnet-name>.ts.net` (no `:8000`). Enter the test
+   Bearer token directly in the app's secure settings; never put it in GitHub,
+   this document, logs, or chat.
 
-The HTTPS server configuration is already wired into the robot process. It
-refuses non-loopback binding unless both certificate and key paths are set;
-it also refuses the bind unless
-`THASHU_API_TLS_ANDROID_TRUST_CONFIRMED=1`. That setting is an operator
-attestation after confirming the agreed hostname and certificate trust; it
-does not itself verify Android trust. Leave it at `0` until the team approves
-and verifies the plan. Routes and Bearer authentication are unchanged.
+### Android HTTPS and telemetry test
+
+Use an Android phone signed into the authorized tailnet and with Tailscale
+connected. These are verification steps; no live Pi/Android result is claimed
+until the output is recorded.
+
+1. Open `https://thashu-robot.<tailnet-name>.ts.net/health` in the Android
+   browser. Expect HTTP 200 with no certificate or hostname warning.
+2. Open `/api/v1/status` on the same origin. Expect HTTP 200. Confirm that
+   unauthenticated control routes remain protected; do not send a movement
+   command as part of this transport check.
+3. In the Flutter app, save the same HTTPS origin and the test token through
+   its secure settings screen. Connect to status and telemetry. Confirm the
+   authenticated WebSocket reaches `/api/v1/telemetry` using TLS, telemetry
+   frames arrive, and the UI clears stale state when a new frame arrives.
+4. When no fresh frame arrives for one second, confirm the UI marks telemetry
+   stale; `NA` and `FAR` readings in a received frame remain fresh sensor
+   states. Confirm no JSON heartbeat event is required; WebSocket Ping/Pong
+   keeps the connection alive.
+5. Record the phone model/Android version, app revision, Pi revision, tailnet
+   hostname, certificate result, `/health` and `/api/v1/status` results, and
+   telemetry/staleness result. Keep tokens and private credentials out of the
+   report.
+
+**Verification status:** the plan is approved, but Pi setup and Android HTTPS /
+telemetry checks are still pending. This workstation has no `adb` command or
+connected Android device, so the live phone test must be run on the project
+phone. Android's normal trust uses preinstalled system CAs; no app trust change
+is planned. Tailscale documents MagicDNS and certificate provisioning, and
+Caddy's Tailscale integration obtains certificates from the local daemon and
+supports WebSocket reverse proxying: [MagicDNS](https://tailscale.com/docs/features/magicdns),
+[Tailscale HTTPS certificates](https://tailscale.com/docs/how-to/set-up-https-certificates),
+[Caddy certificates on Tailscale](https://tailscale.com/docs/integrations/web-servers/caddy/caddy-certificates),
+[Caddy reverse proxy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy),
+[Android network security](https://developer.android.com/privacy-and-security/security-config).
