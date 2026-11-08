@@ -219,9 +219,9 @@ async def run() -> None:
                 print("[BLE SETUP] Pairing window open for 60 seconds.")
             if advertised_until and now >= advertised_until:
                 advertised_until = 0.0
-                STATE.disarm()
                 if STATE.get_status() == "waiting":
                     STATE.set_status("expired")
+                STATE.disarm()
                 print("[BLE SETUP] Pairing window closed.")
             await asyncio.sleep(0.05)
     finally:
