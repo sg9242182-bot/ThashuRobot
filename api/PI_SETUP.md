@@ -109,6 +109,8 @@ Do not enable an automatic-start service until Tharun confirms the Pi's install 
 
 ## HTTPS setup for private-LAN phone access
 
+TLS listener support is implemented, but deployment is not complete: no certificate, trust anchor, or stable Pi hostname has been selected or installed. Vishal and Tharun need to choose the stable address (a DHCP-reserved IP or a hostname that resolves on the phone's local network) and coordinate the certificate trust method with Niteshvar. The app currently requires HTTPS and uses Android's normal certificate validation; it does not disable checks or include a private CA.
+
 Create or install a certificate and matching key outside the repository. The
 certificate must include the Pi's chosen private hostname or static LAN IP as
 a Subject Alternative Name. Set the runtime environment securely, for example
