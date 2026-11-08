@@ -165,7 +165,7 @@ class WifiProvisioningService(Service):
     def status(self, _options) -> bytes:
         return STATE.get_status().encode("ascii")
 
-    @characteristic(CREDENTIALS_UUID, CharFlags.WRITE | CharFlags.ENCRYPT_WRITE)
+    @characteristic(CREDENTIALS_UUID, CharFlags.WRITE | CharFlags.ENCRYPT_WRITE | CharFlags.RELIABLE_WRITE)
     def credentials(self, _options):
         pass
 
