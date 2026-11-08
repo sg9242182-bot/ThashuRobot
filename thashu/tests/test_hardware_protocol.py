@@ -1,4 +1,6 @@
+import json
 import unittest
+from pathlib import Path
 
 from hardware import gpio_control
 from hardware.motors import MotorController
@@ -62,6 +64,17 @@ class HardwareProtocolTests(unittest.TestCase):
         servo = ServoTracker()
         servo.center()
         self.assertTrue(any("|SERVO|PAN_TILT|90|90\n" in line for line in self._writes()))
+
+    def test_shared_protocol_v0_vectors(self):
+        vector_path = Path(__file__).with_name("protocol_vectors.json")
+        vectors = json.loads(vector_path.read_text(encoding="utf-8"))
+
+        for vector in vectors["commands"]:
+            with self.subTest(vector=vector["name"]):
+                sequence = self.transport.send(vector["payload"])
+                self.assertIsNotNone(sequence)
+                expected = vector["request_frame"].format(sequence=sequence) + "\\n"
+                self.assertEqual(self.fake.writes[-1], expected)
 
     def test_sequence_numbers_increase(self):
         self.transport.send("STOP")
