@@ -89,14 +89,15 @@ Make hardware communication explicit and reliable before exposing movement contr
 - [ ] Add a Pi test that consumes the shared vectors. The current `test_hardware_protocol` test uses fake serial and does not read the vector file; no shared-vector parser harness is present on this branch.
 - [x] Do not invent pin mappings or assume the current motor driver; the integrated firmware remains the hardware source of truth.
 - [x] Record Tharun-reported v0 parser checks: HEARTBEAT, STOP, EYES, invalid EYES argument, unknown command, partial frames, oversized-frame discard, and recovery. Unsupported-version testing does not apply to v0.
-- [ ] Capture live serial output from the existing firmware showing `EVENT|0|READY`, `TEL|0|SENSORS|...`, `ACK|sequence|ALIVE` for HEARTBEAT, and `ACK|sequence|OK` for STOP. Do not reflash; record the firmware/backend revisions with the output. No standalone ESP32 parser-test harness is present in the branch.
+- [x] Verify live ESP32 telemetry and heartbeat on the Pi without reflashing. Tharun's 2026-11-08 run received 377 telemetry frames (mean interval 80 ms, longest 108 ms) and 20/20 HEARTBEAT ACKs (mean round trip 41.3 ms, maximum 66.6 ms). The API STOP command lookup also returned `acknowledged` with no error.
+- [ ] Capture `EVENT|0|READY` and record the exact firmware/backend revisions. The previous serial test reset its input buffer after opening the port, so it did not preserve READY; no telemetry/heartbeat/STOP retest is needed. No standalone ESP32 parser-test harness is present in the branch.
 
 ### Exit criteria
 - [x] Both sides agree on the same documented v0 contract; CMD/ACK frames do not include a protocol-version field.
 - [x] Valid, invalid, partial, stale, and unknown messages have defined behavior.
 - [x] Transport failures are detectable and cannot silently appear as success.
 
-**Phase 2 evidence (updated 2026-11-08):** The deployed v0 framing is used by the integrated ESP32 parser, Pi client, tests, and shared vectors. Pi protocol tests passed 12/12 on the backend source branch; earlier hardware-protocol tests passed 5/5 after pulling v0. Tharun reports the listed parser checks passed. On the Phase 12 Pi run, status reported transport `connected`, and STOP reached ESP32 `ACK|sequence|OK` (command result `acknowledged`). The exact `EVENT|0|READY`, raw `TEL|0|SENSORS|...`, and HEARTBEAT `ALIVE` capture with firmware/backend revisions is still needed for the live-capture checklist item. No reflash is planned. Protocol v0 correlates ACKs by sequence only and cannot distinguish a delayed ACK after Pi restart if that sequence is reused.
+**Phase 2 evidence (updated 2026-11-08):** The deployed v0 framing is used by the integrated ESP32 parser, Pi client, tests, and shared vectors. Pi protocol tests passed 12/12 on the backend source branch; earlier hardware-protocol tests passed 5/5 after pulling v0. Tharun reports the listed parser checks passed. On the Phase 12 Pi run, status reported transport `connected`, and STOP reached an acknowledged result. Tharun's direct serial timing run received 377 telemetry frames (80 ms mean interval; 108 ms longest interval) and 20/20 HEARTBEAT ACKs (41.3 ms mean, 66.6 ms maximum). These are accepted as evidence; no repeat is requested. Only the raw READY event and exact firmware/backend revisions remain to be captured. No reflash is planned. Protocol v0 correlates ACKs by sequence only and cannot distinguish a delayed ACK after Pi restart if that sequence is reused.
 
 ## Phase 3 — Robot manager, modes, and command lifecycle
 
