@@ -1,4 +1,4 @@
-name: Phase 6 sensor freshness tests
+name: Phase 6 diagnostics and sensor tests
 
 on:
   workflow_dispatch:
@@ -6,15 +6,21 @@ on:
     branches:
       - phase-12-pi-api-https
     paths:
+      - "api/main.py"
+      - "api/tests/test_api.py"
+      - "api/requirements.txt"
+      - "api/requirements-test.txt"
       - "thashu/hardware/gpio_control.py"
       - "thashu/tests/test_hardware_protocol.py"
-      - "api/requirements-test.txt"
       - ".github/workflows/phase6-sensor-freshness.yml"
   pull_request:
     paths:
+      - "api/main.py"
+      - "api/tests/test_api.py"
+      - "api/requirements.txt"
+      - "api/requirements-test.txt"
       - "thashu/hardware/gpio_control.py"
       - "thashu/tests/test_hardware_protocol.py"
-      - "api/requirements-test.txt"
       - ".github/workflows/phase6-sensor-freshness.yml"
 
 jobs:
@@ -29,7 +35,7 @@ jobs:
           python-version: "3.11"
       - name: Install backend test dependencies
         run: python -m pip install -r api/requirements-test.txt
-      - name: Test Pi protocol and sensor freshness
-        run: python -m unittest thashu.tests.test_hardware_protocol
+      - name: Test diagnostics API, protocol, and sensor freshness
+        run: python -m unittest api.tests.test_api thashu.tests.test_hardware_protocol
         env:
           PYTHONPATH: thashu
