@@ -39,9 +39,11 @@ Identify current implementation, approved interfaces, and unresolved decisions b
 - [x] Inventory API routes already implemented and distinguish them from planned routes.
 - [x] Inventory the current Pi–ESP32 transport, parser, command format, and telemetry format from code and hardware evidence.
 - [x] Create a contract-gap list: endpoint/schema, mode transition, command acknowledgement, timeout, heartbeat, error taxonomy, versioning, and auth.
-- [ ] Obtain Niteshvar's explicit review/approval of the production API contract. Niteshvar's Flutter PR #9 is merged and states that the client targets the Pi API contract documented in `api/README.md`; this confirms implementation alignment, but no separate written contract approval is recorded. Hardware/protocol behavior with Tharun is confirmed for deployed protocol v0.
+- [x] Obtain Niteshvar's explicit review/approval of the production API contract. Tharun confirmed on 2026-11-09 that Niteshvar agreed to the production API contract; Flutter PR #9 is merged against `api/README.md`. Hardware/protocol behavior with Tharun is confirmed for deployed protocol v0.
 - [x] Record unresolved decisions in repository documentation or a focused issue.
 - [x] Do not claim an interface is approved solely because it appears in an AI-generated draft.
+
+**Phase 0 completion evidence (2026-11-09):** Tharun reports Niteshvar explicitly agreed to the production API contract; this closes the last open Phase 0 approval item. Existing behavior, unresolved decisions, and owners were documented before changes.
 
 ### Exit criteria
 - [x] Existing behavior and gaps are documented.
