@@ -100,7 +100,7 @@ _last_idle_recognized_person = None
 _last_idle_recognized_at = 0.0
 _motion_timer = None
 _motion_generation = 0
-_motion_lock = threading.Lock()
+_motion_lock = threading.RLock()
 _shutdown_event = threading.Event()
 _shutdown_lock = threading.Lock()
 _shutdown_complete = False
@@ -409,6 +409,89 @@ def stop_motion():
         return motors.stop()
 
 
+_follow_start_pending = False
+_follow_region_pending = None
+_api_server = None
+_api_thread = None
+
+
+def _cancel_motion_sources():
+    """Cancel active voice/follow output before an API mode change or STOP."""
+    global _auto_face_track_id, _follow_start_pending, _follow_region_pending
+    global _follow_search_active, _follow_motion_active
+    global _motion_timer, _motion_generation
+
+    with _motion_lock:
+        _follow_start_pending = False
+        _follow_region_pending = None
+        _follow_search_active = False
+        _auto_face_track_id = None
+        follow_logic.stop()
+        servo_tracker.stop_search()
+        _motion_generation += 1
+        if _motion_timer is not None:
+            _motion_timer.cancel()
+            _motion_timer = None
+        _follow_motion_active = False
+
+
+def _start_api_server():
+    """Run the mobile API with this process's existing motor and serial manager."""
+    global _api_server, _api_thread
+
+    try:
+        import sys
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if repo_root not in sys.path:
+            sys.path.insert(0, repo_root)
+
+        import uvicorn
+        from api.main import app, services
+        from core.config import api_host, api_port
+        from core.robot_manager import RobotCommandManager
+
+        manager = RobotCommandManager(
+            motor=motors,
+            command_lock=_motion_lock,
+            before_mode_switch=_cancel_motion_sources,
+            before_external_stop=_cancel_motion_sources,
+        )
+        services.attach_robot_manager(manager)
+        host = api_host()
+        port = api_port()
+        config = uvicorn.Config(
+            app,
+            host=host,
+            port=port,
+            log_level="info",
+            ws_ping_interval=20.0,
+            ws_ping_timeout=10.0,
+        )
+        _api_server = uvicorn.Server(config)
+        _api_thread = threading.Thread(
+            target=_api_server.run,
+            name="thashu-api",
+            daemon=True,
+        )
+        _api_thread.start()
+        print(f"[API] Started on {host}:{port}; shares the robot serial connection")
+    except Exception as exc:
+        print(f"[API] Startup failed ({type(exc).__name__}); voice/runtime remains available")
+
+
+def _stop_api_server():
+    """Stop Uvicorn and its lifespan before closing the shared ESP32 transport."""
+    global _api_server, _api_thread
+    if _api_server is not None:
+        _api_server.should_exit = True
+    if _api_thread is not None and _api_thread is not threading.current_thread():
+        _api_thread.join(timeout=3.0)
+        if _api_thread.is_alive():
+            print("[API] Server thread did not stop within 3 seconds")
+    _api_thread = None
+    _api_server = None
+
+
 def _shutdown_runtime(reason="process exit"):
     """Stop motion first, then close owned workers and device resources once."""
     global _shutdown_complete
@@ -445,6 +528,11 @@ def _shutdown_runtime(reason="process exit"):
         audio.stop()
     except Exception as exc:
         print(f"[SYSTEM] Audio shutdown warning: {exc}")
+
+    try:
+        _stop_api_server()
+    except Exception as exc:
+        print(f"[SYSTEM] API shutdown warning: {exc}")
 
     try:
         motors.gpio.close()
@@ -840,6 +928,7 @@ def main():
     global _memory_delete_pending, _memory_pending
     global _last_idle_recognized_person, _last_idle_recognized_at
     print("[SYSTEM] Jarvis started")
+    _start_api_server()
 
     # Start systems
     audio.start()
