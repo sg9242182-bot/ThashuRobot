@@ -86,6 +86,24 @@ class HardwareProtocolTests(unittest.TestCase):
         self.transport._disconnect("test disconnect")
         self.assertFalse(self.transport.has_ready_event())
 
+    def test_ready_event_and_disconnect_invalidate_pre_restart_sensors(self):
+        self.transport._update_sensor_snapshot(
+            "TEL|0|SENSORS|TOF_L|420|TOF_C|400|TOF_R|390|US_REAR|730"
+        )
+        self.assertIsNotNone(self.transport.get_sensor_snapshot())
+
+        self.transport._observe_controller_event("EVENT|0|READY")
+        self.assertTrue(self.transport.has_ready_event())
+        self.assertIsNone(self.transport.get_sensor_snapshot())
+
+        self.transport._update_sensor_snapshot(
+            "TEL|0|SENSORS|TOF_L|420|TOF_C|400|TOF_R|390|US_REAR|730"
+        )
+        self.assertIsNotNone(self.transport.get_sensor_snapshot())
+        self.transport._disconnect("controller restart")
+        self.assertFalse(self.transport.has_ready_event())
+        self.assertIsNone(self.transport.get_sensor_snapshot())
+
     def test_sensor_freshness_is_unknown_until_complete_frame(self):
         result = self.transport.get_sensor_freshness()
         self.assertEqual(
