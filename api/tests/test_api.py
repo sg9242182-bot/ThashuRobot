@@ -116,7 +116,7 @@ class FakeTransport:
     def is_connected(self):
         return self.connected
 
-    def get_sensor_freshness(self, max_age=1.0):
+    def get_sensor_freshness(self, max_age=1.0, observed_monotonic=None):
         return dict(self.sensor_freshness)
 
     def has_ready_event(self):
