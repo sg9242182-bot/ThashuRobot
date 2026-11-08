@@ -305,7 +305,7 @@ For each phase, record:
 
 | Phase | Status | Remaining item(s) |
 |---|---|---|
-| 0 — Architecture/contracts | In progress | Record explicit API-contract approval; implementation alignment is evidenced by merged Flutter PR #9. |
+| 0 — Architecture/contracts | Complete | Niteshvar's explicit API-contract agreement was confirmed by Tharun on 2026-11-09; implementation alignment is also evidenced by merged Flutter PR #9. |
 | 1 — Service foundation | In progress | Review broader API module separation and voice/vision logging; capture startup/shutdown against the deployed revision. |
 | 2 — Serial protocol | In progress | Capture READY, raw telemetry, and heartbeat ACK with revisions. Pi status and STOP ACK now verified during the Phase 12 run. |
 | 3 — Robot manager/modes | In progress | Latched Emergency Stop requires a tested ESP32 protocol/firmware change before Pi support. |
