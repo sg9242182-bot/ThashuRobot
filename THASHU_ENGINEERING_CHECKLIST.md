@@ -1210,6 +1210,8 @@ Implementation present on this branch:
 
 \[x] Document private-LAN HTTPS setup and certificate trust requirements. No certificate or private key is committed.
 
+\[x] Add Flutter runtime Pi address/token settings using HTTPS-only validation and platform secure storage; initialize REST and WebSocket clients from saved settings, add Android internet permission, and expose settings in the app. Integrated from Niteshvar's Phase 12 connection setup branch; Flutter dependency resolution/build and device verification remain pending.
+
 Pi verification (2026-11-08; user-reported):
 
 \[x] `/health` returned HTTP 200 and `/api/v1/status` returned HTTP 200 with ESP32 transport connected and mode AUTO.
@@ -1231,6 +1233,8 @@ Still required:
 \[ ] Confirm whether restart/shutdown/reset controls are required in the Flutter contract; define authorization and safe behavior before adding them. These controls are not implemented by the current API routes.
 
 \[ ] Agree the app-facing error/diagnostic fields and verify status plus sensor telemetry/staleness behavior.
+
+\[ ] Resolve Flutter dependencies and commit the generated lockfile; run Flutter analysis/tests and build the Android APK on the app toolchain.
 
 \[ ] Configure a certificate whose SAN matches the app URL; verify HTTPS and WebSocket TLS from Android with certificate validation enabled.
 
