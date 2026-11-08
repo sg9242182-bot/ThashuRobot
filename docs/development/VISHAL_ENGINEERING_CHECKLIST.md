@@ -203,7 +203,7 @@ Make failures observable and actionable without pretending an untested subsystem
 - [ ] Provide bounded log retrieval with redaction; do not expose secrets.
 - [ ] Separate a check that failed from a check that could not run.
 - [ ] Make diagnostic endpoints read-only unless a separate authorized action is explicitly specified.
-- [ ] Add tests for missing devices, stale data, malformed telemetry, and log access boundaries. GPIO/manager/API fake suites cover missing, stale, malformed, and secret-safe event/log behavior; there is no log-retrieval endpoint, so endpoint access tests wait for an approved diagnostics contract.
+- [ ] Add tests for missing devices, stale data, malformed telemetry, and log access boundaries. GPIO/manager/API fake suites cover missing, stale, malformed, and secret-safe event/log behavior; there is no log-retrieval endpoint, so endpoint access tests wait for an approved diagnostics contract. A GPIO sensor-freshness accessor and tests were added on `phase-12-pi-api-https`; the GitHub Actions run is pending.
 
 ### Exit criteria
 - [ ] Reported health reflects evidence, not assumptions.
