@@ -259,6 +259,14 @@ class AudioManager:
                 print(f"[AUDIO] Error closing stream: {e}")
             self._stream = None
 
+        watchdog = self._watchdog_thread
+        if watchdog is not None and watchdog is not threading.current_thread():
+            watchdog.join(timeout=1.0)
+            if watchdog.is_alive():
+                print("[AUDIO] Watchdog thread is still stopping")
+            else:
+                self._watchdog_thread = None
+
         print("[AUDIO] Stream stopped")
 
     def pause(self):
@@ -279,23 +287,42 @@ class AudioManager:
 
     def resume(self):
         """
-        Reopen the mic after TTS/brain has finished.
-        Uses the device index already resolved at start() — no re-enumeration.
-        Re-enumeration only happens in start() and the watchdog (on actual disconnect).
+        Reopen the mic after TTS/brain has finished. Prefer the current device
+        index, but re-enumerate and retry if ALSA reports that the device changed
+        or disappeared while the stream was paused.
         """
         if self._paused and self._running:
             self.drain()
             self._overflow_count = 0
-            try:
-                # _device_idx is already set from start(); do not call _resolve_device()
-                # here — that re-enumerates all devices and prints the full listing on
-                # every pause/resume cycle, which is unnecessary and noisy.
-                self._stream = self._open_stream()
-                self._stream.start()
-                self._paused = False
-                print(f"[AUDIO] Resumed (device [{self._device_idx}])")
-            except Exception as e:
-                print(f"[AUDIO] Resume failed: {e}")
+            last_error = None
+
+            for attempt in range(2):
+                stream = None
+                try:
+                    if attempt:
+                        # USB audio indices can change after a device is connected
+                        # or reset. Refresh only on a failed resume, not every time.
+                        time.sleep(0.25)
+                        self._device_idx = self._resolve_device()
+
+                    stream = self._open_stream()
+                    stream.start()
+                    self._stream = stream
+                    self._paused = False
+                    print(f"[AUDIO] Resumed (device [{self._device_idx}])")
+                    return True
+                except Exception as exc:
+                    last_error = exc
+                    if stream is not None:
+                        try:
+                            stream.close()
+                        except Exception:
+                            pass
+                    self._stream = None
+
+            print(f"[AUDIO] Resume failed after refreshing devices: {last_error}")
+            return False
+        return self._running and not self._paused
 
     # ── Watchdog ──────────────────────────────────────────────────────────────
 
@@ -338,10 +365,12 @@ class AudioManager:
             print("[AUDIO] Watchdog: stream not active — attempting restart")
             for attempt in range(5):
                 try:
-                    time.sleep(1.0 * (attempt + 1))   # back off between retries
+                    if self._stop_event.wait(1.0 * (attempt + 1)):
+                        print("[AUDIO] Watchdog: restart aborted (stopped)")
+                        break
 
-                    # Fix 3: re-check after sleep — pause/stop may have been
-                    # called during the backoff window.
+                    # Fix 3: re-check after backoff — pause/stop may have been
+                    # called while waiting.
                     if self._paused or not self._running:
                         print("[AUDIO] Watchdog: restart aborted (paused or stopped)")
                         break

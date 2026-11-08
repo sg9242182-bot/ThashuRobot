@@ -55,15 +55,14 @@ find "$THASHU_MODELS_DIR" -type f -printf '%p %s bytes\n' | sort
 | Feature | Path under `$THASHU_MODELS_DIR` | Source |
 |---|---|---|
 | Person / upper-body tracking | `pose_landmarker_lite.task` | MediaPipe Pose Landmarker Lite |
-| Face recognition embeddings | `face/w600k_r50.onnx` | InsightFace `buffalo_l.zip` |
-| Face detection and five-point alignment landmarks | `face/face_detection_yunet_2023mar.onnx` | OpenCV Zoo YuNet (MIT) |
+| Face detection (optional acceleration) | `face/face_detection_yunet_2023mar.onnx` | OpenCV Zoo YuNet (MIT); Haar fallback is supported |
 | Wake word | `openwakeword/hey_jarvis_v0.1.onnx` | openWakeWord downloader |
 | Wake word support | `openwakeword/melspectrogram.onnx`, `embedding_model.onnx` | Same openWakeWord download |
 | Local LLM | `llm/qwen2.5-0.5b-instruct-q4_k_m.gguf` | Official Qwen GGUF repository |
 | Piper voice | `piper/en_US-lessac-low.onnx` and matching `.onnx.json` | Piper voices repository |
 | Speech recognition | `whisper/` | faster-whisper downloads Whisper tiny on first initialization |
 
-The face detector uses the machine-local YuNet landmark model when installed and falls back to OpenCV's Haar cascade for detection-only behavior. Confirmed face embeddings are stored under `~/.local/share/thashu/data/people_faces.json`, outside the checkout; the new enrollment flow stores no face photos. Piper's executable is software, not a model weight. The code defaults to `~/piper/piper/piper`; set `THASHU_PIPER_BIN` if it is installed elsewhere.
+The face detector uses machine-local YuNet when installed and falls back to OpenCV's Haar cascade. Dlib estimates landmarks within detected crops. Confirmed dlib descriptors are stored under `~/.local/share/thashu/data/people_faces_dlib.json`, outside the checkout; the enrollment flow stores no face photos. Legacy ArcFace data at `people_faces.json` is not read or modified. Piper's executable is software, not a model weight. The code defaults to `~/piper/piper/piper`; set `THASHU_PIPER_BIN` if it is installed elsewhere.
 
 ## Download the models
 
@@ -95,31 +94,21 @@ python -c 'import os; from openwakeword.utils import download_models; download_m
 
 ### Face recognition
 
-The official InsightFace model archive publishes a SHA-256 checksum. This downloads it to `/tmp`, verifies it, and extracts only the recognition model:
+The active recognizer is dlib. Install it through the project's normal requirements:
 
 ```bash
-wget -O /tmp/thashu-buffalo_l.zip https://github.com/deepinsight/insightface/releases/download/model-zoo/buffalo_l.zip
-echo '80ffe37d8a5940d59a7384c201a2a38d4741f2f3c51eef46ebb28218a7b0ca2f  /tmp/thashu-buffalo_l.zip' | sha256sum -c -
-python - <<'PY'
-import os
-from pathlib import Path
-from zipfile import ZipFile
-
-target = Path(os.environ["THASHU_MODELS_DIR"]) / "face" / "w600k_r50.onnx"
-with ZipFile("/tmp/thashu-buffalo_l.zip") as zf:
-    matches = [name for name in zf.namelist() if Path(name).name == target.name]
-    if len(matches) != 1:
-        raise SystemExit(f"Expected one {target.name}; found {matches}")
-    target.write_bytes(zf.read(matches[0]))
-print(f"Installed {target} ({target.stat().st_size:,} bytes)")
-PY
+cd ~/ThashuRobot/thashu
+source ~/.venvs/thashu/bin/activate
+python -m pip install -r requirements.txt
 ```
 
-InsightFace labels its pretrained recognition models for non-commercial research use. Check that license before using this model commercially.
+Dlib's five-point predictor and 128-D recognition model are supplied by `face_recognition_models`; no ArcFace recognition model download is needed. YuNet is an optional face-box detector acceleration. If it is absent, the existing Haar detector still supplies face crops to dlib.
 
-### Face landmarks for recognition
+Dlib descriptors are not compatible with legacy ArcFace embeddings. The dlib database is `~/.local/share/thashu/data/people_faces_dlib.json`. Existing `people_faces.json` and `w600k_r50.onnx` files are left untouched; enroll identities again through the confirmed enrollment flow before expecting recognition.
 
-Face recognition requires the YuNet detector because the ArcFace embedding is aligned from five detected landmarks. Without this asset the camera can still detect faces with Haar, but those detections are not assigned a known identity and remain Unknown.
+### Optional YuNet face detector
+
+Dlib estimates five facial landmarks inside each detected face crop. YuNet accelerates face-box detection when installed; the existing Haar fallback can also provide boxes to dlib.
 
 OpenCV 4.10's contrib build provides FaceDetectorYN. Download the small OpenCV Zoo model into the machine-local model directory:
 
@@ -128,7 +117,7 @@ curl -fL 'https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yu
 test -s "$THASHU_MODELS_DIR/face/face_detection_yunet_2023mar.onnx"
 ```
 
-The OpenCV Zoo YuNet model is MIT-licensed; the separate InsightFace recognition weights retain their non-commercial research limitation: https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet
+The OpenCV Zoo YuNet model is MIT-licensed: https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet
 
 ### Qwen local LLM
 
@@ -159,14 +148,13 @@ python -c 'from voice.speech_to_text import _get_model; _get_model()'
 ```bash
 find "$THASHU_MODELS_DIR" -type f -printf '%p %s bytes\n' | sort
 test -s "$THASHU_MODELS_DIR/pose_landmarker_lite.task"
-test -s "$THASHU_MODELS_DIR/face/w600k_r50.onnx"
 test -s "$THASHU_MODELS_DIR/openwakeword/hey_jarvis_v0.1.onnx"
 test -s "$THASHU_MODELS_DIR/openwakeword/melspectrogram.onnx"
 test -s "$THASHU_MODELS_DIR/openwakeword/embedding_model.onnx"
 test -s "$THASHU_MODELS_DIR/llm/qwen2.5-0.5b-instruct-q4_k_m.gguf"
 test -s "$THASHU_MODELS_DIR/piper/en_US-lessac-low.onnx"
 test -s "$THASHU_MODELS_DIR/piper/en_US-lessac-low.onnx.json"
-git -C ~/ThashuRobot check-ignore -v thashu/models/face/w600k_r50.onnx
+git -C ~/ThashuRobot check-ignore -v thashu/models/face/face_detection_yunet_2023mar.onnx
 ```
 
 `git check-ignore` should report `thashu/models`; the active assets are in your home data directory, outside Git altogether.
@@ -175,8 +163,62 @@ git -C ~/ThashuRobot check-ignore -v thashu/models/face/w600k_r50.onnx
 
 - [MediaPipe Pose Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker)
 - [openWakeWord model downloader](https://github.com/dscripka/openWakeWord)
-- [InsightFace model-zoo release and checksum](https://github.com/deepinsight/insightface/releases/tag/model-zoo)
-- [InsightFace model licensing](https://github.com/deepinsight/insightface/blob/master/model_zoo/README.md)
 - [Official Qwen 2.5 0.5B Instruct GGUF files](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/tree/main)
 - [Piper en_US-lessac-low voice files](https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_US/lessac/low)
 - [faster-whisper `download_root` option](https://github.com/SYSTRAN/faster-whisper/blob/master/faster_whisper/transcribe.py)
+
+
+## Low-latency streaming Piper setup (Phase 11)
+
+The application prefers the in-process `libpiper` backend. It keeps the voice model resident and streams decoder chunks to ALSA. This requires split ONNX files and the native library. Until both are available, Thashu uses the existing Piper CLI fallback.
+
+Run once on the Raspberry Pi. Keep MediaPipe's required protobuf version; do not install the PyPI `piper-tts` package for the splitter.
+
+```bash
+cd ~/ThashuRobot
+git clone --depth 1 https://github.com/OHF-Voice/piper1-gpl.git ~/piper1-gpl
+cd ~/ThashuRobot/thashu
+source ~/.venvs/thashu/bin/activate
+
+python -m pip install --force-reinstall "onnx==1.17.0" "protobuf==4.25.5" "numpy==1.26.4"
+python -m pip check
+```
+
+If `pip check` reports a MediaPipe/protobuf conflict, stop and share the output. Split the existing voice using the splitter from the cloned upstream source:
+
+```bash
+MODEL="$HOME/.local/share/thashu/models/piper/en_US-lessac-low.onnx"
+PYTHONPATH="$HOME/piper1-gpl/src" python -m piper.split_voice_for_streaming "$MODEL"
+ls -lh "${MODEL%.onnx}.encoder.onnx" "${MODEL%.onnx}.decoder.onnx"
+```
+
+Install the native build tools. CMake must be version 3.26 or newer:
+
+```bash
+sudo apt update
+sudo apt install -y build-essential git
+python -m pip install "cmake==3.30.9"
+hash -r
+which cmake
+cmake --version
+```
+
+The pip-installed CMake is isolated in the active Thashu virtual environment and provides a Linux ARM64 wheel. Confirm `which cmake` points inside `~/.venvs/thashu/bin` and the version is at least 3.26 before building. Do not run a full OS upgrade just to get CMake.
+
+Then build and install libpiper:
+
+```bash
+cmake -S "$HOME/piper1-gpl/libpiper" \
+  -B "$HOME/piper1-gpl/libpiper/build" \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX="$HOME/piper1-gpl/libpiper/install" \
+  -DCMAKE_INSTALL_RPATH='$ORIGIN'
+cmake --build "$HOME/piper1-gpl/libpiper/build" --parallel 2
+cmake --install "$HOME/piper1-gpl/libpiper/build"
+
+ls -lh "$HOME/piper1-gpl/libpiper/install/lib/libpiper.so"
+ls -d "$HOME/piper1-gpl/libpiper/install/share/espeak-ng-data"
+```
+
+The runtime checks those default paths. For a different install location, set `THASHU_LIBPIPER` and `THASHU_ESPEAK_DATA_DIR` when launching Thashu. Upstream references: [voice splitting and streaming](https://github.com/OHF-Voice/piper1-gpl/blob/main/docs/STREAMING.md), [libpiper build instructions](https://github.com/OHF-Voice/piper1-gpl/blob/main/libpiper/README.md).
+

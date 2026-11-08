@@ -1,7 +1,8 @@
+import os
 import subprocess
 import threading
 
-DEVICE  = "default"
+DEVICE  = os.environ.get("THASHU_AUDIO_OUTPUT", "sysdefault:CARD=Headphones")
 _lock   = threading.Lock()
 
 

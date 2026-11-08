@@ -1,4 +1,4 @@
-"""Persistent face embeddings; unknown people are never enrolled automatically."""
+"""Persistent dlib face descriptors for explicitly confirmed identities."""
 
 import difflib
 import json
@@ -8,25 +8,36 @@ import tempfile
 import numpy as np
 
 
-class FaceDatabase:
-    """Stores only confirmed names and normalized embeddings, never face photos."""
+class DlibFaceDatabase:
+    """Stores raw 128-D dlib descriptors separately from legacy ArcFace data."""
 
     VERSION = 1
-    MAX_EMBEDDINGS_PER_PERSON = 8
-    # Conservative initial gates; the Pi validation must tune/confirm them with
-    # labeled same-person and different-person samples before Phase 6 completes.
-    DEFAULT_THRESHOLD = 0.50
-    DEFAULT_MARGIN = 0.08
+    MAX_EMBEDDINGS_PER_PERSON = 15
+    DEFAULT_THRESHOLD = 0.60
+    DEFAULT_MARGIN = 0.12
+    DESCRIPTOR_SIZE = 128
 
-    def __init__(self, db_path="data/people_faces.json",
-                 threshold=DEFAULT_THRESHOLD, margin=DEFAULT_MARGIN):
+    def __init__(self, db_path="~/.local/share/thashu/data/people_faces_dlib.json", threshold=None, margin=None):
         self.db_path = os.path.abspath(os.path.expanduser(db_path))
-        self.threshold = float(threshold)
-        self.margin = float(margin)
-        if not -1.0 <= self.threshold <= 1.0 or not 0.0 <= self.margin <= 2.0:
-            raise ValueError("Invalid face recognition thresholds")
+        self.threshold = float(self.DEFAULT_THRESHOLD if threshold is None else threshold)
+        self.margin = float(self.DEFAULT_MARGIN if margin is None else margin)
+        if not np.isfinite(self.threshold) or self.threshold <= 0 or self.threshold > 2:
+            raise ValueError("Invalid dlib distance threshold")
+        if not np.isfinite(self.margin) or self.margin < 0 or self.margin > 2:
+            raise ValueError("Invalid dlib distance margin")
         self.load_error = None
         self.data = self.load()
+
+    @staticmethod
+    def _normalize(vector):
+        """Validate a finite raw 128-D dlib descriptor without rescaling it."""
+        value = np.asarray(vector, dtype=np.float32).reshape(-1)
+        if value.size != DlibFaceDatabase.DESCRIPTOR_SIZE or not np.isfinite(value).all():
+            raise ValueError("Expected a finite 128-D dlib descriptor")
+        return value.copy()
+
+    def is_overlap(self, distance):
+        return float(distance) <= self.threshold
 
     @staticmethod
     def _clean_name(name):
@@ -36,14 +47,6 @@ class FaceDatabase:
         if not name or len(name) > 64 or not all(ch.isalnum() or ch in " _.-'" for ch in name):
             raise ValueError("Person name is empty or contains unsupported characters")
         return name
-
-    @staticmethod
-    def _normalize(vector):
-        value = np.asarray(vector, dtype=np.float32).reshape(-1)
-        norm = float(np.linalg.norm(value))
-        if value.size == 0 or not np.isfinite(value).all() or not np.isfinite(norm) or norm <= 1e-12:
-            raise ValueError("Embedding must be a finite, non-zero vector")
-        return value / norm
 
     def load(self):
         if not os.path.exists(self.db_path):
@@ -86,31 +89,6 @@ class FaceDatabase:
         finally:
             if os.path.exists(temporary):
                 os.unlink(temporary)
-
-    def add_person(self, name, embedding, *, confirmed=False):
-        """Persist one enrollment sample only after the explicit confirmation flow."""
-        if confirmed is not True:
-            raise PermissionError("Face enrollment requires explicit identity confirmation")
-        if self.load_error is not None:
-            raise OSError("Face database could not be loaded; refusing to overwrite it")
-        name = self._clean_name(name)
-        vector = self._normalize(embedding)
-        existing = self.data.get(name, [])
-        for stored in existing:
-            if float(np.dot(vector, np.asarray(stored, dtype=np.float32))) >= 0.90:
-                return False
-        previous = self.data.get(name)
-        updated = list(previous or []) + [vector.tolist()]
-        self.data[name] = updated[-self.MAX_EMBEDDINGS_PER_PERSON:]
-        try:
-            self.save()
-        except OSError:
-            if previous is None:
-                self.data.pop(name, None)
-            else:
-                self.data[name] = previous
-            raise
-        return True
 
     def resolve_name(self, spoken_name):
         """Resolve a spoken name to one saved label; callers must confirm fuzzy matches."""
@@ -163,8 +141,62 @@ class FaceDatabase:
             raise
         return True
 
+    def best_other_match(self, embedding, exclude_name=None):
+        query = self._normalize(embedding)
+        excluded = str(exclude_name or "").strip().casefold()
+        best_name, best_distance = None, float("inf")
+        for name, embeddings in self.data.items():
+            if name.casefold() == excluded:
+                continue
+            distances = [
+                float(np.linalg.norm(query - self._normalize(stored)))
+                for stored in embeddings
+            ]
+            if distances and min(distances) < best_distance:
+                best_name, best_distance = name, min(distances)
+        return best_name, best_distance
+
+    def filter_enrollment_samples(self, name, embeddings):
+        if self.load_error is not None:
+            raise OSError("Face database could not be loaded; refusing enrollment")
+        name = self._clean_name(name)
+        accepted, rejected = [], []
+        for index, embedding in enumerate(embeddings):
+            vector = self._normalize(embedding)
+            other_name, distance = self.best_other_match(vector, exclude_name=name)
+            if other_name is not None and self.is_overlap(distance):
+                rejected.append((index, other_name, distance))
+            else:
+                accepted.append(vector)
+        return accepted, rejected
+
+    def add_person(self, name, embedding, *, confirmed=False):
+        if confirmed is not True:
+            raise PermissionError("Face enrollment requires explicit identity confirmation")
+        if self.load_error is not None:
+            raise OSError("Face database could not be loaded; refusing to overwrite it")
+        name = self._clean_name(name)
+        vector = self._normalize(embedding)
+        existing = self.data.get(name, [])
+        if any(
+            float(np.linalg.norm(vector - self._normalize(stored))) <= 0.20
+            for stored in existing
+        ):
+            return False
+        previous = self.data.get(name)
+        self.data[name] = list(previous or []) + [vector.tolist()]
+        self.data[name] = self.data[name][-self.MAX_EMBEDDINGS_PER_PERSON:]
+        try:
+            self.save()
+        except OSError:
+            if previous is None:
+                self.data.pop(name, None)
+            else:
+                self.data[name] = previous
+            raise
+        return True
+
     def add_person_samples(self, name, embeddings, *, confirmed=False):
-        """Persist a batch collected from one stable face after spoken confirmation."""
         if confirmed is not True:
             raise PermissionError("Face enrollment requires explicit identity confirmation")
         if self.load_error is not None:
@@ -173,77 +205,94 @@ class FaceDatabase:
         vectors = [self._normalize(item) for item in embeddings]
         if len(vectors) < 5:
             raise ValueError("At least five quality-approved observations are required")
-        if name in self.data:
-            raise ValueError("That confirmed name already exists; refusing to merge identities")
 
-        matrix = np.stack(vectors)
-        similarities = matrix @ matrix.T
-        pair_scores = similarities[np.triu_indices(len(vectors), k=1)]
-        if pair_scores.size and float(np.median(pair_scores)) < 0.45:
+        distances = [
+            float(np.linalg.norm(vectors[left] - vectors[right]))
+            for left in range(len(vectors))
+            for right in range(left + 1, len(vectors))
+        ]
+        if distances and float(np.median(distances)) > self.threshold:
             raise ValueError("Enrollment observations are inconsistent; no identity was saved")
 
-        # Refuse an enrollment that looks like an existing identity, instead of
-        # silently creating a duplicate label for a face already in the store.
-        for existing_name, stored_embeddings in self.data.items():
-            score = max(
-                float(np.dot(vector, self._normalize(stored)))
-                for vector in vectors
-                for stored in stored_embeddings
+        accepted, rejected = self.filter_enrollment_samples(name, vectors)
+        if rejected:
+            summary = ", ".join(
+                f"sample {index + 1} overlaps {other_name} distance={distance:.3f}"
+                for index, other_name, distance in rejected
             )
-            if score >= self.threshold:
-                raise ValueError(f"Enrollment resembles the existing identity {existing_name}")
+            raise ValueError(
+                "Enrollment still contains overlapping samples; capture replacements: "
+                + summary
+            )
 
-        self.data[name] = [vector.tolist() for vector in vectors[-self.MAX_EMBEDDINGS_PER_PERSON:]]
+        previous = self.data.get(name)
+        self.data[name] = list(previous or []) + [item.tolist() for item in accepted]
+        self.data[name] = self.data[name][-self.MAX_EMBEDDINGS_PER_PERSON:]
         try:
             self.save()
         except OSError:
-            self.data.pop(name, None)
+            if previous is None:
+                self.data.pop(name, None)
+            else:
+                self.data[name] = previous
             raise
         return True
 
-    def match(self, embedding, threshold=None, margin=None, *, diagnostics=False):
-        """Return (name, score) only when best score and separation both pass."""
+    def match_details(self, embedding):
         if not self.data:
-            if diagnostics:
-                print("[FACE MATCH TEST] rejected: identity database is empty")
-            return None, -1.0
+            return None, float("inf"), 0.0
         try:
             query = self._normalize(embedding)
         except (TypeError, ValueError):
-            if diagnostics:
-                print("[FACE MATCH TEST] rejected: query embedding is invalid")
-            return None, -1.0
+            return None, float("inf"), 0.0
 
-        best_by_person = []
+        distances = []
         for name, embeddings in self.data.items():
-            scores = [
-                float(np.dot(query, self._normalize(stored)))
-                for stored in embeddings
-            ]
-            if scores:
-                best_by_person.append((max(scores), name))
-        if not best_by_person:
-            if diagnostics:
-                print("[FACE MATCH TEST] rejected: database has no usable embeddings")
-            return None, -1.0
+            if embeddings:
+                best = min(
+                    float(np.linalg.norm(query - self._normalize(stored)))
+                    for stored in embeddings
+                )
+                distances.append((best, name))
+        if not distances:
+            return None, float("inf"), 0.0
+        distances.sort()
+        best_distance, best_name = distances[0]
+        second_distance = distances[1][0] if len(distances) > 1 else float("inf")
+        return best_name, best_distance, second_distance - best_distance
 
-        best_by_person.sort(reverse=True)
-        best_score, best_name = best_by_person[0]
-        second_score = best_by_person[1][0] if len(best_by_person) > 1 else -1.0
-        required_score = self.threshold if threshold is None else float(threshold)
-        required_margin = self.margin if margin is None else float(margin)
-        score_pass = best_score >= required_score
-        margin_score = best_score - second_score
-        margin_pass = margin_score >= required_margin
+    def match(self, embedding, threshold=None, margin=None, *, diagnostics=False):
+        best_name, best_distance, separation = self.match_details(embedding)
+        if best_name is None:
+            if diagnostics:
+                print("[FACE MATCH TEST] rejected: dlib identity database is empty or invalid")
+            return None, float("inf")
+
+        maximum_distance = self.threshold if threshold is None else float(threshold)
+        minimum_margin = self.margin if margin is None else float(margin)
+        distance_pass = best_distance <= maximum_distance
+        margin_pass = separation >= minimum_margin
         if diagnostics:
-            verdict = "candidate" if score_pass and margin_pass else "rejected"
+            verdict = "candidate" if distance_pass and margin_pass else "rejected"
             print(
-                f"[FACE MATCH TEST] {verdict}: best={best_score:.3f} ({best_name}), "
-                f"second={second_score:.3f}, delta={margin_score:.3f}, "
-                f"required_score={required_score:.3f}, "
-                f"required_margin={required_margin:.3f}, "
-                f"identities={len(best_by_person)}"
+                f"[FACE MATCH TEST] {verdict}: best_distance={best_distance:.3f} "
+                f"({best_name}), separation={separation:.3f}, "
+                f"maximum_distance={maximum_distance:.3f}, "
+                f"required_margin={minimum_margin:.3f}, identities={len(self.data)}"
             )
-        if score_pass and margin_pass:
-            return best_name, best_score
-        return None, best_score
+        if distance_pass and margin_pass:
+            return best_name, best_distance
+        return None, best_distance
+
+    def compare_sample_and_prototype_scores(self, embedding):
+        # ArcFace cosine diagnostics are not meaningful for raw dlib descriptors.
+        return []
+
+    def add_high_confidence_sample(self, name, embedding):
+        # Unattended dlib enrollment remains disabled until its distance gates
+        # have been validated on the robot's actual camera.
+        return False
+
+
+# Compatibility name; this database always stores dlib descriptors.
+FaceDatabase = DlibFaceDatabase

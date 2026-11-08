@@ -1,30 +1,42 @@
+import time
+
+
 class ShortTermMemory:
-    def __init__(self, max_size=5):
-        """
-        Stores recent interactions
-        
-        Args:
-            max_size (int): number of recent messages to keep
-        """
-        self.max_size = max_size
+    """Recent conversation context with a bounded size and per-pair time-to-live."""
+
+    DEFAULT_MAX_SIZE = 5
+    DEFAULT_EXPIRATION_SECONDS = 10 * 60
+
+    def __init__(self, max_size=DEFAULT_MAX_SIZE,
+                 expiration_seconds=DEFAULT_EXPIRATION_SECONDS):
+        self.max_size = max(1, int(max_size))
+        self.expiration_seconds = max(1.0, float(expiration_seconds))
         self.memory = []
+        self._added_at = []
+
+    def _expire(self, now=None):
+        """Drop conversation pairs older than the configured retention window."""
+        now = time.monotonic() if now is None else now
+        cutoff = now - self.expiration_seconds
+        while self._added_at and self._added_at[0] <= cutoff:
+            self._added_at.pop(0)
+            self.memory.pop(0)
 
     def add(self, user_input: str, response: str):
-        """
-        Store a conversation pair
-        """
-
+        """Store a conversation pair, retaining only recent, unexpired context."""
+        now = time.monotonic()
+        self._expire(now)
         self.memory.append({
             "input": user_input,
             "response": response
         })
+        self._added_at.append(now)
 
-        # Keep memory size limited
-        if len(self.memory) > self.max_size:
+        while len(self.memory) > self.max_size:
             self.memory.pop(0)
+            self._added_at.pop(0)
 
     def get_context(self):
-        """
-        Return recent conversation
-        """
-        return self.memory
+        """Return unexpired recent conversation pairs without internal timestamps."""
+        self._expire()
+        return list(self.memory)

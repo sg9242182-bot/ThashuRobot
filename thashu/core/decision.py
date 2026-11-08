@@ -267,10 +267,28 @@ def get_spelled_registration_name(user_input):
     return "".join(letters).title()
 
 
+
+def get_enrollment_spelling(user_input):
+    """Accept only a direct sequence of spoken letter names for enrollment."""
+    tokens = _normalize_phrase(user_input).split()
+    if len(tokens) < 2:
+        return None
+    letters = []
+    for token in tokens:
+        letter = _LETTER_NAMES.get(token)
+        if letter is None:
+            return None
+        letters.append(letter)
+    return "".join(letters).title()
+
+
 def get_remove_identity_name(user_input):
     """Return a name only for an explicit request to remove its stored face identity."""
     normalized = _normalize_phrase(user_input)
     if normalized in _RECOGNITION_CANCEL_PHRASES:
+        return None
+    # Keep saved-memory deletion phrases out of the face-identity name parser.
+    if normalized in _MEMORY_DELETE_PHRASES:
         return None
     match = re.fullmatch(r"(?:forget|remove|delete) ([a-z][a-z .'-]{0,62})", normalized)
     if not match:
@@ -385,6 +403,163 @@ def get_look_command(user_input: str):
     return _LOOK_COMMANDS.get(normalized)
 
 
+
+_MEMORY_SAVE_QUERY = {
+    "what do you remember about me",
+    "what have you saved about me",
+    "tell me what you remember about me",
+    "what personal memories do you have about me",
+    "what events do you remember about me",
+    "tell me what events you remember about me",
+    "where did we meet",
+    "where have we met",
+}
+
+
+def get_event_memory_request(user_input: str):
+    """Return (event text, explicitly stated trailing location or None)."""
+    request = get_person_memory_request(user_input)
+    if request is None or request[0] != "event":
+        return None
+
+    event_text = request[1]
+    separators = list(re.finditer(r"\s+(?:at|in)\s+", event_text, flags=re.IGNORECASE))
+    # Only a simple trailing at/in phrase can be stored as a location.
+    for match in reversed(separators):
+        candidate = event_text[match.end():].strip(" .!?,'")
+        description = event_text[:match.start()].strip(" .!?,'")
+        if not description or not candidate or len(candidate) > 80:
+            continue
+        temporal = re.search(
+            r"\s+(today|yesterday|tomorrow|tonight|this morning|this afternoon|last night)$",
+            candidate,
+            re.IGNORECASE,
+        )
+        if temporal:
+            description = (description + " " + candidate[temporal.start():].strip()).strip()
+            candidate = candidate[:temporal.start()].strip()
+        words = candidate.split()
+        if len(words) > 8 or not any(char.isalpha() for char in candidate):
+            continue
+        if re.fullmatch(
+            r"(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midnight|night|morning|afternoon|evening)",
+            candidate,
+            re.IGNORECASE,
+        ):
+            continue
+        if re.search(r"\b(?:with|because|then|while|although|but|and)\b", candidate, re.IGNORECASE):
+            continue
+        return description, candidate
+    return event_text, None
+
+
+def get_person_event_query(user_input: str):
+    """Return an event recall target, empty for all events, or None."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", (user_input or "").lower()).strip()
+    event_queries = {
+        "what events do you remember about me",
+        "tell me what events you remember about me",
+        "where did we meet",
+        "where have we met",
+    }
+    if normalized in event_queries:
+        return ""
+    match = re.fullmatch(
+        r"(?:where did i meet|where have i met) ([a-z][a-z0-9' -]{0,62})",
+        normalized,
+    )
+    if not match:
+        return None
+    target = " ".join(match.group(1).split()).strip()
+    return target or None
+
+
+def get_place_event_query(user_input: str):
+    """Return an explicitly spoken place label for event recall, or None."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", (user_input or "").lower()).strip()
+    prefixes = (
+        "what do you remember happening at ",
+        "what do you remember happening in ",
+        "tell me what happened at ",
+        "tell me what happened in ",
+        "what events happened at ",
+        "what events happened in ",
+        "what event happened at ",
+        "what event happened in ",
+        "what happened at ",
+        "what happened in ",
+    )
+    for prefix in prefixes:
+        if not normalized.startswith(prefix):
+            continue
+        place = " ".join(normalized[len(prefix):].split())
+        if place and len(place) <= 80 and len(place.split()) <= 8:
+            return place
+    return None
+
+
+def get_person_memory_request(user_input: str):
+    """Parse only explicit permanent-memory save phrases.
+
+    'Remember that ...' saves a person fact.
+    'Remember this event ...' saves a user-designated event.
+    """
+    text = " ".join((user_input or "").strip().split())
+    patterns = (
+        ("event", r"remember this event(?:\s*[:,;.!?]\s*|\s+)(.+)"),
+        ("fact", r"remember that(?:\s*[:,;.!?]\s*|\s+)(.+)"),
+    )
+    for kind, pattern in patterns:
+        match = re.fullmatch(pattern, text, flags=re.IGNORECASE)
+        if match:
+            content = match.group(1).strip(" .!?")
+            if content:
+                return kind, content
+    return None
+
+
+
+def get_person_memory_save_confirmation(user_input: str):
+    """Return an exact explicit save-confirmation or cancellation command."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", (user_input or "").lower()).strip()
+    if normalized == "confirm memory":
+        return "CONFIRM"
+    if normalized == "cancel memory":
+        return "CANCEL"
+    return None
+
+
+_MEMORY_DELETE_PHRASES = {
+    "forget all my memories",
+    "forget everything you remember about me",
+    "delete my saved memories",
+}
+_MEMORY_DELETE_CONFIRM_PHRASES = {"confirm delete memories"}
+_MEMORY_DELETE_CANCEL_PHRASES = {"cancel memory deletion"}
+
+
+def get_person_memory_delete_command(user_input: str):
+    """Return an exact delete, confirm, or cancel command for saved memories."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", (user_input or "").lower()).strip()
+    if normalized in _MEMORY_DELETE_PHRASES:
+        return "DELETE"
+    if normalized in _MEMORY_DELETE_CONFIRM_PHRASES:
+        return "CONFIRM"
+    if normalized in _MEMORY_DELETE_CANCEL_PHRASES:
+        return "CANCEL"
+    return None
+
+
+def is_person_memory_query(user_input: str) -> bool:
+    """Recognize bounded recall requests without passing them to the LLM."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", (user_input or "").lower()).strip()
+    return (
+        normalized in _MEMORY_SAVE_QUERY
+        or get_person_event_query(user_input) is not None
+        or get_place_event_query(user_input) is not None
+    )
+
+
 def is_forward_command(user_input: str) -> bool:
     """Accept only explicit forward phrases with an optional recognized speed."""
     return get_forward_speed(user_input) is not None
@@ -422,3 +597,17 @@ def decide(user_input: str, context=None) -> str:
 
     # ===== DEFAULT =====
     return "AI_FALLBACK"
+
+def should_announce_recognized_person(person_name, last_announced_name):
+    """Announce only a new, non-unknown identity relative to the last announcement."""
+    if not isinstance(person_name, str) or not person_name.strip():
+        return False
+    normalized = person_name.strip().casefold()
+    if normalized == "unknown":
+        return False
+    previous = (
+        last_announced_name.strip().casefold()
+        if isinstance(last_announced_name, str)
+        else ""
+    )
+    return normalized != previous

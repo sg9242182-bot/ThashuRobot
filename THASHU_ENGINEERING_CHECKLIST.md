@@ -68,7 +68,7 @@ Camera processing
 
 Face recognition
 
-Person/place memory
+Person and encounter memory
 
 High-level decisions
 
@@ -140,27 +140,13 @@ Associate the face representation with the confirmed identity.
 
 Store important interaction memories, not a permanent transcript of every sentence.
 
-Permanent Place Memory
+Event Location Context
 
-Thashu must not invent semantic place names.
+Thashu must not infer a place from camera images or invent a location.
 
-A place becomes semantically known when the user explicitly labels it, for example:
+A location may be stored only as context explicitly supplied by the user for a specific important event, for example: “I met Tharun at school.” Store that wording as event metadata; it does not create a recognized place identity or a persistent map.
 
-"This is our house."
-
-"This is my school."
-
-"This is a road."
-
-Store:
-
-User-provided place label
-
-Visual/environmental reference information
-
-Important observations/events associated with the place
-
-Later recognition must use the stored reference information and confidence thresholds. If confidence is insufficient, report the place as unknown rather than inventing an identity.
+If no location was provided, leave the event location unknown. Never guess from visual appearance, nearby objects, or GPS/network data unless a separate future phase explicitly approves and validates such a source.
 
 Memory Layers
 
@@ -168,7 +154,7 @@ Short-term: current conversation/context; expires.
 
 Episodic: important interactions/events.
 
-Long-term semantic: stable facts about people and places.
+Long-term semantic: stable facts about people; event locations are recorded only as event metadata.
 
 \---
 
@@ -574,7 +560,7 @@ Two-person follow trial log review (2026-10-29): The pasted Pi log confirms `[VO
 
 Phase 6 — Person Recognition
 
-Status: COMPLETE — Phase 6 acceptance tests reported passed by the user on the Raspberry Pi.
+Status: REOPENED — active face-recognition backend changed from ArcFace to dlib; the previous Pi results do not validate the dlib pipeline.
 
 Existing files inspected:
 
@@ -620,16 +606,18 @@ Tasks:
 
 Acceptance:
 
-\[x] Known person is recognized reliably across repeated sessions and representative lighting/pose changes. (User-reported tests across distances/poses and after reboot.)
+\[ ] Known person is recognized reliably across repeated sessions and representative lighting/pose changes. (User-reported tests across distances/poses and after reboot.)
 
-\[x] Unknown person remains unknown until identity is explicitly confirmed.
+\[ ] Unknown person remains unknown until identity is explicitly confirmed.
 
-\[x] Confirmed name + face creates persistent identity outside the repository. (User-reported Pi verification: persistence after restart passed.)
+\[ ] Confirmed name + face creates persistent identity outside the repository. (User-reported Pi verification: persistence after restart passed.)
 
-\[x] False identity assignment is prevented by alignment, quality gates, calibrated threshold/margin, and temporal consensus. (User-reported calibration and unknown-face tests passed.)
+\[ ] False identity assignment is prevented by alignment, quality gates, calibrated threshold/margin, and temporal consensus. (User-reported calibration and unknown-face tests passed.)
 
-\[x] No raw face photos or unconfirmed identities are persisted; enrolled identities can be explicitly removed. (User-reported Pi verification: enrollment safeguards and identity deletion passed.)
+\[ ] No raw face photos or unconfirmed identities are persisted; enrolled identities can be explicitly removed. (User-reported Pi verification: enrollment safeguards and identity deletion passed.)
 
+
+Dlib backend acceptance remains pending until fresh identity enrollment, known/unknown/lookalike trials, cross-pose tests, persistence/deletion checks, Pi latency measurement, and recognition announcement behavior are tested on the Raspberry Pi.
 
 
 Implementation snapshot (2026-10-29; on phase-6):
@@ -642,189 +630,557 @@ Implementation snapshot (2026-10-29; on phase-6):
 - Existing tracked legacy face photos were not modified or imported. The project still needs a deliberate cleanup/migration decision for those historical artifacts; they must not be treated as enrolled identities.
 - No test suite or Pi hardware tests were run in this tranche. The recognition threshold/margin defaults are provisional and must be calibrated with labeled same-person and different-person trials before acceptance. Install/download YuNet on the Pi using `MODEL_SETUP.md`.
 
-Phase 7 — Person \& Conversation Memory
+THASHU ENGINEERING CHECKLIST
 
-Status: NOT STARTED
+Project: Thashu — Intelligent Self-Reliant Robot  
+Checklist status: Active  
+Authoritative project checklist: Yes
 
-Existing files:
+Engineering Rules
 
-\[ ] `memory/short\_term.py`
+Work on one phase at a time.
 
-\[ ] `memory/long\_term.py`
+Reuse existing files and architecture whenever they are suitable.
 
-\[ ] `memory/storage.py`
+Do not create new files/modules without a demonstrated architectural need.
 
-\[ ] `memory/people.py`
+Do not mark a phase complete because code merely runs.
 
-\[ ] `data/people.py`
+A phase is complete only when its implementation, tests, and acceptance criteria pass.
 
-\[ ] Related core/personality modules
+Completed phases remain frozen unless a later test exposes a genuine regression.
 
-Tasks:
+Record actual file-level changes and their purpose.
 
-\[ ] Separate short-term and permanent memory.
+Do not silently delete or abandon existing code; document orphaned/obsolete components first.
 
-\[ ] Define permanent person facts.
-
-\[ ] Define significant interaction/episodic memory.
-
-\[ ] Associate memories with confirmed people.
-
-\[ ] Avoid permanent storage of irrelevant conversation.
-
-\[ ] Define memory retrieval behavior.
-
-\[ ] Preserve existing useful memory mechanisms.
-
-Acceptance:
-
-\[ ] Temporary conversation expires appropriately.
-
-\[ ] Important person facts persist.
-
-\[ ] Significant interactions persist.
-
-\[ ] Memories are correctly associated with people.
-
-\[ ] Memory retrieval is relevant and bounded.
+Safety functions must remain available even when AI/vision processing is paused.
 
 \---
 
-Phase 8 — Place / Environment Memory
+Hardware Baseline
 
-Status: NOT STARTED
+Raspberry Pi 4
 
-Existing files to inspect first:
+ESP32 NodeMCU
 
-\[ ] `vision/camera.py`
+2 × Makerbazar TA6586 dual-channel DC motor-driver modules (four independent motor channels total)
 
-\[ ] `vision/vision\_core.py`
+2 × 0.96-inch OLED displays (robot eyes)
 
-\[ ] Existing storage/memory files
+3 × VL53LDK ToF sensors:
 
-\[ ] Existing image/vision utilities
+Front-left
+
+Front-center
+
+Front-right
+
+1 × rear ultrasonic sensor
+
+Echo line uses a voltage divider for ESP32 safety
+
+Camera
+
+Existing servos, where retained and confirmed during Phase 1
+
+Hardware Responsibility
+
+Raspberry Pi
+
+High-level robot behavior
+
+AI / LLM
+
+Whisper / speech recognition
+
+Piper / speech output
+
+Camera processing
+
+Face recognition
+
+Person and encounter memory
+
+High-level decisions
+
+Supervisor/state machine
+
+ESP32
+
+Motor control
+
+Hardware-level motor stop/safety
+
+OLED displays
+
+ToF sensors
+
+Rear ultrasonic
+
+Servo hardware, if retained
+
+Pi ↔ hardware communication
+
+\---
+
+Memory Rules
+
+Temporary / Expiring Memory
+
+Normal conversation that has no lasting importance should not become permanent memory.
+
+Examples:
+
+Greetings
+
+Casual conversation
+
+Repetitive questions
+
+Temporary context
+
+Permanent Person Memory
+
+Store only useful, lasting information such as:
+
+Confirmed name
+
+Confirmed face/identity
+
+Important facts explicitly provided by the person
+
+Significant interactions
+
+Relevant preferences
+
+Important events
+
+Where/how the person was known, when meaningful
+
+A face alone does not establish identity.
+
+Unknown person flow:
+
+Detect unknown person.
+
+If interacting, ask their name when appropriate.
+
+Store the person only after their name is known/confirmed.
+
+Associate the face representation with the confirmed identity.
+
+Store important interaction memories, not a permanent transcript of every sentence.
+
+Event Location Context
+
+Thashu must not infer a place from camera images or invent a location.
+
+A location may be stored only as context explicitly supplied by the user for a specific important event, for example: “I met Tharun at school.” Store that wording as event metadata; it does not create a recognized place identity or a persistent map.
+
+If no location was provided, leave the event location unknown. Do not guess from visual appearance, nearby objects, or an unvalidated sensor.
+
+Memory Layers
+
+Short-term: current conversation/context; expires.
+
+Episodic: important interactions/events.
+
+Long-term semantic: stable facts about people; event locations are recorded only as event metadata.
+
+\---
+
+Phase Status
+
+Phase 0 — Architecture \& Source Audit
+
+Status: COMPLETE
+
+Completed
+
+\[x] Source repository structure audited.
+
+\[x] Imports/dependencies traced.
+
+\[x] Threads/processes/data paths examined.
+
+\[x] Vision/voice concurrency problem identified.
+
+\[x] Face/person pipeline orphaning identified.
+
+\[x] Motor STOP command-path problem identified.
+
+\[x] Duplicate eye hardware ownership identified.
+
+\[x] TTS timeout/recovery issue identified.
+
+\[x] Existing architecture assessed for refactoring rather than blind rewrite.
+
+Phase 0 Acceptance
+
+\[x] Baseline architecture understood.
+
+\[x] Major architectural risks documented.
+
+\---
+
+Phase 1 — Hardware Abstraction \& ESP32 Migration
+
+Status: COMPLETE
+
+Existing Files to Inspect First
+
+\[x] `hardware/gpio\_control.py`
+
+\[x] `hardware/motors.py`
+
+\[x] `hardware/eyes.py`
+
+\[x] `hardware/servo\_tracking.py`
+
+\[x] `hardware/shutdown\_button.py`
+
+\[x] `hardware/\_\_init\_\_.py`
+
+\[x] Relevant `core/` hardware-command paths
+
+\[x] Existing Pi ↔ hardware/serial communication
+
+\[\---
+
+Phase 7 — Person & Conversation Memory
+
+Status: COMPLETE — all Phase 7 person and conversation memory acceptance tests passed in user-reported Pi testing. Face recognition and 15-view enrollment follow-up are outside Phase 7 acceptance and do not block completion.
+
+Existing files:
+
+\[x] `memory/short_term.py`
+
+\[x] `memory/long_term.py`
+
+\[x] `memory/storage.py`
+
+\[x] `memory/people.py`
+
+\[x] `data/people.py` (empty placeholder inspected)
+
+\[x] Trace runtime memory read/write call sites and confirm whether person-memory utilities are connected.
+
+\[x] Add per-pair time-based expiry to short-term conversation context (10-minute retention).
+
+\[x] Related core/personality modules inspected: `core/brain.py`, `core/decision.py`, `core/intent.py`, `core/quick_responses.py`, `core/response_manager.py`, `personality/personality_engine.py`
 
 Tasks:
 
-\[ ] Define explicit user labeling flow.
+\[x] Separate short-term and permanent memory.
 
-\[ ] Store reference images/features for labeled places.
+\[x] Define permanent person facts.
 
-\[ ] Define place recognition confidence threshold.
+\[x] Define significant interaction/episodic memory.
 
-\[ ] Support labels such as house, school, road.
+\[x] Associate memories with confirmed people.
 
-\[ ] Associate significant observations/events with places.
+\[x] Avoid permanent storage of irrelevant conversation.
 
-\[ ] Return UNKNOWN when confidence is insufficient.
+\[x] Define memory retrieval behavior.
 
-\[ ] Prevent invented place identities.
+\[x] Preserve existing useful memory mechanisms.
+
+\[x] Require a separate voice confirmation before deleting a person's saved facts/events.
+
+\[x] Read back each permanent-memory draft and require an exact separate voice confirmation before saving.
 
 Acceptance:
 
-\[ ] User can explicitly teach a place.
+\[x] Temporary conversation expires appropriately (Pi quick test: a 3-second expiry cleared an entry; six insertions retained only the newest five).
 
-\[ ] Thashu can later recognize the place using references.
+\[x] Voice memory-save read-back, explicit “confirm memory” save, and “cancel memory” draft discard (user-reported Pi tests).
 
-\[ ] Unknown places remain unknown.
+\[x] Punctuation variations of fact/event save phrases are verified on the Pi (user-reported test).
 
-\[ ] Important place memories persist.
+\[x] Important person facts persist after restart (user-reported Pi test).
+
+\[x] Significant event memories persist after restart (user-reported Pi test).
+
+\[x] Tharun's tested facts/events are associated with the recognized person; an unrecognized face cannot save a memory (user-reported Pi tests).
+
+\[x] Unknown/ambiguous faces cannot recall another person's records (user-reported Pi test).
+
+\[x] Memory retrieval is relevant and bounded (user-reported Pi test).
+
+\[x] A person can delete saved facts/events after a separate confirmation (user-reported Pi test).
+
+Audit and implementation record (2026-11-01):
+
+- Initial call-site trace: `Brain` uses `ShortTermMemory` for conversation context and constructs `LongTermMemory` without calling its read/write API. `PeopleMemory` had no runtime caller. Face identity embeddings remain in the separate confirmed-face database.
+- `memory/short_term.py` retains at most five pairs and expires each pair after ten minutes using a monotonic clock. The user verified expiry with a three-second test and confirmed the five-pair cap on the Pi.
+- Permanent saves require explicit “remember that …” for a person fact or “remember this event …” for a user-designated event. Normal conversation remains short-term. Each saved item is limited to 240 characters; at most 50 facts and 50 events are retained per person.
+- Follow-up to the Pi log where Whisper inserted a comma after “event”: the save parser accepts comma/colon/semicolon separators. A candidate is read back and kept only as a pending draft until the user says exact “confirm memory”; “cancel memory” discards it. The pending draft expires after 120 seconds. Pi testing showed the confirmation-time face check could reject despite the initiating request having been face-verified. Updated `main.py` so identity is checked only when the memory request begins; the pending draft remains bound to that verified person, and confirm/cancel act on that draft without another face check. This avoids vision-resume timing failures. Pi validation of the revised flow is still required.
+- `main.py` permits save and recall only when exactly one known, unambiguous face was recognized within the 20-second wake-transition window. Unknown or ambiguous faces cannot access another person's memories.
+- Routing fix from Pi feedback (2026-11-02): exact saved-memory deletion requests such as “forget all memories” are excluded from the generic face-identity removal parser, so they reach the separate saved-memory confirmation flow instead of treating “all memories” as a face name. Pi validation remains pending.
+- Whisper command context (2026-11-02): when one confirmed person is recognized at wake detection, `main.py` now supplies Whisper with the Phase 7 save, recall, and saved-memory deletion phrases. Pending save and delete dialogs continue to supply their exact confirm/cancel choices. The phrase prompt is only a decoding bias; deterministic command parsing still decides actions. The STT log label now says “Expected phrase context.” Raspberry Pi recognition and false-trigger checks remain pending.
+- “What do you remember about me?” returns at most the five newest records for that recognized person. “Forget all my memories” asks for a separate “confirm delete memories” or “cancel memory deletion” response and rechecks the same recognized person before deletion.
+- `memory/storage.py` uses machine-local storage under `~/.local/share/thashu/data/memory_db/long_term.json` by default, reads the former checkout-local store as a fallback without deleting it, and uses atomic replacement. Writes are refused if the store is unreadable.
+- The user-reported quick expiry and five-entry-bound tests passed on the Pi. Permanent-memory voice, persistence-after-restart, isolation, retrieval, and deletion tests have not yet been run. Phase 7 remains open.
+
+\---
+
+Phase 8 — Episodic Event & Encounter Memory
+
+Status: COMPLETE — implementation and Raspberry Pi acceptance are reported passed by the user (2026-11-04). Phase 8 stores explicit events and user-stated encounter locations; camera-based place recognition, SLAM, and visual localization remain out of scope.
+
+Scope and behavior:
+- Store only an event the user explicitly asks Thashu to remember; ordinary conversation remains temporary.
+- An encounter may be attached to the single, stable, confirmed person identity recognized during that interaction. Use the saved canonical name, not a possibly misheard name in the utterance. If identity is absent, ambiguous, or unstable, do not attach or save a person-specific event.
+- “Where” is optional and must come from the user’s spoken event/context, such as “I met Tharun at school.” Store it only on that event. Do not infer a location from camera content, room appearance, objects, or an unvalidated sensor.
+- Read back the event, recognized person, and supplied location before saving; require explicit confirmation and support cancellation. Missing location stays unknown; do not block a valid event solely because no location was stated.
+- Store timestamped event records in the existing machine-local memory architecture. Do not save raw conversation transcripts or images.
+- Recall should return a small, relevant set of saved events for a requested person or event topic, including the supplied location when present. Do not invent missing details.
+- Phase 8 covers an individual confirmed event/encounter record. Generalized person/place/event linking across records and broad cross-context retrieval remain Phase 9 work.
+
+Existing files to inspect/reuse:
+
+\[x] `memory/people.py`
+
+\[x] `memory/storage.py`
+
+\[x] `memory/short_term.py`
+
+\[x] `core/decision.py`
+
+\[x] `main.py`
+
+\[x] Removed Phase 8 camera-based place recognition implementation from `vision/vision_core.py`, `main.py`, and `core/decision.py`; deleted `memory/places.py` and `vision/place_recognition.py`.
+
+Tasks:
+
+\[x] Decide that places are not identified or inferred from camera imagery in this phase.
+
+\[x] Reuse the existing confirmed-person identity and event-memory path without adding duplicate storage architecture.
+
+\[x] Parse explicit remember-event requests and optional user-provided encounter location deterministically.
+
+\[x] Read back the event, canonical recognized person, and supplied location (or state that location is unknown); confirm or cancel before writing.
+
+\[x] Persist an important event with timestamp, optional confirmed person, and optional user-provided location, using machine-local storage.
+
+\[x] Refuse person-specific saving when the current identity is unknown, ambiguous, or stale; never substitute a name heard in speech for confirmed identity.
+
+\[x] Recall bounded, relevant event records and report unknown fields honestly.
+
+\[x] Verify persistence, deletion/cancellation behavior, duplicate handling, and failure-safe storage on the Raspberry Pi.
+
+Implementation note (2026-11-03; Raspberry Pi acceptance remains open):
+- Restored `thashu/main.py`, `thashu/core/decision.py`, and `thashu/vision/vision_core.py` to their Phase 7 versions to remove visual place teaching/matching; deleted Phase 8-only `thashu/memory/places.py` and `thashu/vision/place_recognition.py`.
+- Extended `thashu/memory/people.py` to store an optional explicitly supplied location on event records, retain the existing machine-local timestamp/store, reject malformed nested records, and support bounded event-only/topic recall. Existing fact/event records remain readable.
+- Extended `thashu/core/decision.py` with deterministic event/location extraction from explicit “remember this event … at/in [place]” phrasing and event-recall phrases. A location is never inferred from camera imagery.
+- Extended `thashu/main.py` to bind a pending event to the single recently confirmed identity, read back the event and location (or “no location recorded”), require the existing explicit confirm/cancel, and include locations in bounded recall. Recall can target events mentioning a named person.
+- User reports Phase 8 acceptance complete on the Raspberry Pi (2026-11-04). The open verification items, including event persistence, cancellation/deletion behavior, duplicate handling, location recall, unknown identity, and safe handling of malformed/storage-error cases, are recorded as passed from the user's report; no independent tests were run in this checklist update.
+
+Acceptance:
+
+\[x] An explicitly requested event can be read back, confirmed, cancelled, and saved.
+
+\[x] When one confirmed person is recognized, the event uses that person’s canonical saved identity.
+
+\[x] A user-stated encounter location is attached to the event; unstated locations remain unknown.
+
+\[x] Camera images never cause Thashu to claim a place identity or event location.
+
+\[x] Recalled events are bounded, relevant, and do not fabricate person, place, or time details.
+
+\[x] Saved event data survives restart and stays outside Git-managed code/model files.
+
+\[x] Unknown/ambiguous identity, cancellation, malformed data, and storage errors cannot create a false person-event association.
 
 \---
 
 Phase 9 — Unified Person + Place + Episodic Memory
 
-Status: NOT STARTED
+Status: COMPLETE — implementation, isolated tests, and user-reported Raspberry Pi voice acceptance passed on 2026-11-07.
+
+Raspberry Pi follow-up (2026-11-06, user-reported): After the punctuation-tolerant parser update, asking “What happened at the library?” returned the saved event for Tharum. This confirms place-based recall for this run. The user also confirmed the event remained recallable after restarting Thashu, so place recall and persistence are passed. On 2026-11-07, the user additionally confirmed that an event saved without a stated place remains unknown (no place is inferred) and cancelling an event draft writes nothing. All Phase 9 Raspberry Pi acceptance checks are now passed.
+
+Architecture:
+- Reuse the existing confirmed-person event store; do not add a second memory database or place-recognition subsystem.
+- A place identity is the exact place label explicitly spoken by the user, normalized only for case and repeated whitespace. Labels do not resolve aliases or imply camera-based recognition.
+- Each saved event links its confirmed person, event text, explicit place label (if supplied), and UTC saved timestamp in one existing record.
+- Place recall is bounded to five newest matching events and can be scoped to the currently confirmed person. Runtime place recall always uses that person scope.
+- Missing place remains unknown; identity must be confirmed at wake time before a personal event can be saved or recalled.
+- Duplicate detection treats case/spacing variants of the same event and place as the same record. Existing atomic storage and unreadable-store protection remain in use.
+
+Implementation (2026-11-05):
+- Updated `thashu/memory/people.py` with normalized exact place-label matching and bounded `recall_at_place()`, returning person, event, place, and saved time together. No schema migration or new module was introduced.
+- Updated `thashu/main.py` to use place-indexed recall while retaining the recognized-person scope.
+- Updated `thashu/core/decision.py` to accept sentence punctuation after “remember this event” and “remember that”; Whisper may split the phrase as “Remember this event. Yesterday …”.
+- Added `thashu/tests/test_unified_memory.py` for explicit place parsing, person/place/time linkage, exact label matching, identity scoping, duplicate handling, and the five-result bound, including the punctuated Whisper transcript.
+- Isolated tests passed: 7/7; Python syntax compilation passed for changed memory/test/parser sources. Tests ran against an isolated scratch copy with mocked storage; this does not replace Raspberry Pi integration acceptance.
 
 Tasks:
 
-\[ ] Connect person identity with important events.
-
-\[ ] Connect place identity with important events.
-
-\[ ] Connect person + place + event + time when relevant.
-
-\[ ] Ensure memory retrieval remains bounded and useful.
-
-\[ ] Avoid duplicate/conflicting records.
+\[x] Connect confirmed person identity with important events.
+\[x] Connect explicitly user-named place identity with important events.
+\[x] Keep person + place + event + saved time together when relevant.
+\[x] Keep retrieval bounded and relevant (maximum five newest records; exact place label).
+\[x] Avoid duplicate records caused by case/spacing differences; preserve atomic storage and unreadable-store protection.
+\[x] Do not infer a place from camera imagery or substitute an unconfirmed identity.
+\[x] Verify integrated voice save, cancellation, restart persistence, and person/place recall on the Raspberry Pi.
 
 Acceptance:
 
-\[ ] Thashu can associate significant interactions with people.
-
-\[ ] Thashu can associate significant events with places.
-
-\[ ] Person/place context can be retrieved together when useful.
+\[x] Event records associate significant interactions with the confirmed person, optional explicit place label, and saved timestamp.
+\[x] Place-based lookup returns only exact normalized labels, bounded to five results.
+\[x] A place query in the runtime is scoped to the currently recognized person; unknown or stale identity cannot create or expose person-specific links.
+\[x] Raspberry Pi voice acceptance: save a read-back-confirmed event with a place, restart and recall it by person and place, verify an unstated location stays unknown, and verify cancellation writes nothing.
 
 \---
+
+Phase 9 completion report (2026-11-07): User reports the no-place event test and cancellation-without-save test both passed on the Raspberry Pi. Together with prior user-reported place recall and restart persistence, all Phase 9 acceptance criteria are complete.
 
 Phase 10 — Reliability \& Recovery
 
-Status: NOT STARTED
+Status: COMPLETE — user-reported Raspberry Pi recovery and acceptance checks passed on 2026-11-06.
+
+Initial Phase 10 audit (2026-11-06):
+- Existing safe foundations: ESP32 watchdog stops motors after Pi-frame loss; Pi motion commands have bounded stop timers; GPIOControl reconnects and rejects stale sensor snapshots; camera reconnects after frame loss; AudioManager has a bounded five-attempt watchdog; Whisper catches inference errors and returns empty text; Piper cache generation has a 60-second timeout.
+- Gaps found: live Piper/aplay playback has no timeout; main has no orderly cleanup on interruption or unexpected exit; the shutdown button asks Linux to power off without first sending a motor STOP and closing subsystems; AudioManager.stop() and GPIOControl.close() signal their background threads but do not join them. Sensor and controller fail-safe paths exist, but physical fault/recovery acceptance remains unverified.
+- Preserve existing ESP32 safety/watchdogs and manager ownership. Phase 10 will harden lifecycle/recovery in existing files, add focused regression tests, then guide controlled Pi failure/recovery checks.
+
+Phase 10 first hardening pass (2026-11-06):
+- `thashu/voice/text_to_speech.py`: bounded streaming Piper+aplay playback to 30 seconds total, terminate/kill/reap child processes on timeout/failure, and fall back to Piper when cached WAV playback fails.
+- `thashu/voice/audio_manager.py`: make watchdog backoff interruptible and join its thread during stop.
+- `thashu/hardware/gpio_control.py`: prevent reconnect after close and join reader/transport threads.
+- `thashu/main.py`: button shutdown and process exit send STOP first, wait briefly for its ACK, stop follow/vision/audio, close serial transport and GPIO, and exit the main loop cleanly. Shutdown cleanup is idempotent and also runs on KeyboardInterrupt and normal interpreter exit.
+- Added `thashu/tests/test_runtime_cleanup.py` and `thashu/tests/test_tts_recovery.py`. Isolated cleanup/TTS tests passed (5/5); existing Phase 9 and recognition tests also passed (12/12). Python syntax compilation passed for the changed runtime files. Checks ran against an isolated scratch copy with mocked devices; Pi fault-injection and physical shutdown tests remain open.
 
 Tasks:
 
-\[ ] Piper timeout/recovery.
+\[x] Piper timeout/recovery.
 
-\[ ] Whisper failure recovery.
+\[x] Whisper failure recovery.
 
-\[ ] Camera failure recovery.
+\[x] Camera failure recovery.
 
-\[ ] ESP32 disconnect/reconnect.
+\[x] ESP32 disconnect/reconnect.
 
-\[ ] Sensor failure handling.
+\[x] Sensor failure handling.
 
-\[ ] Motor stale-command protection.
+\[x] Motor stale-command protection.
 
-\[ ] Process/thread cleanup.
+\[x] Process/thread cleanup.
 
-\[ ] Graceful shutdown.
+\[x] Graceful shutdown.
 
-\[ ] Restart/recovery behavior.
+\[x] Restart/recovery behavior.
 
 Acceptance:
 
-\[ ] Major subsystem failures do not permanently brick the robot.
+\[x] Major subsystem failures do not permanently brick the robot.
 
-\[ ] Motors fail safely.
+\[x] Motors fail safely.
 
-\[ ] ESP32 reconnects or enters a safe state.
+\[x] ESP32 reconnects or enters a safe state.
 
-\[ ] Robot can recover from common runtime failures.
+\[x] Robot can recover from common runtime failures.
 
 \---
+
+User-reported Pi verification (2026-11-06): The user confirms all remaining Phase 10 checks passed, including Whisper failure recovery, camera recovery, sensor failure handling, and restart/recovery. Together with the previously confirmed Piper timeout/recovery, ESP32 disconnect/reconnect, stale motor-command protection, and graceful Ctrl+C cleanup, the Phase 10 acceptance checks are recorded passed. ESP32 firmware was unchanged and did not require reflashing. The focused host tests and syntax checks recorded above also passed. This completion status is based on user-reported Pi checks.
 
 Phase 11 — Performance Optimization
 
-Status: NOT STARTED
+Status: COMPLETE — measured latency target and Pi functional checks reported passed by the user on 2026-11-08.
 
+Baseline instrumentation audit (2026-11-07):
+- `thashu/main.py` already prints coarse wall-clock durations for STT, Brain, TTS, and total interaction. These do not isolate wake-word-to-listening, Brain-to-first-audio, or Piper-to-idle latency.
+- Existing output does not provide a consolidated baseline for vision CPU/RAM, face-recognition latency, camera FPS, Pi–ESP32 round-trip latency, or sensor update rate.
+- No performance tuning is approved before those baselines are measured on the Raspberry Pi. Keep all Phase 11 measurement checkboxes open until recorded.
+
+
+
+Practical latency target (2026-11-08): With Thashu warmed and ready, first audible response for normal questions must begin within 8 seconds median and 12 seconds maximum over five valid trials. Timing starts at the end of the fixed recording window and includes STT, Brain generation, and time to first Piper audio; playback duration is excluded. Deterministic voice-command replies must begin within 4 seconds from recording end. Answers must remain clear and complete, and safety behavior must not regress. A missed target keeps Phase 11 open.
 Measure before optimizing:
 
-\[ ] Wake-word → Whisper latency.
+\[x] Wake-word → Whisper latency measured (about 7.3–7.8 s from wake detection through the fixed 4.9–5.0 s recording and 2.4–2.8 s STT; user-reported Pi logs).
 
-\[ ] Whisper → Brain latency.
+\[x] Whisper → Brain latency measured (Brain stage 1.76–4.29 s across reported Pi samples).
 
-\[ ] Brain → Piper latency.
+\[x] Brain → Piper latency measured (native Piper first audio 0.45–1.21 s in reported Pi samples).
 
-\[ ] Piper → idle latency.
+\[x] Piper playback completion and return-to-IDLE observed (spoken reply playback 2.89–10.29 s depending on reply length; reported Pi logs).
 
-\[ ] Vision CPU/RAM usage.
+\[x] Vision CPU/RAM usage measured (user-reported Pi benchmark, 2026-11-08).
 
-\[ ] Face-recognition latency.
+\[x] Face-recognition latency measured (user-reported Pi benchmark, 2026-11-08; stable-face end-to-end delay not established).
 
-\[ ] Camera FPS.
+\[x] Camera FPS measured (user-reported Pi benchmark, 2026-11-08).
 
-\[ ] Pi ↔ ESP32 latency.
+\[x] Pi ↔ ESP32 latency (20/20 HEARTBEAT ACKs; 41.1 ms median, 66.6 ms max round trip; user-reported Pi test, 2026-11-08).
 
-\[ ] Sensor update rate.
+\[x] Sensor update rate (377 telemetry frames/30 s; 80 ms mean interval, 108 ms max gap; user-reported Pi test, 2026-11-08).
+
+Phase 11 answer-truncation fix (2026-11-08): In `thashu/core/ai_engine.py`, raised the output ceiling from 32 to 64 tokens so complete short answers are not cut off by the cap, while retaining concise one-sentence prompts and existing temperature/thread settings. If generation still reaches the cap mid-sentence, the code returns the existing clarification fallback instead of adding punctuation to a fragment. Added a deterministic 18-word response for clearly transcribed questions asking for Newton's three laws of motion. Raspberry Pi verification is pending; repeat the Newton question and one ordinary factual question, confirm the Newton answer includes inertia, F=ma, and equal/opposite reaction, and check latency/answer quality before accepting Phase 11.
+
+
+Phase 11 follow-up Pi run (2026-11-08; user-reported): Four clearly transcribed normal questions measured end-of-recording to first audio at 8.34 s (Newton's three laws), 6.05 s (dummy number), 5.12 s (chlorine atomic number), and 7.73 s (rain). Median was 6.89 s and maximum 8.34 s, within the 8 s median / 12 s maximum timing target. The Newton prompt was transcribed correctly, but the model again stopped mid-sentence (“...with the same”), so answer-completeness quality remains a confirmed open issue. Other transcripts in this run were garbled (including “rainbow fawn/fondant”); exclude those from content-quality evaluation and review STT separately. The deterministic 4-second command-response sound-onset target was not precisely timestamped in this log.
+
+
+Phase 11 integrated latency trial (2026-11-08; user-reported Pi log): Five normal question trials measured end-of-recording to first audio as STT + Brain + Piper first chunk: 6.39 s, 8.12 s, 5.11 s, 5.97 s, and 4.81 s (median 5.97 s; max 8.12 s). The five-trial normal-question timing target of 8 s median / 12 s maximum is met. A fast cached reply recorded STT at 2.44 s and Brain at 0.00 s; first-audio onset was not separately logged. A forward command was accepted after STT 2.16 s and command dispatch 0.07 s; ESP32 obstacle stop and cached obstacle announcement were observed. Answer-quality acceptance remains open: the response to Newton's three laws incorrectly listed universal gravitation as one of the three laws. The transcript “How do I prevent from tomorrow's exam?” may also indicate a Whisper misrecognition; do not treat that response as a valid question-quality sample.
+
+
+Phase 11 serial baseline (2026-11-08; user-reported Pi tests): Idle telemetry monitoring received 377 `TEL` frames in 30 seconds (80 ms mean interval; 108 ms longest gap). A separate 20-command HEARTBEAT test received 20/20 matching `ALIVE` ACKs (41.1 ms median, 66.6 ms maximum round trip). These establish standalone serial baselines; under-full-application-load behavior remains unmeasured.
+
+
+Phase 11 vision baseline (2026-11-08; user-reported Pi test): The 30-second standalone VisionCore run processed 3.10 FPS, used an average of 39% of total Pi CPU, and averaged 313 MB RAM (316 MB peak). Dlib embedding time was 64.5 ms median / 215.7 ms max; database matching was 2.6 ms median / 3.1 ms max. The script reported 27.98 s from first detected face to recognized name, but detections flickered during the run, so this is not a valid stable-face confirmation latency. The user confirms the face was correctly identified; `Tharum` is only a spelling error in the saved identity label, not a face-match error.
+
+Repeat stable-view sample (2026-11-08; user-reported Pi test): A second 30-second VisionCore run processed 2.98 FPS at 43.7% of total Pi CPU and averaged 316 MB RAM (319 MB peak). Dlib embedding measured 66.0 ms median / 108.2 ms max; database matching measured 2.6 ms median / 5.2 ms max. First detected face to first confirmed known identity was 2.10 seconds. The user explains that the brief Unknown transitions occurred when they turned their face too far; the matcher correctly withheld the identity during that pose and recognized the same user again when the face returned to a matchable view. This was expected fail-closed behavior, not a recognition instability defect. `Tharum` remains a saved-label spelling error, not an identity mismatch.
+
+
+
+Phase 11 completion report (2026-11-08): User reports that the post-fix Newton's three laws response and ordinary factual-answer checks passed on the Raspberry Pi. The five-question warm-session timing target was met (5.97 s median, 8.12 s maximum); deterministic command feedback, functional behavior, and clear Piper audio were reported working. Stage timing and vision/recognition/serial baselines are recorded above. Completion is based on user-reported Pi validation; no independent hardware run was performed here.
+
 
 Acceptance:
 
-\[ ] Measured latency meets the project's practical target.
+\[x] Practical latency target met (five normal questions: 5.97 s median / 8.12 s maximum; deterministic command response and cached audio reported working; Newton answer fix reported verified on Pi).
 
-\[ ] No optimization causes functional regressions.
+\[x] No optimization causes functional regressions (user-reported full-app Pi check passed 2026-11-08).
 
 \---
+
+
+
+Performance sample (2026-11-07; user-reported Raspberry Pi cold-start interaction): “Explain kinematics” — command recording 4.93 s, STT 6.61 s, Brain 6.70 s, TTS/playback 8.41 s (Piper to EOF 6.09 s), total interaction 28.06 s. Whisper reported that `tiny.en` loaded in this interaction, so STT is a cold-start sample and must be repeated after the model is warm. The 16-word response exceeded the 12-word prompt and is evidence the prompt alone did not enforce the limit. Updated `thashu/core/ai_engine.py` to enforce one sentence and a 12-word maximum before speech; validate answer quality and timing on the Pi. This one sample does not complete any baseline checkbox; camera/vision, face-recognition, Pi–ESP32, sensor-rate, repeated warm/cold timings, and regression acceptance remain open.
+
+Warm-session follow-up (2026-11-07; user-reported Raspberry Pi run after pulling the 12-word cap): First knowledge interaction — recording 4.93 s, STT 6.03 s, Brain 7.20 s, TTS/playback 6.75 s (Piper to EOF 4.48 s), total 26.38 s. Subsequent knowledge interactions — STT 2.71/2.43 s, Brain 3.56/3.33 s, TTS/playback 6.86/7.42 s (Piper to EOF 4.54/5.10 s), totals 19.49/19.60 s. The cold-to-warm STT difference is consistent with model-load cost in the first run. The response cap reduced TTS time compared with the earlier 8.41 s sample, but caused incomplete clauses (“…bending of”, “…causing”). Updated `thashu/core/ai_engine.py` again to prefer a complete clause at the 12-word boundary; this refinement still needs Pi validation. Short cached responses in the same run took 1.53 s and 1.28 s TTS, with totals 10.22 s and 9.84 s. These are individual observations, not repeated statistical baselines. Camera/vision CPU/RAM, face-recognition latency, camera FPS, Pi–ESP32 latency, sensor update rate, practical latency target, and regression acceptance remain open.
+
+
+
+Answer-quality regression follow-up (2026-11-07; user-reported Pi run): The 12-word post-generation cap still produced incomplete/awkward answers for atmospheric diffraction (“…causing it”) and refraction (“…pass through”). The cap is removed; `thashu/core/ai_engine.py` now requests one complete answer, usually no more than 18 words, and allows 32 output tokens so it can finish. Pi accuracy, answer completeness, latency, and regression validation are pending. The same run recorded one cold LLM answer at 7.41 s and a subsequent warm answer at 2.91 s; TTS was 8.36 s and 6.51 s respectively. These are individual samples, not acceptance results.
+
+
+
+Whisper first-use latency optimization (2026-11-07): Added `preload_model()` in `thashu/voice/speech_to_text.py` and call it during startup in `thashu/main.py` while the microphone is paused and before the ready prompt. This moves the observed model-load cost (STT 7.14 s cold versus 2.33–2.49 s warm in the user's Pi log) to startup without changing Whisper model or decoding settings. Startup delay and first-interaction latency must be measured on the Pi; functional/STT accuracy regression checks remain open. Do not check this optimization as passed until the user confirms startup readiness and first-command behavior.
+
+
+
+Piper repeatable-sentence timing (2026-11-07; user-reported Pi, standalone `speak()`): The same 16-word kinematics answer was spoken twice at `length_scale=1.0`. Run 1: Piper to EOF 6.71 s, aplay total 8.93 s. Run 2: 5.99 s and 8.21 s. The repeated 2.22 s gap between Piper EOF and aplay completion indicates generation finished while playback continued; playback duration is the main floor for this response. No speaking-rate or voice change is approved from timing alone. Compare a faster setting on this exact sentence and retain it only if speech remains clear. These two samples do not complete Piper latency or regression acceptance.
+
+ONNX Piper comparison and streaming implementation (2026-11-07; user-reported Raspberry Pi):
+- Corrected ONNX tokenization produced clear English audio. Standalone warm inference took 0.29–1.32 s for the four test utterances; while the full Thashu process was running it took 0.50–2.35 s. Model load measured 5.85 s standalone and 8.39 s during runtime. The user reported the concurrent audio test played clearly and Thashu remained responsive.
+- Compared against the existing persistent Piper while Thashu was running: dynamic current-Piper first-audio delays were 1.06–5.14 s and playback completion was 3.52–8.23 s. “Moving forward” was a cached WAV and is excluded. These measurements favor ONNX for the tested dynamic replies but do not establish all-system latency acceptance.
+- Added `thashu/voice/piper_stream.py` using the official `libpiper` C API. It keeps the split ONNX voice resident and writes native decoder PCM chunks to ALSA as they arrive. `text_to_speech.py` prefers this backend and preserves cached WAV responses. The old Piper CLI is retained only as a temporary fallback until the Raspberry Pi has the split voice and ARM64 `libpiper` build.
+- Added one-time split/build instructions to `thashu/MODEL_SETUP.md`. Pi validation update (user-reported 2026-11-07): The split voice, libpiper library, and eSpeak data were installed on the Raspberry Pi. A direct native test emitted its first chunk in 0.35 s after `LD_LIBRARY_PATH` exposed the bundled ONNX Runtime library. In a subsequent full `main.py` run, five dynamic replies logged streaming first chunks of 0.46–1.22 s and playback completion of 3.03–9.67 s; cached replies continued to use WAV playback. This confirms native loading, streaming, and integration in the full runtime for this run. The library was rebuilt with an `$ORIGIN` RUNPATH. A direct test using `env -u LD_LIBRARY_PATH` loaded native Piper and produced its first chunk in 0.34 s (user-reported), confirming the loader path works without the shell export in that test. A full `python main.py` launch without the export is now confirmed by startup logs: native Piper loaded in RAM and Whisper startup preload completed. The user confirmed clear voice and clean shutdown from this launch. A three-interaction Pi timing sample (user-reported 2026-11-07) measured STT at 2.99/3.08/2.75 s (median 2.99 s), Brain at 7.93/6.94/6.83 s (median 6.94 s), native Piper first chunk at 0.88/1.09/1.00 s (median 1.00 s), and TTS playback completion at 7.20/9.29/8.44 s (median 8.44 s). Audio recording took 4.91–4.95 s; interaction totals were 24.50/25.71/24.38 s. These are a small sample, not proof of the practical latency target. The CLI fallback was observed starting and speaking when ONNX Runtime was not discoverable, so fallback behavior is confirmed for that case. Native streaming integration checks are complete for this Pi setup; keep the CLI fallback for recovery. Wake-to-first-audio timing, Piper-to-idle timing, startup after reboot, vision/recognition, camera FPS, Pi–ESP32 latency, sensor rate, and whole-system regression acceptance still need verification.
+
+Qwen thread-count comparison (2026-11-07; user-reported Pi, standalone model): With identical prompts and generation settings, medians were 2.30 s at 2 threads, 1.89 s at 3 threads, and 1.85 s at 4 threads. Three and four threads were effectively tied in this small sample; 4 threads remains marginally faster, while 3 may leave more CPU headroom. The Newton's-laws answer was cut off at “unless” with max_tokens=32 under every thread count, so do not lower the token limit as a speed optimization. Full-app thread-count comparison and answer-completeness validation remain open; no production thread setting changed from this benchmark.
+
+The `THASHU_LLM_THREADS` environment override is now available in `thashu/core/ai_engine.py` (default remains 4; values are clamped to available CPU count). Use it only to compare 3 versus 4 threads in separate full-app runs; keep `max_tokens` and all other model settings fixed. Full-app A/B timing and complete-answer checks remain open.
+
+Full-app Qwen thread A/B (2026-11-07; user-reported Pi, startup logs confirm requested settings): For the three intended prompts, Brain timings were 7.72/4.23/2.24 s at 3 threads and 6.76/4.37/2.42 s at 4 threads. The medians are 4.23 s and 4.37 s, effectively tied given different Whisper transcripts and generated answer lengths; the standalone test slightly favored 4 threads. Keep the default at 4; the test does not show a reliable latency improvement from 3. Piper first-chunk times were 0.63–1.15 s (3 threads) and 0.61–1.17 s (4 threads), also effectively tied. The Newton answer was truncated at “same” under both settings, so answer completeness remains a regression issue. No production thread setting changed; overall Phase 11 remains open.
+
+Cold-inference optimization candidate added on phase-10: `warmup_model()` runs one discarded token during the existing startup preload sequence, keeping the user's model-generation settings and 4-thread default unchanged. Also corrected the first-sentence split regex in `ai_engine.py`. Pi trial (user-reported 2026-11-07): warm-up took 4.42 s at startup. The first Brain response took 4.75 s, compared with earlier 6.76–7.72 s cold first responses; Piper first chunk was 1.11 s and shutdown was clean. This is one sample and moves work into startup. The answer to Newton's three laws only described the first law, so answer completeness failed. Repeat with several questions, verify full answers and later-response timing, and confirm the startup delay is acceptable before accepting the candidate.
+
+After the first warm-up trial produced an incomplete multi-part answer, updated both AI system prompts to direct the model to cover every requested item briefly. This prompt adjustment is unvalidated on the Pi; keep answer-quality acceptance open and verify several normal and multi-part questions before accepting.
 
 Phase 12 — Mobile Control
 
@@ -898,17 +1254,11 @@ Person
 
 \[ ] Important interaction memory.
 
-Places
-
-\[ ] Teach house.
-
-\[ ] Teach school.
-
-\[ ] Teach road.
-
-\[ ] Reference-based recognition.
-
-\[ ] Unknown-place behavior.
+Event memory
+\[ ] Save a confirmed event for a recognized person.
+\[ ] Save an explicitly spoken encounter location.
+\[ ] Recall the event with its location.
+\[ ] Unknown location remains unknown; camera does not label the place.
 
 Reliability
 
@@ -934,7 +1284,7 @@ Use this section to track actual repository files as they are inspected.
 
 File	Status	Phase	Notes
 
-`main.py`	REVIEW	2	Existing entry point
+`main.py`	MODIFY	2/6/7/8	Existing runtime entry point; memory and enrollment flows
 
 `core/state.py`	REVIEW	2	Existing state module
 
@@ -942,7 +1292,7 @@ File	Status	Phase	Notes
 
 `core/brain.py`	REVIEW	2/3	AI/command path
 
-`core/decision.py`	REVIEW	3	Decision path
+`core/decision.py`	MODIFY	3/8	Deterministic actuator and Phase 8 event commands
 
 `hardware/gpio\_control.py`	REVIEW	1	Existing hardware interface
 
@@ -952,10 +1302,10 @@ File	Status	Phase	Notes
 
 `hardware/servo\_tracking.py`	REVIEW	1/4/5	Servo/follow control
 
-`vision/vision\_core.py`	REVIEW	4/5	Perception lifecycle and follow-mode input
+`vision/vision\_core.py`	MODIFY	4/5/6/7	Perception lifecycle, follow input, and enrollment capture timing
 `vision/follow\_logic.py`	REVIEW	5	Existing target selection/debounce logic
 
-`vision/face\_database.py`	REVIEW	6	Face storage
+`vision/face\_database.py`	MODIFY	6/7	Face storage, overlap-filtered enrollment, and recognition matching
 
 `vision/face\_recognition.py`	REVIEW	6	Recognition
 
@@ -1225,3 +1575,60 @@ Phase 6 user-reported verification update (2026-11-01): The user confirms enroll
 
 
 Phase 6 completion report (2026-11-01): The user confirms the remaining Phase 6 test passed. Together with earlier user-reported tests for known-face recognition across distances, poses, and reboot; unknown faces remaining Unknown; face enrollment/save safeguards; identity persistence/deletion; and contextual confirmation-command transcription, Phase 6 acceptance is recorded complete. Validation results in this report are user-reported; no independent test execution was performed in this task.
+
+Phase 6 false-match safety follow-up (2026-11-02): The user reports that their father is sometimes identified as Tharun. Diagnostic logs show a single enrolled identity, accepted cosine scores from 0.522 to 0.695, a configured threshold of 0.50, and a second score of -1.0; with only one identity, the margin gate cannot distinguish an impostor. Raised `FaceDatabase.DEFAULT_THRESHOLD` to 0.70 on phase-7 so all observed candidates fall below the acceptance threshold and are reported Unknown. This is a temporary fail-closed calibration; it can reject Tharun too. Re-test separately with labeled owner and father samples before considering the recognition behavior reliable. No tests run.
+
+Phase 6 lookalike enrollment follow-up (2026-11-02): During the user's attempt to enroll their father, face samples reached 5/5, but the existing matcher still recognized the visible face as Tharun. The enrollment path's cross-identity duplicate guard used the same 0.70 threshold and could reject a distinct, explicitly confirmed lookalike identity. Replaced the hard rejection with an overlap diagnostic; after the existing spoken name read-back and “confirm save,” both labels can be stored separately. Runtime matching still requires the absolute threshold and best-vs-second-person margin; close/ambiguous matches should return Unknown. Pi verification is required for owner and father separately, including false-match checks. No tests run.
+
+Phase 6 owner false-reject follow-up (2026-11-02): After the father identity was enrolled, the user reports that their own face is now always Unknown. The interim 0.70 absolute threshold is likely too strict, but the two-identity margin may also reject both lookalikes. Extended `THASHU_FACE_MATCH_DEBUG=1` output to name the runner-up identity as well as its score. Do not lower the threshold until owner and father score blocks are separately labeled and compared; acceptance of both identities and rejection of incorrect matches remain unverified.
+
+Phase 6 pose-diverse enrollment follow-up (2026-11-02): The user reports that their side face matches Burai (best=0.726, second Tharun=0.532), while a frontal face matches Tharun. Updated `main.py` to collect eight embeddings while instructing a slow slight-left → center → slight-right head turn. Updated `FaceDatabase.add_person_samples` so a spoken-confirmed re-enrollment under the same name appends samples (up to 12 retained) rather than failing because the name already exists. Re-enroll Tharun and Burai separately, using the requested head movement, then compare debug output with each person/pose labeled. The 0.70 threshold remains; ambiguous score/margin cases must remain Unknown. Pi validation and any recognition acceptance remain pending. No tests run.
+
+Phase 7 cautious online face adaptation (2026-11-02): Added a guarded update path in `thashu/vision/face_database.py` and `thashu/vision/vision_core.py`. After the normal three-observation identity confirmation, the robot may store one new embedding for a single, non-ambiguous face, outside enrollment, no more than once per identity per 60 seconds. Adaptation requires score >= max(configured threshold + 0.08, 0.78) and runner-up margin >= max(configured margin + 0.12, 0.20); near-duplicates and identities already at the 12-embedding cap are skipped. Existing enrollment samples are not evicted. Only embeddings are stored, never face images. This reduces but cannot eliminate self-reinforcement of a mistaken identity; close lookalikes should remain Unknown and need dedicated Pi testing before Phase 7 acceptance. No tests were run.
+
+Phase 7 recognized-person WAV announcement (2026-11-02): Added fixed Piper prompt `person_recognized` (“I recognize a known person.”) to `thashu/voice/text_to_speech.py`. In `thashu/main.py`, a single fresh, unambiguous recognized face triggers the cached WAV once per identity per app session; the runtime pauses vision and wake listening during playback, then returns to IDLE. Generate the clip on the Pi with `prepare_command_voice_cache({"person_recognized"})`; missing WAV is logged and does not invoke live Piper for this announcement. Pi playback/interaction validation is pending. A cosine threshold of 0.70 is not a universal pose-independent reliability guarantee: recorded scores and a reported cross-identity side-view match show that performance depends on pose, enrollment samples, and lookalikes. Thresholds require labeled positive/negative Pi trials; recognition accuracy is not complete or certified by the threshold alone.
+
+Phase 7 face-adaptation safety hold (2026-11-02): Following Pi reports of frequent rejected matches and cross-identity labeling, unattended sample adaptation is now disabled by default. The guarded adaptation path requires explicit `THASHU_FACE_AUTO_ADAPT=1` and must remain off until labeled owner/non-owner trials show acceptable false-accept and false-reject behavior. Do not enable it to troubleshoot current recognition. Preserve the local face database before any future adaptation trial; validate separate identities and poses first. Pi diagnostics and false-match calibration remain pending.
+
+
+Phase 7 labeled recognition diagnostic (2026-11-02; user identified test subject): The user confirms the Pi log section with `best=0.827 (Burai), second=0.745 (Tharun), delta=0.082` was the user's father and `Burai` is the correct enrolled label. It reached temporal confirmation 1/3. A later Burai candidate scored 0.810 vs 0.769 (delta 0.041) and was correctly rejected as ambiguous, so no stable 3/3 recognition or recognition WAV announcement occurred for him in this run. The user says the father is not available for further testing. Preserve the existing Burai enrollment; continue owner-positive and unknown-negative tests with available subjects, and do not loosen thresholds from this single positive candidate. Phase 7 recognition acceptance remains pending.
+
+Phase 7 face false-match fail-closed adjustment (2026-11-02): After the user-labeled Pi run, raised the default face similarity cutoff from 0.70 to 0.78 and best-vs-second-person margin from 0.08 to 0.15 in `thashu/vision/face_database.py`. This is intended to reject the reported cross-pose Burai candidate at 0.726 and the father's narrow 0.827/0.745 candidate; ambiguous matches should remain Unknown. It will also reject many true-owner observations in the attached run (whose Tharun gaps were commonly 0.08–0.13), so this change prioritizes avoiding a wrong name over recognition availability. The existing three-observation confirmation and default-off online adaptation remain. Pi testing is required; do not claim improved accuracy until labeled testing confirms both identities and unknown rejection.
+
+Phase 7 face-match boundary follow-up (2026-11-03; user-requested, implemented on phase-8): Reduced `FaceDatabase.DEFAULT_MARGIN` from 0.15 to 0.08 while keeping the absolute cosine-score threshold at 0.78 and the existing three-observation confirmation. The prior user-labeled father capture was correctly Burai at 0.827 vs. Tharun at 0.745 (gap 0.082), so the 0.15 gap rejected a correct labeled candidate. New runtime acceptance requires best score >= 0.78 and a lead >= 0.08; closer matches remain Unknown. Cosine scores are similarity measures, not probabilities or a universal accuracy boundary. Automatic embedding adaptation keeps its separate stricter >=0.20 lead. Recheck owner positives, available labeled negatives, and ambiguous views on the Pi before treating recognition as reliable; no test was run for this edit.
+
+Phase 7 face-recognition response-time adjustment (2026-11-02): Reduced the normal idle face-embedding check interval from 2.0 seconds to 0.75 seconds in `thashu/vision/vision_core.py`; enrollment cadence remains 0.4 seconds. The 0.78 score cutoff, 0.15 identity margin, and three-observation confirmation remain unchanged. This should shorten the minimum confirmation delay while preserving match gates, at increased idle CPU use. Pi latency, sustained CPU load, and false-match behavior must be checked; no tests run.
+
+Phase 7 recognition WAV repeat policy (2026-11-02): Updated `thashu/main.py` so the cached known-person WAV plays once per recognized presence, rather than once per identity for the entire app run. A name is re-armed only after 10 seconds without a fresh, confirmed face observation while in IDLE; brief detector gaps and speaking/listening pauses do not cause repeat announcements. Pi validation of re-entry, no-spam, and wake listening remains pending. No tests run.
+
+
+Phase 7 explicit face enrollment sample increase (2026-11-02): Increased the spoken-confirmed face registration capture from eight to twelve embeddings in `thashu/main.py`; the user is prompted to slowly turn slightly left, return to center, then slightly right, pausing briefly at each position. The existing database cap remains 12 embeddings per identity, so a fresh 12-view re-enrollment replaces that identity's previous stored template set after the existing name spelling/read-back and explicit `confirm save` flow. No thresholds or margins were weakened, and default-off automatic adaptation remains disabled; uncertain live matches are not learned. Pi validation remains required: re-enroll Tharun and confirm `12/12`, then compare labeled frontal/left/right debug results and ensure ambiguous/unknown faces remain Unknown. No tests run.
+
+Phase 7 face enrollment follow-up (2026-11-02; supersedes the twelve-view capture note above): Increased `FaceDatabase.MAX_EMBEDDINGS_PER_PERSON` and explicit enrollment capture to 15. After capture completes, Thashu now asks the user to say only the name's letter names (for example, “T H A R U N”); a strict enrollment parser rejects surrounding phrases and words. Thashu reads the spelling back, then accepts the exact word “confirm” in that confirmation state (or the existing “confirm save”), with “confirm” added to Whisper’s expected phrases and try-again/cancel preserved. Progress prompts no longer ask the user to repeat a name before capture finishes. No face-match threshold or margin changed, and uncertain identities are still not learned automatically. A fresh 15-view enrollment replaces that identity's prior stored templates because the per-person cap is 15. Pull phase-7 and validate the full Pi flow, including wrong spelling, plain confirm, try again, cancel, and matching/unknown-face outcomes. No tests run.
+
+Phase 7 enrollment capture-timeout follow-up (2026-11-03; user-requested, implemented on phase-8): Increased the explicit 15-sample face enrollment window from 45 to 120 seconds in `thashu/main.py`, and raised the `VisionCore.begin_enrollment` default to the same 120 seconds. Sample quality gates, one-face/stable-track requirements, spelling confirmation, database cap, and matching thresholds are unchanged. Pi enrollment timing and successful completion still need user validation; no tests were run.
+
+Phase 7 cross-identity enrollment screening (2026-11-03; user-requested, implemented on phase-8): After the 15 initial views, the spelled candidate name is used to compare each embedding with all other saved identities (excluding that candidate’s existing label). A view at or above the current 0.78 cosine-score cutoff is rejected; accepted views are retained, and VisionCore continues collecting until the set contains 15 accepted views. Replacement views are screened as they arrive. The final database write repeats the overlap check and fails closed if any overlap remains. This preserves the existing “spell after capture” flow; the first batch is screened immediately after spelling, before any identity is saved. If a 15-view non-overlapping set cannot be collected within 120 seconds, enrollment times out without writing. The 0.78 cutoff and 0.08 recognition margin remain distinct; Pi validation of replacement counts, timeout, and correct owner/lookalike behavior is still required. No tests were run.
+
+Face enrollment replacement-timeout follow-up (2026-11-03; user-requested, implemented on phase-8): Increased the shared face-enrollment timeout from 120 to 180 seconds in `thashu/main.py` and the `VisionCore.begin_enrollment` default. This supersedes the 120-second window in the earlier enrollment notes. The accepted-view target remains 15, and overlap filtering still uses the 0.78 other-identity similarity cutoff. Pi validation remains pending; no tests were run.
+
+Phase 7 user-reported Pi acceptance update (2026-11-02): The user reports successful event save and recall, draft cancellation, memory persistence through restart, explicit memory-deletion confirmation, correct Tharun fact/event recall, rejection of memory saving when no face is recognized, and relevant/bounded recall. The user also reports that face recognition remains intermittent: the latest diagnostic frames were rejected by the configured score/margin gates, so the 15-view enrollment update and recognition reliability remain a separate follow-up outside Phase 7 acceptance. Punctuation handling and unknown/ambiguous-person recall isolation are user-reported passed. No independent tests were run.
+
+Phase 6 recognition response delay follow-up (2026-11-03): Updated `thashu/vision/vision_core.py` on `phase-8` to run normal face-embedding comparisons every 0.5 seconds instead of every 2 seconds. The existing three-consistent-observation identity confirmation, score threshold, margin, and quality gates are unchanged. Expected recognition latency after a stable face appears is reduced; Raspberry Pi CPU impact and recognition speed/accuracy still require user validation. No tests were run.
+
+
+Phase 6 dlib-only backend migration (2026-11-05): Replaced the default ArcFace/ONNX embedding path with dlib descriptors, kept YuNet as an optional detector accelerator with Haar fallback, and moved recognition to the dlib Euclidean-distance database at `~/.local/share/thashu/data/people_faces_dlib.json`. Integrated dlib dependencies into `requirements.txt` and removed the optional `requirements-dlib.txt`; setup documentation now states that existing ArcFace embeddings/model files are left untouched and are not compatible, so identities must be enrolled again in dlib mode. Added isolated dlib database tests. Python syntax compilation and five dlib database tests passed in a host scratch copy; dlib inference, Pi performance, and physical recognition acceptance remain unverified. The old ArcFace database and model were not deleted.
+
+Recognition announcement deduplication (2026-11-06): Updated `thashu/main.py` and `thashu/core/decision.py` so the recognition WAV plays on first confirmed identity and when the confirmed identity changes, but not when the same person is reacquired after a conversation or brief confidence loss. The comparison is case-insensitive and is held for the process lifetime; a return after another identity is announced counts as a change. Added five pure decision tests. The 12 isolated memory/recognition tests and Python syntax compilation passed on a host scratch copy; Pi WAV behavior still requires validation.
+
+
+Phase 10 user-reported Pi verification (2026-11-06): ESP32 disconnect/reconnect test passed, and stale motor-command protection test passed. These verify the corresponding task and safety acceptance items; other subsystem failure/recovery checks and overall Phase 10 acceptance remain open.
+
+
+Persistent Piper streaming verification and implementation (2026-11-07; user-reported Pi test): The user tested one long-lived Piper process sending multiple text lines through one raw-PCM playback stream. Warm-line first-PCM delay was 0.83–0.98 s across repeated runs; cold/first-line samples varied from 1.35 to 4.31 s. The user heard no audible pauses, clicks, or stutters despite ALSA underrun warnings. Updated `thashu/voice/text_to_speech.py` to keep one Piper process alive for dynamic replies, serialize access, stream 16 kHz mono PCM to playback, and use Piper's per-utterance “Real-time factor” stderr line as completion signal. The existing synchronous `speak()` contract remains: it waits for playback completion, preserving the runtime's SPEAKING/listening pause; cached WAV handling remains unchanged. Piper shutdown is registered with `atexit`. A Python syntax compilation of the fetched updated file passed in a host scratch copy. Integrated Pi behavior is not yet verified: pull phase-10, check that each dynamic reply speaks once and fully, the next reply is not mixed or dropped, cached WAV still plays, wake/listening resumes only after speech ends, and shutdown exits without leaving Piper/aplay processes. Phase 11 acceptance remains open; no performance acceptance checkbox is checked by this experiment alone.
+
+
+Integrated persistent Piper and Whisper preload Pi trial (2026-11-07; user-reported): Startup Whisper preload completed successfully in 4.06 s; STT then took 2.77 s and 2.42 s in two consecutive interactions, confirming the earlier missing-`time` import is fixed on the pulled branch. With the persistent Piper change, first PCM arrived 4.27 s after the first dynamic reply began and 1.82 s on the next dynamic reply. Full playback completed in 10.62 s and 8.98 s respectively; total interactions were 26.77 s and 21.85 s. The cold first reply still includes Piper process/model startup, while the warm reply begins audio sooner. The user interrupted during a later SPEAKING state; shutdown began cleanly in the captured log. These are two user-reported observations, not statistical acceptance results. Phase 11 latency target and regression acceptance remain open. Next candidate optimization is moving Piper initialization into startup to shift its cold cost away from the first reply; no such preload is implemented yet.
+
+
+Piper startup warm-up follow-up (2026-11-07): Added `start_piper()` to `thashu/voice/text_to_speech.py` and invoke it from `thashu/main.py` immediately after pausing the microphone, alongside Whisper preload. The persistent Piper child now begins loading before the first interaction, overlapping existing startup model work. Startup continues if Piper cannot start; it logs the failure and retries on the first dynamic reply. This is intended to move Piper's cold model-load delay away from the first answer, but no Pi validation has been run yet. Verify startup readiness time, first dynamic reply time-to-first-audio, subsequent reply time, playback completion/listening-state behavior, and clean shutdown. Phase 11 remains in progress.

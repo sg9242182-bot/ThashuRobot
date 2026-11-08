@@ -32,11 +32,12 @@ class VisionCore:
                 from vision.person_detection import UpperBodyDetector
                 person_detector = UpperBodyDetector()
         if recognizer is None:
-            from vision.face_recognition import FaceRecognizer
-            recognizer = FaceRecognizer(model_path("face", "w600k_r50.onnx"))
+            from vision.face_recognition import DlibFaceRecognizer
+            recognizer = DlibFaceRecognizer()
         if database is None:
-            from vision.face_database import FaceDatabase
-            database = FaceDatabase(data_path("people_faces.json"))
+            from vision.face_database import DlibFaceDatabase
+            database = DlibFaceDatabase(data_path("people_faces_dlib.json"))
+        face_backend = "dlib"
         if tracker is None:
             from vision.tracker import CentroidTracker
             tracker = CentroidTracker(max_disappeared=20)
@@ -47,6 +48,8 @@ class VisionCore:
         self.detector = detector
         self.person_detector = person_detector
         self.person_tracker = person_tracker
+        self.face_backend = face_backend
+        print("[FACE RECOGNITION] Backend: dlib (128-D CPU descriptors)")
         self.recognizer = recognizer
         self.database = database
         self.tracker = tracker
@@ -60,6 +63,7 @@ class VisionCore:
         self._tracker_reset_pending = False
         self.current_faces = []
         self.current_names = {}
+        self._recognition_events = []
         self.current_tracks = []
         self.current_people = []
         self.latest_frame_at = None
@@ -68,6 +72,8 @@ class VisionCore:
         self._reported_face_count = 0
         self._reported_person_count = 0
         self._recognition_votes = {}
+        self._last_adaptive_sample_at = {}
+        self._auto_face_adapt = os.environ.get("THASHU_FACE_AUTO_ADAPT", "").strip() == "1"
         # Haar detections can flicker between frames. Only publish a face after
         # it is spatially consistent across three consecutive camera frames.
         self._detection_candidates = []
@@ -184,16 +190,33 @@ class VisionCore:
                 "frame_size": self.frame_size,
             }
 
-    def begin_enrollment(self, required_samples=5, timeout=45.0):
-        """Collect a short-lived batch from one stable, unambiguous face."""
+    def drain_recognition_events(self):
+        """Return confirmed, unambiguous recognition transitions since last drain."""
+        with self._lock:
+            events = self._recognition_events
+            self._recognition_events = []
+            return events
+
+    def begin_enrollment(
+        self, required_samples=5, timeout=180.0, *,
+        initial_samples=None, target_name=None,
+    ):
+        """Collect quality-approved samples, optionally replacing overlaps."""
+        required_samples = max(5, int(required_samples))
+        seed_samples = [sample.copy() for sample in (initial_samples or [])]
+        if len(seed_samples) > required_samples:
+            raise ValueError("Initial enrollment samples exceed the required count")
         with self._lock:
             self._enrollment = {
-                "status": "collecting",
+                "status": "ready" if len(seed_samples) >= required_samples else "collecting",
                 "started_at": time.monotonic(),
                 "expires_at": time.monotonic() + float(timeout),
-                "required_samples": max(5, int(required_samples)),
+                "required_samples": required_samples,
                 "track_id": None,
-                "samples": [],
+                "samples": [sample.copy() for sample in seed_samples],
+                "seed_samples": seed_samples,
+                "target_name": target_name,
+                "overlap_rejections": 0,
             }
 
     def enrollment_status(self):
@@ -206,6 +229,7 @@ class VisionCore:
                 "sample_count": len(state["samples"]),
                 "required_samples": state["required_samples"],
                 "expires_at": state["expires_at"],
+                "overlap_rejections": state.get("overlap_rejections", 0),
             }
 
     def enrollment_samples(self):
@@ -349,8 +373,7 @@ class VisionCore:
         ]
 
     def _loop(self):
-        recog_interval = 2.0
-        enrollment_recog_interval = 0.4
+        recog_interval = 0.75
         debug_match = os.environ.get("THASHU_FACE_MATCH_DEBUG", "").strip() == "1"
         if debug_match:
             print(
@@ -400,12 +423,8 @@ class VisionCore:
             except (AttributeError, TypeError, ValueError):
                 frame_width, frame_height = self.frame_size
 
-            landmark_detections = []
-            if getattr(self.detector, "recognition_ready", False):
-                landmark_detections = self.detector.detect_with_landmarks(frame)
-                detections = [item["bbox"] for item in landmark_detections]
-            else:
-                detections = self.detector.detect(frame)
+            # Dlib computes its own five-point landmarks inside each detected crop.
+            detections = self.detector.detect(frame)
             if not self._processing_enabled.is_set():
                 continue
             faces = self._stabilize_detections(detections)
@@ -463,14 +482,10 @@ class VisionCore:
                     ):
                         enrollment["samples"].clear()
                         enrollment["track_id"] = None
-            with self._lock:
-                enrollment = getattr(self, "_enrollment", None)
-                enrollment_active = bool(
-                    enrollment and enrollment["status"] == "collecting"
-                )
-            recog_interval = (
-                enrollment_recog_interval if enrollment_active else 2.0
-            )
+            # Dlib descriptors are more CPU intensive. Run them at a lower
+            # cadence inside the dedicated vision worker; camera capture,
+            # audio, motor control, and safety loops remain independent.
+            recog_interval = 0.75
             if now - last_recog > recog_interval and faces:
                 for face_index, (x1, y1, x2, y2) in enumerate(faces):
                     if not self._processing_enabled.is_set():
@@ -483,50 +498,40 @@ class VisionCore:
                             print("[FACE MATCH TEST] skipped: face has no stable track ID")
                         continue
 
-                    # Match the stabilized box to the closest current YuNet
-                    # observation. Haar-only detections have no landmarks and
-                    # therefore cannot claim an identity.
-                    landmark_item = None
-                    best_overlap = 0.0
-                    for item in landmark_detections:
-                        ax1, ay1, ax2, ay2 = item["bbox"]
-                        ix1, iy1 = max(x1, ax1), max(y1, ay1)
-                        ix2, iy2 = min(x2, ax2), min(y2, ay2)
-                        intersection = max(0, ix2 - ix1) * max(0, iy2 - iy1)
-                        union = ((x2 - x1) * (y2 - y1)
-                                 + (ax2 - ax1) * (ay2 - ay1) - intersection)
-                        overlap = intersection / union if union > 0 else 0.0
-                        if overlap > best_overlap:
-                            best_overlap, landmark_item = overlap, item
-                    if landmark_item is None or best_overlap < 0.30:
-                        if debug_match:
-                            print(
-                                "[FACE MATCH TEST] skipped: stabilized face has no "
-                                f"matching YuNet landmarks (overlap={best_overlap:.3f})"
-                            )
-                        continue
-
-                    ax1, ay1, ax2, ay2 = landmark_item["bbox"]
-                    face_img = frame[ay1:ay2, ax1:ax2]
-                    embedding = self.recognizer.get_embedding(
-                        face_img,
-                        landmark_item["landmarks"],
-                        bbox_origin=(ax1, ay1),
-                    )
+                    face_img = frame[y1:y2, x1:x2]
+                    embedding = self.recognizer.get_embedding(face_img)
                     if not self._processing_enabled.is_set():
                         break
 
                     if embedding is None:
                         recognized, _score = None, -1.0
                         if debug_match:
+                            reason = getattr(
+                                self.recognizer, "last_failure_reason", None
+                            ) or "unspecified_embedding_failure"
                             print(
                                 "[FACE MATCH TEST] rejected before database match: "
-                                "quality, landmarks, alignment, or embedding inference failed"
+                                + reason
                             )
                     elif debug_match:
                         recognized, _score = self.database.match(
                             embedding, diagnostics=True
                         )
+                        compare_scores = getattr(
+                            self.database, "compare_sample_and_prototype_scores", None
+                        )
+                        if callable(compare_scores):
+                            comparisons = compare_scores(embedding)
+                            if comparisons:
+                                summary = "; ".join(
+                                    f"{name}[{count}]: max={legacy:.3f}, "
+                                    f"centroid={prototype:.3f}"
+                                    for name, count, legacy, prototype in comparisons
+                                )
+                                print(
+                                    "[FACE MATCH TEST] scoring comparison "
+                                    "(centroid is diagnostic only): " + summary
+                                )
                     else:
                         recognized, _score = self.database.match(embedding)
                     with self._lock:
@@ -534,22 +539,60 @@ class VisionCore:
                         if enrollment and enrollment["status"] == "collecting":
                             if (len(faces) != 1 or track_id in ambiguous_ids
                                     or embedding is None):
-                                enrollment["samples"].clear()
+                                enrollment["samples"] = [
+                                    sample.copy() for sample in enrollment.get("seed_samples", [])
+                                ]
                                 enrollment["track_id"] = None
                             elif enrollment["track_id"] not in (None, track_id):
                                 enrollment["status"] = "ambiguous"
-                                enrollment["samples"].clear()
+                                enrollment["samples"] = [
+                                    sample.copy() for sample in enrollment.get("seed_samples", [])
+                                ]
                             else:
                                 enrollment["track_id"] = track_id
-                                enrollment["samples"].append(embedding.copy())
-                                sample_count = len(enrollment["samples"])
-                                print(
-                                    "[VISION] Enrollment face samples "
-                                    f"{sample_count}/{enrollment['required_samples']}"
+                                target_name = enrollment.get("target_name")
+                                overlap = (
+                                    self.database.best_other_match(
+                                        embedding, exclude_name=target_name
+                                    )
+                                    if target_name
+                                    else (None, -1.0)
                                 )
-                                if sample_count >= enrollment["required_samples"]:
-                                    enrollment["status"] = "ready"
-                                    print("[VISION] Face enrollment capture ready")
+                                other_name, overlap_score = overlap
+                                overlap_check = getattr(
+                                    self.database, "is_overlap", None
+                                )
+                                overlaps = (
+                                    overlap_check(overlap_score)
+                                    if callable(overlap_check)
+                                    else overlap_score >= self.database.threshold
+                                )
+                                if other_name is not None and overlaps:
+                                    enrollment["overlap_rejections"] = (
+                                        enrollment.get("overlap_rejections", 0) + 1
+                                    )
+                                    needed = max(
+                                        0,
+                                        enrollment["required_samples"]
+                                        - len(enrollment["samples"]),
+                                    )
+                                    print(
+                                        "[VISION] Rejected overlapping enrollment view: "
+                                        f"{other_name}={overlap_score:.3f}; "
+                                        f"replacement still needed "
+                                        f"({len(enrollment['samples'])}/"
+                                        f"{enrollment['required_samples']}, need {needed})"
+                                    )
+                                else:
+                                    enrollment["samples"].append(embedding.copy())
+                                    sample_count = len(enrollment["samples"])
+                                    print(
+                                        "[VISION] Enrollment face samples "
+                                        f"{sample_count}/{enrollment['required_samples']}"
+                                    )
+                                    if sample_count >= enrollment["required_samples"]:
+                                        enrollment["status"] = "ready"
+                                        print("[VISION] Face enrollment capture ready")
 
                     with self._lock:
                         if not self._processing_enabled.is_set():
@@ -567,16 +610,66 @@ class VisionCore:
                             else "Unknown"
                         )
                         if debug_match and recognized is not None and votes < 3:
+                            gate_label = (
+                                "distance gates passed"
+                                if self.face_backend == "dlib"
+                                else "similarity gates passed"
+                            )
                             print(
-                                "[FACE MATCH TEST] similarity gates passed; "
+                                f"[FACE MATCH TEST] {gate_label}; "
                                 f"temporal confirmation {votes}/3 for {recognized}"
                             )
                         old_published_name = self.current_names.get(track_id, "Unknown")
                         self.current_names[track_id] = published_name
-                        if published_name != old_published_name and published_name != "Unknown":
+                        if (
+                            published_name != "Unknown"
+                            and published_name != old_published_name
+                            and len(faces) == 1
+                            and track_id not in ambiguous_ids
+                            and getattr(self, "_enrollment", None) is None
+                        ):
+                            self._recognition_events.append({
+                                "name": published_name,
+                                "observed_at": time.monotonic(),
+                            })
+                        adapt_identity = None
+                        if (
+                            published_name != old_published_name
+                            and published_name != "Unknown"
+                        ):
                             print(f"[VISION] Recognized enrolled person: {published_name}")
                         elif old_published_name != "Unknown" and published_name == "Unknown":
                             print("[VISION] Identity confidence lost; reporting Unknown")
+
+                        enrollment_active = getattr(self, "_enrollment", None) is not None
+                        if (
+                            published_name != "Unknown"
+                            and votes >= 3
+                            and len(faces) == 1
+                            and track_id not in ambiguous_ids
+                            and not enrollment_active
+                            and self._auto_face_adapt
+                            and time.monotonic()
+                                - self._last_adaptive_sample_at.get(published_name, 0.0)
+                                >= 60.0
+                            and callable(
+                                getattr(self.database, "add_high_confidence_sample", None)
+                            )
+                        ):
+                            adapt_identity = published_name
+
+                    if adapt_identity is not None and embedding is not None:
+                        try:
+                            if self.database.add_high_confidence_sample(
+                                adapt_identity, embedding
+                            ):
+                                self._last_adaptive_sample_at[adapt_identity] = time.monotonic()
+                                print(
+                                    "[VISION] Added one high-confidence adaptation sample "
+                                    f"for {adapt_identity}"
+                                )
+                        except Exception as exc:
+                            print(f"[VISION] Skipped automatic face sample: {exc}")
 
                 last_recog = now
 

@@ -1,6 +1,7 @@
 import time
 import threading
 import os
+import atexit
 import statistics
 
 import numpy as np
@@ -9,10 +10,11 @@ import RPi.GPIO as GPIO
 from voice.audio_manager  import AudioManager
 from voice.wake_word      import WakeWordEngine
 from voice.vad            import VoiceActivityDetector
-from voice.speech_to_text import transcribe 
-from voice.text_to_speech import speak, play_cached_response
+from voice.speech_to_text import transcribe, preload_model
+from voice.text_to_speech import speak, play_cached_response, play_recognized_person, start_piper
 from voice.sound_player   import play
 from core.brain           import Brain
+from core.ai_engine      import warmup_model
 from core.attention       import AttentionSystem
 from core.state           import RuntimeState, RuntimeStateMachine
 from core.event_bus       import EventBus
@@ -21,8 +23,9 @@ from vision.follow_logic   import FollowLogic
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
 from hardware.servo_tracking import ServoTracker
-from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, is_recognition_query
+from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, get_enrollment_spelling, is_recognition_query, get_person_memory_request, get_event_memory_request, get_person_event_query, get_place_event_query, get_person_memory_save_confirmation, is_person_memory_query, get_person_memory_delete_command
 from core.model_paths import model_path, project_path
+from memory.people import PeopleMemory
 
 # ── Sounds ────────────────────────────────────────────────────────────────────
 SOUND_STARTUP   = project_path("sounds", "startup.wav")
@@ -52,6 +55,9 @@ FOLLOW_PULSE_SECONDS = 0.25
 FOLLOW_PULSE_INTERVAL_SECONDS = 0.75
 FOLLOW_SENSOR_MAX_AGE_SECONDS = 0.75
 FOLLOW_OBSTACLE_CLEARANCE_MM = 300
+PENDING_MEMORY_CONFIRM_SECONDS = 120.0
+FACE_ENROLLMENT_SAMPLE_COUNT = 15
+FACE_ENROLLMENT_TIMEOUT_SECONDS = 180.0
 
 # ── Shutdown Button ───────────────────────────────────────────────────────────
 BUTTON_PIN = 17
@@ -62,6 +68,7 @@ runtime   = RuntimeStateMachine()
 event_bus = EventBus()
 
 brain  = Brain()
+person_memory = PeopleMemory()
 motors = MotorController()
 audio  = AudioManager(sample_rate=SAMPLE_RATE, blocksize=BLOCK_SIZE)
 wake = WakeWordEngine(
@@ -87,11 +94,16 @@ _follow_motion_active = False
 _follow_safety_notice_latched = False
 _identity_enrollment_state = "idle"
 _identity_pending_name = None
+_memory_delete_pending = None
+_memory_pending = None
 _last_idle_recognized_person = None
 _last_idle_recognized_at = 0.0
 _motion_timer = None
 _motion_generation = 0
 _motion_lock = threading.Lock()
+_shutdown_event = threading.Event()
+_shutdown_lock = threading.Lock()
+_shutdown_complete = False
 event_bus.subscribe(
     "RUNTIME_STATE_CHANGED",
     vision.on_runtime_state_changed,
@@ -107,21 +119,13 @@ def monitor_shutdown_button():
 
     print("[SYSTEM] Shutdown button monitoring started")
 
-    while True:
+    while not _shutdown_event.wait(0.1):
         # Button pressed = LOW
         if GPIO.input(BUTTON_PIN) == GPIO.LOW:
             print("[SYSTEM] Shutdown button pressed")
-
-            # Optional: eyes expression before shutdown
-            eyes.thinking()
-
-            # Prevent accidental double trigger
-            time.sleep(1)
-
+            _shutdown_runtime("physical shutdown button")
             os.system("sudo shutdown now")
             break
-
-        time.sleep(0.1)
 
 
 # ── Collect spoken command ─────────────────────────────────────────────────────
@@ -209,6 +213,29 @@ def _rearm_wake_after_audio():
     wake.unlock()
 
 
+def _announce_recognized_person(person_name):
+    """Announce the confirmed person's saved name while vision and wake input are paused."""
+    display_name = " ".join(str(person_name or "").split())
+    message = f"I recognize {display_name}."
+    transition_runtime(RuntimeState.SPEAKING)
+    wake.lock()
+    audio.pause()
+    eyes.happy()
+    try:
+        if not play_recognized_person(display_name):
+            print(f"[VISION] Named recognition WAV unavailable; using live Piper for {display_name}.")
+            speak(message)
+        time.sleep(0.4)
+    except Exception as exc:
+        print(f"[VISION] Could not play recognition announcement: {exc}")
+    finally:
+        audio.resume()
+        _rearm_wake_after_audio()
+        eyes.idle()
+        transition_runtime(RuntimeState.RETURN_TO_IDLE)
+        transition_runtime(RuntimeState.IDLE)
+
+
 def _announce_enrollment_status(message):
     """Speak an enrollment update through the normal supervised runtime states."""
     transition_runtime(RuntimeState.SPEAKING)
@@ -238,6 +265,16 @@ def _registration_details(text):
             return spelled, True
     return name, False
 
+
+
+def _recently_recognized_person():
+    """Return the one fresh confirmed face carried across wake-word transition."""
+    if (
+        _last_idle_recognized_person is not None
+        and time.monotonic() - _last_idle_recognized_at <= 20.0
+    ):
+        return _last_idle_recognized_person
+    return None
 
 def transition_runtime(target_state):
     global _auto_face_track_id, _follow_start_pending, _follow_region_pending, _follow_search_active
@@ -370,6 +407,64 @@ def stop_motion():
             _motion_timer.cancel()
             _motion_timer = None
         return motors.stop()
+
+
+def _shutdown_runtime(reason="process exit"):
+    """Stop motion first, then close owned workers and device resources once."""
+    global _shutdown_complete
+    with _shutdown_lock:
+        if _shutdown_complete:
+            return
+        _shutdown_complete = True
+        _shutdown_event.set()
+
+    print(f"[SYSTEM] Shutting down cleanly ({reason})")
+    try:
+        follow_logic.stop()
+    except Exception as exc:
+        print(f"[SYSTEM] Follow shutdown warning: {exc}")
+
+    try:
+        servo_tracker.stop_search()
+    except Exception as exc:
+        print(f"[SYSTEM] Servo shutdown warning: {exc}")
+
+    try:
+        sequence = stop_motion()
+        if sequence is not None:
+            motors.gpio.wait_for_ack(sequence, timeout=0.75)
+    except Exception as exc:
+        print(f"[SYSTEM] Motor STOP during shutdown failed: {exc}")
+
+    try:
+        vision.stop()
+    except Exception as exc:
+        print(f"[SYSTEM] Vision shutdown warning: {exc}")
+
+    try:
+        audio.stop()
+    except Exception as exc:
+        print(f"[SYSTEM] Audio shutdown warning: {exc}")
+
+    try:
+        motors.gpio.close()
+    except Exception as exc:
+        print(f"[SYSTEM] ESP32 transport shutdown warning: {exc}")
+
+    current = threading.current_thread()
+    for thread in threading.enumerate():
+        if thread.name == "thashu-shutdown-button" and thread is not current:
+            thread.join(timeout=0.5)
+            if thread.is_alive():
+                print("[SYSTEM] Shutdown-button monitor is still stopping")
+
+    try:
+        GPIO.cleanup()
+    except Exception as exc:
+        print(f"[SYSTEM] GPIO cleanup warning: {exc}")
+
+
+atexit.register(_shutdown_runtime)
 
 
 def confirm_motion_command(sequence, direction):
@@ -726,9 +821,23 @@ def process_safety_events():
         # EVENT and FAULT lines are logged immediately by GPIOControl's reader thread.
 
 
+def _screen_enrollment_samples(vision, name, samples):
+    """Keep samples that do not match another saved identity; capture replacements."""
+    accepted, rejected = vision.database.filter_enrollment_samples(name, samples)
+    if rejected:
+        vision.begin_enrollment(
+            required_samples=FACE_ENROLLMENT_SAMPLE_COUNT,
+            timeout=FACE_ENROLLMENT_TIMEOUT_SECONDS,
+            initial_samples=accepted,
+            target_name=name,
+        )
+    return accepted, rejected
+
+
 # ── Main loop ──────────────────────────────────────────────────────────────────
 def main():
     global _identity_enrollment_state, _identity_pending_name
+    global _memory_delete_pending, _memory_pending
     global _last_idle_recognized_person, _last_idle_recognized_at
     print("[SYSTEM] Jarvis started")
 
@@ -738,7 +847,8 @@ def main():
     # ── Start shutdown button monitor ───────────────────────────────────────
     shutdown_thread = threading.Thread(
         target=monitor_shutdown_button,
-        daemon=True
+        name="thashu-shutdown-button",
+        daemon=True,
     )
 
     shutdown_thread.start()
@@ -748,6 +858,9 @@ def main():
     wake.lock()
 
     audio.pause()
+    start_piper()
+    preload_model()
+    warmup_model()
 
     play(SOUND_STARTUP, blocking=True)
 
@@ -767,46 +880,56 @@ def main():
 
 
 
-    while True:
+    while not _shutdown_event.is_set():
         process_safety_events()
 
         if runtime.current == RuntimeState.IDLE and _identity_enrollment_state == "capturing":
             capture = vision.enrollment_status()
             if capture.get("status") == "ready":
                 if _identity_pending_name:
+                    _identity_enrollment_state = "confirm"
+                    print(
+                        "[VISION] Replacement capture complete "
+                        f"({capture.get('sample_count', 0)}/{capture.get('required_samples', FACE_ENROLLMENT_SAMPLE_COUNT)}) "
+                        f"for {_identity_pending_name}"
+                    )
+                    _announce_enrollment_status(
+                        f"I have fifteen face views for {_identity_pending_name}, after replacing "
+                        "views that overlapped another saved identity. Say confirm to save, "
+                        "or cancel registration."
+                    )
+                else:
                     _identity_enrollment_state = "spelling"
                     print(
                         "[VISION] Required face images captured "
-                        f"({capture.get('sample_count', 0)}/{capture.get('required_samples', 5)}); "
-                        f"waiting for spelling of draft name {_identity_pending_name}"
+                        f"({capture.get('sample_count', 0)}/{capture.get('required_samples', FACE_ENROLLMENT_SAMPLE_COUNT)}); "
+                        "waiting for letter-by-letter name spelling"
                     )
                     _announce_enrollment_status(
-                        f"I have finished taking your face pictures. "
-                        f"I heard your name as {_identity_pending_name}. "
-                        "Please spell it using ordinary letter names."
-                    )
-                else:
-                    _identity_enrollment_state = "awaiting_name"
-                    print(
-                        "[VISION] Required face images captured "
-                        f"({capture.get('sample_count', 0)}/{capture.get('required_samples', 5)}); "
-                        "waiting for the spoken name"
-                    )
-                    _announce_enrollment_status(
-                        "I have finished taking the face pictures. "
-                        "Tell me your name, then spell it using ordinary letter names."
+                        "Face capture is complete. Please spell your name one letter at a time. "
+                        "Say only the letters, like T H A R U N."
                     )
                 continue
             if capture.get("status") in ("ambiguous", "timed_out"):
+                overlap_rejections = capture.get("overlap_rejections", 0)
                 _identity_enrollment_state = "idle"
+                _identity_pending_name = None
                 vision.clear_enrollment()
                 message = (
                     "I saw more than one face, so I cancelled face registration. "
                     "Please try again with only one face in view."
                     if capture.get("status") == "ambiguous"
-                    else "I could not capture enough clear face pictures in time. Please try again."
+                    else (
+                        "I could not capture enough non-overlapping face views in time. "
+                        "Please try again with a different angle or lighting."
+                        if overlap_rejections
+                        else "I could not capture enough clear face pictures in time. Please try again."
+                    )
                 )
-                print(f"[VISION] Enrollment ended: {capture.get('status')}")
+                print(
+                    f"[VISION] Enrollment ended: {capture.get('status')}; "
+                    f"overlap_rejections={overlap_rejections}"
+                )
                 _announce_enrollment_status(message)
                 continue
 
@@ -849,7 +972,10 @@ def main():
             # Ignore wake input only while the camera is actively sweeping
             # to acquire a follow target. Idle face tracking and target tracking
             # continue to listen for the wake word.
-            if not _follow_search_active and wake.process(chunk):
+            wake_triggered = not _follow_search_active and wake.process(chunk)
+            if wake_triggered:
+                # Snapshot identity before the interaction pauses vision and STT delays dispatch.
+                recognized_person_at_wake = _recently_recognized_person()
                 transition_runtime(RuntimeState.WAKE_DETECTED)
 
                 print("[SYSTEM] ═══════════════════════════")
@@ -904,12 +1030,28 @@ def main():
                 expected_phrases = None
                 if _identity_enrollment_state == "confirm":
                     expected_phrases = [
+                        "confirm",
                         "confirm save",
                         "try again",
                         "cancel registration",
                     ]
                 elif _identity_enrollment_state == "delete_confirm":
                     expected_phrases = ["yes", "no", "cancel"]
+                elif _memory_pending is not None:
+                    expected_phrases = ["confirm memory", "cancel memory"]
+                elif _memory_delete_pending is not None:
+                    expected_phrases = ["confirm delete memories", "cancel memory deletion"]
+                elif recognized_person_at_wake is not None:
+                    expected_phrases = [
+                        "remember that [a fact to save]",
+                        "remember this event [an event to save] at [a place]",
+                        "what do you remember about me",
+                        "what events do you remember about me",
+                        "where did I meet [a person]",
+                        "forget all my memories",
+                        "forget everything you remember about me",
+                        "delete my saved memories",
+                    ]
 
                 text = transcribe(raw_audio, expected_phrases=expected_phrases)
 
@@ -944,6 +1086,15 @@ def main():
                 brain_start = time.time()
 
                 identity_command = get_recognition_command(text)
+                identity_save_confirmation = (
+                    identity_command == "CONFIRM_SAVE"
+                    or (
+                        _identity_enrollment_state == "confirm"
+                        and text.strip().casefold().strip(" .!?") == "confirm"
+                    )
+                )
+                memory_delete_command = get_person_memory_delete_command(text)
+                memory_save_confirmation = get_person_memory_save_confirmation(text)
                 registration_name, registration_was_spelled = _registration_details(text)
                 removal_name = get_remove_identity_name(text)
                 if identity_command == "CANCEL" and _identity_enrollment_state != "idle":
@@ -956,22 +1107,17 @@ def main():
                     if not getattr(vision.detector, "recognition_ready", False):
                         response = "Face registration is unavailable because the landmark model is not installed."
                     else:
-                        vision.begin_enrollment(required_samples=5, timeout=45.0)
+                        vision.begin_enrollment(required_samples=FACE_ENROLLMENT_SAMPLE_COUNT, timeout=FACE_ENROLLMENT_TIMEOUT_SECONDS)
                         _identity_enrollment_state = "capturing"
                         # A name in this utterance is only a draft; enrollment
                         # still requires captured face samples, spelling, and save.
-                        _identity_pending_name = registration_name
-                        if registration_name:
-                            response = (
-                                f"I heard your name as {registration_name}. "
-                                "I am collecting five clear face views first. "
-                                "After that, I will ask you to spell the name."
-                            )
-                        else:
-                            response = (
-                                "I am collecting five clear views of one face. "
-                                "Keep your face centered and still for a few seconds."
-                            )
+                        _identity_pending_name = None
+                        response = (
+                            "I am collecting fifteen views of one face. Keep one face in view; "
+                            "slowly turn your head a little left, return to center, then a little "
+                            "right, and pause briefly at each position. After capture, spell your "
+                            "name using only the letters."
+                        )
                 elif removal_name:
                     matched_name = vision.database.resolve_name(removal_name)
                     if matched_name is None:
@@ -989,47 +1135,127 @@ def main():
                                 f"I didn't find {removal_name}, but I found {matched_name}. "
                                 f"Do you want me to delete {matched_name}? Say yes to confirm or no to cancel."
                             )
-                elif _identity_enrollment_state in ("capturing", "awaiting_name") and registration_name:
-                    if _identity_enrollment_state == "capturing" and _identity_pending_name is None:
-                        _identity_pending_name = registration_name
+                elif _identity_enrollment_state in ("capturing", "awaiting_name"):
                     status = vision.enrollment_status()
                     samples = vision.enrollment_samples()
-                    if status.get("status") == "ready" and samples:
-                        _identity_pending_name = registration_name
-                        if registration_was_spelled:
-                            _identity_enrollment_state = "confirm"
-                            spelled_letters = " ".join(registration_name.upper())
-                            response = (
-                                f"I heard {spelled_letters}, which is {registration_name}. "
-                                f"Should I save this face as {registration_name}? Say confirm save, try again to spell it again, or cancel registration."
-                            )
-                        else:
-                            _identity_enrollment_state = "spelling"
-                            response = (
-                                f"I heard the name {_identity_pending_name}. "
-                                "Please spell the name using ordinary letter names, for example T H A R U N."
-                            )
-                    elif status.get("status") in ("ambiguous", "timed_out"):
+                    if status.get("status") in ("ambiguous", "timed_out"):
+                        overlap_rejections = status.get("overlap_rejections", 0)
                         vision.clear_enrollment()
                         _identity_enrollment_state = "idle"
-                        response = "I could not get a stable single face. Please try again with only one face in view."
+                        _identity_pending_name = None
+                        response = (
+                            "I could not get a stable single face. Please try again with only one face in view."
+                            if status.get("status") == "ambiguous"
+                            else (
+                                "I could not capture enough non-overlapping face views in time. "
+                                "Please try again with a different angle or lighting."
+                                if overlap_rejections
+                                else "I could not get enough clear face views in time. Please try again."
+                            )
+                        )
+                    elif status.get("status") == "ready" and samples:
+                        _identity_enrollment_state = "spelling"
+                        spelled_name = get_enrollment_spelling(text)
+                        if spelled_name:
+                            try:
+                                accepted, rejected = _screen_enrollment_samples(
+                                    vision, spelled_name, samples
+                                )
+                                _identity_pending_name = spelled_name
+                                spelled_letters = " ".join(spelled_name.upper())
+                                if rejected:
+                                    _identity_enrollment_state = "capturing"
+                                    needed = FACE_ENROLLMENT_SAMPLE_COUNT - len(accepted)
+                                    competitors = sorted({
+                                        other_name for _, other_name, _ in rejected
+                                    })
+                                    print(
+                                        f"[VISION] Replacing {len(rejected)} overlapping views "
+                                        f"for {spelled_name}; retained {len(accepted)}/"
+                                        f"{FACE_ENROLLMENT_SAMPLE_COUNT}; overlaps={competitors}"
+                                    )
+                                    response = (
+                                        f"I heard {spelled_letters}, which is {spelled_name}. "
+                                        f"{len(rejected)} views overlapped with another saved identity. "
+                                        f"I kept {len(accepted)} and will capture {needed} replacements. "
+                                        "Keep one face in view and slowly change your angle."
+                                    )
+                                else:
+                                    _identity_enrollment_state = "confirm"
+                                    response = (
+                                        f"I heard {spelled_letters}, which is {spelled_name}. "
+                                        "Say confirm to save, try again to spell it again, or cancel registration."
+                                    )
+                            except (ValueError, OSError, PermissionError) as exc:
+                                print(f"[VISION] Enrollment screening failed: {exc}")
+                                vision.clear_enrollment()
+                                _identity_enrollment_state = "idle"
+                                _identity_pending_name = None
+                                response = "I could not safely check those face views. Please try registration again."
+                        else:
+                            response = (
+                                "Face capture is complete. Please spell your name one letter at a time. "
+                                "Say only the letters, like T H A R U N."
+                            )
+                    elif status.get("status") == "ready":
+                        vision.clear_enrollment()
+                        _identity_enrollment_state = "idle"
+                        response = "I could not load the captured face samples. Please start registration again."
                     else:
                         count = status.get("sample_count", 0)
-                        required = status.get("required_samples", 5)
-                        response = (
-                            f"I have {count} of {required} clear face views so far. "
-                            "I will tell you when they are ready. Please stay still and try again in a few seconds."
-                        )
+                        required = status.get("required_samples", FACE_ENROLLMENT_SAMPLE_COUNT)
+                        if _identity_pending_name:
+                            response = (
+                                f"I have {count} of {required} non-overlapping views for "
+                                f"{_identity_pending_name}. Please keep one face in view; "
+                                "I will keep replacing views that match another saved identity."
+                            )
+                        else:
+                            response = (
+                                f"I have {count} of {required} clear face views so far. "
+                                "Please keep one face in view. I will ask you to spell your name when capture is complete."
+                            )
                 elif _identity_enrollment_state == "spelling":
-                    spelled_name = get_spelled_registration_name(text)
+                    spelled_name = get_enrollment_spelling(text)
                     if spelled_name:
-                        _identity_pending_name = spelled_name
-                        _identity_enrollment_state = "confirm"
-                        spelled_letters = " ".join(spelled_name.upper())
-                        response = (
-                            f"I heard {spelled_letters}, which is {spelled_name}. "
-                            f"Should I save this face as {spelled_name}? Say confirm save, try again to spell it again, or cancel registration."
-                        )
+                        samples = vision.enrollment_samples()
+                        try:
+                            if not samples:
+                                raise ValueError("Enrollment samples expired")
+                            accepted, rejected = _screen_enrollment_samples(
+                                vision, spelled_name, samples
+                            )
+                            _identity_pending_name = spelled_name
+                            spelled_letters = " ".join(spelled_name.upper())
+                            if rejected:
+                                _identity_enrollment_state = "capturing"
+                                needed = FACE_ENROLLMENT_SAMPLE_COUNT - len(accepted)
+                                competitors = sorted({
+                                    other_name for _, other_name, _ in rejected
+                                })
+                                print(
+                                    f"[VISION] Replacing {len(rejected)} overlapping views "
+                                    f"for {spelled_name}; retained {len(accepted)}/"
+                                    f"{FACE_ENROLLMENT_SAMPLE_COUNT}; overlaps={competitors}"
+                                )
+                                response = (
+                                    f"I heard {spelled_letters}, which is {spelled_name}. "
+                                    f"{len(rejected)} views overlapped with another saved identity. "
+                                    f"I kept {len(accepted)} and will capture {needed} replacements. "
+                                    "Keep one face in view and slowly change your angle."
+                                )
+                            else:
+                                _identity_enrollment_state = "confirm"
+                                response = (
+                                    f"I heard {spelled_letters}, which is {spelled_name}. "
+                                    "Say confirm to save, try again to spell it again, or cancel registration."
+                                )
+                        except (ValueError, OSError, PermissionError) as exc:
+                            print(f"[VISION] Enrollment screening failed: {exc}")
+                            vision.clear_enrollment()
+                            _identity_enrollment_state = "idle"
+                            _identity_pending_name = None
+                            response = "I could not safely check those face views. Please try registration again."
                     else:
                         response = (
                             "I didn't catch the spelling. Please say each letter separately, "
@@ -1045,7 +1271,7 @@ def main():
                         response = "I could not safely delete that face identity."
                     _identity_enrollment_state = "idle"
                     _identity_pending_name = None
-                elif _identity_enrollment_state == "confirm" and identity_command == "CONFIRM_SAVE":
+                elif _identity_enrollment_state == "confirm" and identity_save_confirmation:
                     samples = vision.enrollment_samples()
                     try:
                         if not samples:
@@ -1065,32 +1291,223 @@ def main():
                     # Keep the captured face samples; only ask for the name spelling again.
                     _identity_enrollment_state = "spelling"
                     _identity_pending_name = None
-                    response = "Okay. Please spell the name again using ordinary letter names, like T H A R U N."
+                    response = "Okay. Please spell the name again using only separate letters, like T H A R U N."
                 elif _identity_enrollment_state == "delete_confirm" and identity_command == "REJECT":
                     vision.clear_enrollment()
                     _identity_enrollment_state = "idle"
                     _identity_pending_name = None
                     response = "I cancelled deleting the face identity."
                 elif _identity_enrollment_state == "spelling":
-                    response = "Please spell the name using ordinary letter names, like T H A R U N, or say cancel."
+                    response = "Please spell your name using only separate letters, like T H A R U N, or say cancel registration."
                 elif _identity_enrollment_state == "confirm":
-                    response = "Please say confirm save, try again to spell the name again, or cancel registration."
+                    response = "Please say confirm, try again to spell the name again, or cancel registration."
                 elif _identity_enrollment_state == "delete_confirm":
                     response = "Please say yes to confirm deleting this saved face identity, or no to cancel."
-                elif _identity_enrollment_state == "capturing":
-                    status = vision.enrollment_status()
-                    if status.get("status") in ("ambiguous", "timed_out"):
-                        vision.clear_enrollment()
-                        _identity_enrollment_state = "idle"
-                        response = "I could not get a stable single face. Please try again with only one face in view."
+                elif _memory_pending is not None:
+                    pending = _memory_pending
+                    confirmed_person = recognized_person_at_wake
+                    if time.monotonic() > pending["expires_at"]:
+                        _memory_pending = None
+                        response = "That memory confirmation expired, so I didn't save anything."
+                    elif memory_save_confirmation == "CANCEL":
+                        _memory_pending = None
+                        response = "I cancelled that memory. Nothing was saved."
+                    elif memory_save_confirmation == "CONFIRM":
+                        # The original save request was face-verified and bound
+                        # to this draft; confirmation only approves its read-back.
+                        try:
+                            saved = person_memory.remember(
+                                pending["person"],
+                                pending["kind"],
+                                pending["text"],
+                                confirmed_identity=True,
+                                location=pending.get("location"),
+                            )
+                            _memory_pending = None
+                            if saved:
+                                print(
+                                    f"[MEMORY] Explicit {pending['kind']} confirmed and saved "
+                                    f"for {pending['person']}"
+                                )
+                                if pending.get("location"):
+                                    response = (
+                                        f"I saved that event for {pending['person']}, "
+                                        f"at {pending['location']}."
+                                    )
+                                else:
+                                    response = f"I saved that {pending['kind']} for {pending['person']}."
+                            else:
+                                response = "I already have that saved."
+                        except (OSError, TypeError, ValueError, PermissionError) as exc:
+                            _memory_pending = None
+                            print(f"[MEMORY] Save rejected: {exc}")
+                            response = "I couldn't safely save that memory."
                     else:
-                        status = vision.enrollment_status()
-                        count = status.get("sample_count", 0)
-                        required = status.get("required_samples", 5)
                         response = (
-                            f"I am still collecting clear views, {count} of {required}. "
-                            "Stay still and say your name again in a few seconds."
+                            "I haven't saved it yet. Say confirm memory to save the read-back, "
+                            "or cancel memory to discard it."
                         )
+                elif _memory_delete_pending is not None:
+                    pending_person = _memory_delete_pending
+                    confirmed_person = recognized_person_at_wake
+                    if memory_delete_command == "CANCEL":
+                        _memory_delete_pending = None
+                        response = "I cancelled deleting your saved memories."
+                    elif memory_delete_command == "CONFIRM" and confirmed_person == pending_person:
+                        try:
+                            removed = person_memory.forget(
+                                pending_person, confirmed=True
+                            )
+                            _memory_delete_pending = None
+                            response = (
+                                f"I deleted {removed} saved memories for {pending_person}."
+                                if removed
+                                else f"There were no saved memories for {pending_person}."
+                            )
+                            print(
+                                f"[MEMORY] Confirmed deletion of {removed} records "
+                                f"for {pending_person}"
+                            )
+                        except (OSError, TypeError, ValueError, PermissionError) as exc:
+                            _memory_delete_pending = None
+                            print(f"[MEMORY] Deletion rejected: {exc}")
+                            response = "I couldn't safely delete those memories."
+                    elif memory_delete_command == "CONFIRM":
+                        _memory_delete_pending = None
+                        response = (
+                            "I could not confirm the same person, so I cancelled "
+                            "deleting those memories."
+                        )
+                    else:
+                        response = (
+                            "Please say confirm delete memories to erase them, "
+                            "or cancel memory deletion."
+                        )
+                elif memory_delete_command == "DELETE":
+                    confirmed_person = recognized_person_at_wake
+                    if confirmed_person is None:
+                        response = (
+                            "I can only delete personal memories when I recognize "
+                            "one confirmed person."
+                        )
+                    elif not person_memory.recall(confirmed_person, limit=5):
+                        response = f"I don't have saved memories for {confirmed_person}."
+                    else:
+                        _memory_delete_pending = confirmed_person
+                        response = (
+                            f"Should I delete all saved facts and events for "
+                            f"{confirmed_person}? Say confirm delete memories or "
+                            "cancel memory deletion."
+                        )
+                elif (event_request := get_event_memory_request(text)) is not None:
+                    confirmed_person = recognized_person_at_wake
+                    if confirmed_person is None:
+                        response = (
+                            "I can only save a personal event when I recognize one "
+                            "confirmed person. Please face the camera and try again."
+                        )
+                    else:
+                        event_text, location = event_request
+                        _memory_pending = {
+                            "person": confirmed_person,
+                            "kind": "event",
+                            "text": event_text,
+                            "location": location,
+                            "expires_at": time.monotonic() + PENDING_MEMORY_CONFIRM_SECONDS,
+                        }
+                        location_readback = (
+                            f" at {location}" if location else " with no location recorded"
+                        )
+                        response = (
+                            f"I heard this event: {event_text}. I will save it for "
+                            f"{confirmed_person}{location_readback}. "
+                            "Say confirm memory to save it, or cancel memory to discard it."
+                        )
+                        print(
+                            f"[MEMORY] Pending explicit event for {confirmed_person}; "
+                            f"location={location or 'unknown'}; waiting for read-back confirmation"
+                        )
+                elif (memory_request := get_person_memory_request(text)) is not None:
+                    confirmed_person = recognized_person_at_wake
+                    if confirmed_person is None:
+                        response = (
+                            "I can only save a permanent memory when I recognize one "
+                            "confirmed person. Please face the camera and try again."
+                        )
+                    else:
+                        kind, memory_text = memory_request
+                        _memory_pending = {
+                            "person": confirmed_person,
+                            "kind": kind,
+                            "text": memory_text,
+                            "expires_at": time.monotonic() + PENDING_MEMORY_CONFIRM_SECONDS,
+                        }
+                        response = (
+                            f"I heard this {kind}: {memory_text}. "
+                            "Say confirm memory to save it, or cancel memory to discard it."
+                        )
+                        print(
+                            f"[MEMORY] Pending explicit {kind} for {confirmed_person}; "
+                            "waiting for read-back confirmation"
+                        )
+                elif is_person_memory_query(text):
+                    confirmed_person = recognized_person_at_wake
+                    if confirmed_person is None:
+                        response = (
+                            "I can only recall personal memories when I recognize "
+                            "one confirmed person."
+                        )
+                    else:
+                        event_query = get_person_event_query(text)
+                        place_query = get_place_event_query(text)
+                        if event_query is not None:
+                            records = person_memory.recall(
+                                confirmed_person,
+                                limit=5,
+                                kind="event",
+                                contains=event_query or None,
+                            )
+                        elif place_query is not None:
+                            records = person_memory.recall_at_place(
+                                place_query,
+                                limit=5,
+                                person=confirmed_person,
+                            )
+                        else:
+                            records = person_memory.recall(confirmed_person, limit=5)
+                        if not records:
+                            if event_query is not None:
+                                response = (
+                                    f"I don't have a saved event"
+                                    f"{' about ' + event_query if event_query else ''} "
+                                    f"for {confirmed_person}."
+                                )
+                            elif place_query is not None:
+                                response = (
+                                    f"I don't have saved events for {confirmed_person} "
+                                    f"at {place_query}."
+                                )
+                            else:
+                                response = (
+                                    f"I don't have any saved facts or events for "
+                                    f"{confirmed_person} yet."
+                                )
+                        else:
+                            entries = []
+                            for record in records:
+                                entry = f"{record['kind']}: {record['text'][:120]}"
+                                if record["kind"] == "event":
+                                    entry += (
+                                        f" at {record['location']}"
+                                        if record.get("location")
+                                        else " (location unknown)"
+                                    )
+                                entries.append(entry)
+                            response = (
+                                f"For {confirmed_person}, I remember: "
+                                + "; ".join(entries)
+                                + "."
+                            )
                 elif is_recognition_query(text):
                     recently_recognized = (
                         _last_idle_recognized_person is not None
@@ -1246,7 +1663,32 @@ def main():
 
                 transition_runtime(RuntimeState.RETURN_TO_IDLE)
                 transition_runtime(RuntimeState.IDLE)
+            elif not _follow_search_active:
+                # Consume all queued transitions and compare the newest identity
+                # with the last one announced. Reacquiring the same face after a
+                # conversation or a brief confidence flicker must stay silent.
+                recognition_events = vision.drain_recognition_events()
+                recognized_name = next(
+                    (
+                        event.get("name")
+                        for event in reversed(recognition_events)
+                        if isinstance(event, dict)
+                        and isinstance(event.get("name"), str)
+                        and event.get("name").strip()
+                        and event.get("name").strip().casefold() != "unknown"
+                    ),
+                    None,
+                )
+                if recognized_name is not None:
+                    print(f"[VISION] Announcing recognized person: {recognized_name}")
+                    _announce_recognized_person(recognized_name)
+
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("[SYSTEM] Keyboard interrupt received")
+    finally:
+        _shutdown_runtime("main exit")
