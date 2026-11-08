@@ -1188,7 +1188,17 @@ Status: IN PROGRESS
 
 Current branch: `phase-12-pi-api-https`, based on current `main`.
 
-Implemented on this branch (not yet Pi-validated):
+Scope retained from the original Phase 12 target:
+
+\[ ] Mobile manual movement and STOP.
+
+\[ ] Robot status and sensor telemetry.
+
+\[ ] Restart, shutdown, and reset controls with explicit safety/authorization rules.
+
+\[ ] Error and diagnostic status suitable for the app.
+
+Implementation present on this branch:
 
 \[x] Bring Vishal's API routes, service layer, request idempotency, telemetry handling, and API/manager unit tests onto the current `main` base.
 
@@ -1200,31 +1210,43 @@ Implemented on this branch (not yet Pi-validated):
 
 \[x] Document private-LAN HTTPS setup and certificate trust requirements. No certificate or private key is committed.
 
-Verification still required:
+Pi verification (2026-11-08; user-reported):
 
-\[ ] Review API imports/dependency compatibility against the Raspberry Pi 4 environment.
+\[x] `/health` returned HTTP 200 and `/api/v1/status` returned HTTP 200 with ESP32 transport connected and mode AUTO.
 
-\[ ] Install the updated runtime requirements in the Pi virtual environment and start the robot/API without opening a second serial transport.
+\[x] Unauthenticated mode request returned HTTP 401.
 
-\[ ] Verify `/health`, `/api/v1/status`, authentication failures, MANUAL/AUTO mode switching, bounded movement dispatch, STOP priority, request-ID replay, and command result lookup on the Pi.
+\[x] Authenticated MANUAL then AUTO mode switches returned HTTP 200.
 
-\[ ] Configure a certificate with a SAN matching the app URL; confirm HTTPS and WebSocket TLS from the Android app with certificate validation enabled.
+\[x] Authenticated STOP returned HTTP 202 and command lookup returned `acknowledged`, no error, mode AUTO.
 
-\[ ] Verify telemetry and command-result recovery after API restart; confirm the ESP32 firmware remains unchanged.
+\[x] User reports the robot movement test passed. Record whether this was the voice/controller path or the API move route before using it to close the mobile-movement check.
 
-\[ ] Complete the phone-to-Pi checks on a trusted private network and record the Pi/API revision. Physical movement tests require the separately agreed safe procedure.
+Still required:
+
+\[ ] Confirm dependency health with `pip check` and record the Pi branch revision. API currently starts and serves requests; no dependency-check output has been recorded.
+
+\[ ] Verify authenticated API movement dispatch in MANUAL mode, sensor/obstacle rejection, bounded stop, request-ID replay/conflict behavior, and STOP priority. Do this only in the previously agreed safe test area.
+
+\[ ] Confirm whether restart/shutdown/reset controls are required in the Flutter contract; define authorization and safe behavior before adding them. These controls are not implemented by the current API routes.
+
+\[ ] Agree the app-facing error/diagnostic fields and verify status plus sensor telemetry/staleness behavior.
+
+\[ ] Configure a certificate whose SAN matches the app URL; verify HTTPS and WebSocket TLS from Android with certificate validation enabled.
+
+\[ ] Verify telemetry and command-result behavior after API restart, including that uncertain in-flight commands are not replayed.
+
+\[ ] Complete the phone-to-Pi checks on a trusted private network and record the API/firmware revisions. No internet connection is required on that private network.
 
 Phase 12 acceptance:
 
-\[ ] Mobile commands use the same robot supervisor and serial transport.
+\[ ] All original mobile-control targets are implemented and tested without bypassing the robot supervisor or ESP32 safety.
 
-\[ ] Mobile control cannot bypass Pi or ESP32 safety checks.
+\[ ] HTTPS works from Flutter with certificate verification enabled.
 
-\[ ] HTTPS works from the Flutter app with certificate verification enabled.
+\[ ] API, telemetry, and command outcomes recover safely after restart.
 
-\[ ] API and telemetry recover reliably after restart without replaying uncertain movement.
-
-\[ ] Status, command outcomes, and diagnostics match the agreed app contract.
+\[ ] App status, sensor telemetry, and diagnostics match the agreed contract.
 
 \---
 
