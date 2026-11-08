@@ -57,6 +57,7 @@ class GPIOControl:
         self._last_heartbeat = 0.0
         self._last_rx_monotonic = 0.0
         self._sensor_snapshot = None
+        self._controller_ready = False
         self._last_connect_attempt = 0.0
         self._stop_event = threading.Event()
 
@@ -154,6 +155,7 @@ class GPIOControl:
                 return False
             serial_conn = self._serial
             self._serial = None
+            self._controller_ready = False
 
         if serial_conn is not None:
             try:
@@ -313,6 +315,9 @@ class GPIOControl:
                                 self._ack_condition.notify_all()
                         if result.startswith("ERROR"):
                             print(f"[ESP32] {line}")
+                    if line == "EVENT|0|READY":
+                        with self._state_lock:
+                            self._controller_ready = True
                     if line.startswith(("EVENT|", "FAULT|")):
                         print(f"[ESP32] {line}")
                         self._events.put(line)
@@ -405,6 +410,11 @@ class GPIOControl:
     def is_connected(self):
         with self._state_lock:
             return self._serial is not None and self._serial.is_open
+
+    def has_ready_event(self):
+        """Return whether READY was observed on the current serial connection."""
+        with self._state_lock:
+            return self._controller_ready
 
     def close(self):
         """Stop background transport threads, join them, and close serial."""
