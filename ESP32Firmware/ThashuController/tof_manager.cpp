@@ -3,6 +3,12 @@
 #include <Arduino.h>
 #include <Wire.h>
 
+namespace {
+constexpr uint8_t REAR_MUX_CHANNELS[3] = {0, 1, 2};
+constexpr uint8_t FRONT_XSHUT_PINS[3] = {4, 16, 17};
+constexpr uint8_t FRONT_I2C_ADDRESSES[3] = {0x30, 0x31, 0x32};
+}
+
 bool ToFManager::selectMuxChannel(uint8_t channel) {
     if (channel > 7) return false;
     Wire.beginTransmission(MUX_ADDRESS);
