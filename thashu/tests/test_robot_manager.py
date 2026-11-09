@@ -8,7 +8,7 @@ THASHU_ROOT = Path(__file__).resolve().parents[1]
 if str(THASHU_ROOT) not in sys.path:
     sys.path.insert(0, str(THASHU_ROOT))
 
-from core.robot_manager import (
+from core.robot_manager import (  # noqa: E402
     ControlMode,
     ControlModeError,
     ModeSwitchError,
