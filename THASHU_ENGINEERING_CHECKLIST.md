@@ -1220,6 +1220,21 @@ configuration and Android HTTPS/telemetry verification remain pending. The
 setup procedure is in `api/PI_SETUP.md`; Tailscale certificate hostnames are
 published in Certificate Transparency logs, so the robot name must stay generic.
 
+Offline app-only hotspot path (draft PR #18; implementation not yet verified):
+
+[x] Add Pi-side local API material management: persistent token, IP-SAN TLS certificate, and SHA-256 fingerprint stored outside the repository.
+
+[x] Extend the physical-button-gated BLE service with an encrypted read-only handoff for the local HTTPS URL, certificate fingerprint, and API token.
+
+[x] Add an opt-in second HTTPS listener on the current Wi-Fi IPv4 address while preserving the loopback API and shared ESP32/API runtime. Automatic address rebind closes the old listener, lets the current movement lease expire with normal STOP, preserves mode, and does not resume motion.
+
+[ ] Do not enable the local listener until Flutter reads the BLE handoff and pins the certificate for both REST and WebSocket.
+
+[ ] Verify service startup, BLE provisioning, HTTPS/authenticated telemetry, hotspot address changes, app reconnect, and Pi restart on the target devices with internet disabled. No movement commands are part of provisioning verification.
+
+Evidence/status: Draft implementation is tracked in [PR #18](https://github.com/sg9242182-bot/ThashuRobot/pull/18). No tests or Pi hardware checks are claimed. The user reports the existing BLE-to-hotspot flow worked through nRF Connect; that does not verify this branch's new handoff or app-only flow. Keep Phase 12 in progress until Flutter pinning and supervised phone/Pi verification pass.
+
+
 \[x] Add Flutter runtime Pi address/token settings using HTTPS-only validation and platform secure storage; initialize REST and WebSocket clients from saved settings, add Android internet permission, and expose settings in the app. Integrated from Niteshvar's Phase 12 connection setup branch; Flutter dependency resolution/build and device verification remain pending.
 
 Pi verification (2026-11-08; user-reported):
