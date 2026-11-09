@@ -29,9 +29,8 @@ THASHU_ROOT = REPO_ROOT / "thashu"
 if str(THASHU_ROOT) not in sys.path:
     sys.path.insert(0, str(THASHU_ROOT))
 
-from api.config import get_api_state_db_path, get_api_token
-from core.robot_manager import (
-    ControlMode,
+from api.config import get_api_state_db_path, get_api_token  # noqa: E402
+from core.robot_manager import (  # noqa: E402
     ControlModeError,
     ModeSwitchError,
     RobotSafetyError,
@@ -1676,7 +1675,7 @@ async def switch_control_mode(request: ModeSwitchRequest):
                     "control_mode": manager.mode.value,
                 },
             ) from exc
-        except Exception as exc:
+        except Exception:
             _log_command_outcome(
                 command_id=request_id,
                 command=f"mode:{request.mode}",
