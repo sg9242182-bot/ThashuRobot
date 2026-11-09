@@ -6,9 +6,9 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODELS_DIR = Path.home() / ".local" / "share" / "thashu" / "models"
-MODELS_DIR = Path(
-    os.environ.get("THASHU_MODELS_DIR", str(DEFAULT_MODELS_DIR))
-).expanduser().resolve()
+MODELS_DIR = (
+    Path(os.environ.get("THASHU_MODELS_DIR", str(DEFAULT_MODELS_DIR))).expanduser().resolve()
+)
 
 
 def project_path(*parts):
@@ -22,9 +22,7 @@ def model_path(*parts):
 
 
 DEFAULT_DATA_DIR = Path.home() / ".local" / "share" / "thashu" / "data"
-DATA_DIR = Path(
-    os.environ.get("THASHU_DATA_DIR", str(DEFAULT_DATA_DIR))
-).expanduser().resolve()
+DATA_DIR = Path(os.environ.get("THASHU_DATA_DIR", str(DEFAULT_DATA_DIR))).expanduser().resolve()
 
 
 def data_path(*parts):
