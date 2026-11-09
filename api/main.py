@@ -1886,9 +1886,9 @@ async def renew_movement_lease(lease_id: str, request: LeaseRenewalRequest):
         raise HTTPException(
             status_code=409,
             detail={
-                        "error": "app_disconnected",
-                        "error_code": "APP_DISCONNECTED",
-                    },
+                "error": "app_disconnected",
+                "error_code": "APP_DISCONNECTED",
+            },
         )
     try:
         return await services.renew_movement_lease(
