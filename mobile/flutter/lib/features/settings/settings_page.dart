@@ -80,8 +80,10 @@ class _SettingsPageState extends State<SettingsPage> {
         _provisioningMessage = error.toString().replaceFirst('Bad state: ', '');
       });
     } finally {
-      _hotspotPasswordController.clear();
-      if (mounted) setState(() => _provisioning = false);
+      if (mounted) {
+        _hotspotPasswordController.clear();
+        setState(() => _provisioning = false);
+      }
     }
   }
 
@@ -168,8 +170,8 @@ class _SettingsPageState extends State<SettingsPage> {
               autocorrect: false,
               enableSuggestions: false,
               textInputAction: TextInputAction.done,
-              onSubmitted: (_) {
-                if (!_provisioning) _provisionHotspot();
+              onSubmitted: (_) async {
+                if (!_provisioning) await _provisionHotspot();
               },
               decoration: const InputDecoration(
                 labelText: 'Hotspot password',
