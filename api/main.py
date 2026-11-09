@@ -31,6 +31,7 @@ if str(THASHU_ROOT) not in sys.path:
 
 from api.config import get_api_state_db_path, get_api_token  # noqa: E402
 from core.robot_manager import (  # noqa: E402
+    ControlMode as ControlMode,  # Re-exported for API test/client compatibility.
     ControlModeError,
     ModeSwitchError,
     RobotSafetyError,
