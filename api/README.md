@@ -271,8 +271,8 @@ GitHub Actions from the repository root:
 ```powershell
 python -m pip install -r api/requirements-test.txt
 python -m ruff format --check --line-length 100 api/config.py thashu/core/config.py thashu/core/model_paths.py
-python -m ruff check --select E4,E7,E9,F api thashu/core/api_lifecycle.py thashu/core/config.py thashu/core/model_paths.py thashu/core/robot_manager.py thashu/hardware/gpio_control.py thashu/tests/test_api_lifecycle.py thashu/tests/test_gpio_protocol.py thashu/tests/test_hardware_protocol.py thashu/tests/test_robot_manager.py thashu/tests/test_runtime_cleanup.py
-python -m unittest api.tests.test_api thashu.tests.test_api_lifecycle thashu.tests.test_robot_manager thashu.tests.test_hardware_protocol thashu.tests.test_gpio_protocol thashu.tests.test_runtime_cleanup
+python -m ruff check --select E4,E7,E9,F api thashu/core/api_lifecycle.py thashu/core/config.py thashu/core/model_paths.py thashu/core/robot_manager.py thashu/hardware/gpio_control.py thashu/tests/test_hardware_protocol.py thashu/tests/test_robot_manager.py thashu/tests/test_runtime_cleanup.py
+python -m unittest api.tests.test_api thashu.tests.test_robot_manager thashu.tests.test_hardware_protocol thashu.tests.test_runtime_cleanup
 ```
 
 The hardware-protocol unit test uses a fake serial transport and `thashu/tests/protocol_vectors.json` to check Pi command framing and sequence behavior. It does not execute the ESP32 parser or replace hardware verification; the firmware does not yet consume this fixture in a parser test.
