@@ -55,9 +55,7 @@ def models_dir() -> Path:
 
 
 def data_dir() -> Path:
-    return _configured_path(
-        "THASHU_DATA_DIR", Path.home() / ".local/share/thashu/data"
-    ).resolve()
+    return _configured_path("THASHU_DATA_DIR", Path.home() / ".local/share/thashu/data").resolve()
 
 
 def piper_binary() -> str:
