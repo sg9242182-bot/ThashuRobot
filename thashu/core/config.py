@@ -112,3 +112,11 @@ def api_tls_android_trust_confirmed() -> bool:
     if value not in {"0", "1"}:
         raise ValueError("THASHU_API_TLS_ANDROID_TRUST_CONFIRMED must be 0 or 1")
     return value == "1"
+
+
+def api_local_tls_pinning_confirmed() -> bool:
+    """Require an explicit operator opt-in to the app-pinned local TLS listener."""
+    value = os.environ.get("THASHU_API_LOCAL_TLS_PINNING_CONFIRMED", "0").strip()
+    if value not in {"0", "1"}:
+        raise ValueError("THASHU_API_LOCAL_TLS_PINNING_CONFIRMED must be 0 or 1")
+    return value == "1"
