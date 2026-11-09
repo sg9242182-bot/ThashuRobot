@@ -224,6 +224,7 @@ Physical robot movement tests remain deferred to final project-wide verification
 Let an operator provision Thashu from the Thashu app alone and then connect to the Pi locally without requiring Tailscale, nRF Connect, or internet access.
 
 ### Checklist
+- [x] Pi-side BLE provisioning and hotspot join were hardware-tested by Tharun using nRF Connect; this is accepted as evidence for the Pi service and is not a Flutter app integration test.
 - [ ] Integrate the physical-button-gated BLE Wi-Fi provisioning service into Settings using the Pi service/characteristic UUIDs and status strings from the reviewed provisioning branch; do not fork or change the Pi BLE protocol without agreement.
 - [ ] Keep the existing 3-second Pi-button hold and 60-second provisioning window. The app must explain the timing, scan only for Thashu's service, request the minimum OS Bluetooth permissions, and send credentials through the encrypted GATT characteristic.
 - [ ] Collect hotspot SSID/password only for the provisioning attempt; never persist or log the password and clear it from memory/UI after success or failure.
