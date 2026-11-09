@@ -1675,7 +1675,7 @@ async def switch_control_mode(request: ModeSwitchRequest):
                     "control_mode": manager.mode.value,
                 },
             ) from exc
-        except Exception:
+        except Exception as exc:
             _log_command_outcome(
                 command_id=request_id,
                 command=f"mode:{request.mode}",
@@ -1812,7 +1812,7 @@ async def move(request: MoveRequest):
                 error_code="invalid_command",
                 state="rejected",
             )
-        except Exception as exc:
+        except Exception:
             fail(
                 503,
                 {"error": "robot_unavailable", "command_id": command_id},
