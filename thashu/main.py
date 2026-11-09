@@ -411,6 +411,12 @@ def stop_motion():
 
 _api_server = None
 _api_thread = None
+_local_api_server = None
+_local_api_thread = None
+_local_api_monitor_thread = None
+_local_api_monitor_stop = threading.Event()
+_local_api_lock = threading.Lock()
+_local_api_bound_ip = None
 
 
 def _cancel_motion_sources():
@@ -433,9 +439,98 @@ def _cancel_motion_sources():
         _follow_motion_active = False
 
 
+def _start_local_api_listener(address, app, validate_api_tls_bind, pinning_confirmed):
+    """Serve the shared API over TLS on one Wi-Fi address only."""
+    global _local_api_server, _local_api_thread, _local_api_bound_ip
+    from core.local_api_access import ensure_local_api_material, local_api_port
+
+    material = ensure_local_api_material(address)
+    validate_api_tls_bind(
+        address,
+        material["certfile"],
+        material["keyfile"],
+        android_trust_confirmed=pinning_confirmed,
+    )
+    import uvicorn
+    server_config = uvicorn.Config(
+        app,
+        host=address,
+        port=local_api_port(),
+        log_level="warning",
+        access_log=False,
+        ws_ping_interval=20.0,
+        ws_ping_timeout=10.0,
+        ssl_certfile=material["certfile"],
+        ssl_keyfile=material["keyfile"],
+        lifespan="off",
+        timeout_graceful_shutdown=1,
+    )
+    server = uvicorn.Server(server_config)
+    thread = threading.Thread(
+        target=server.run,
+        name="thashu-local-api",
+        daemon=True,
+    )
+    server.install_signal_handlers = lambda: None
+    thread.start()
+    _local_api_server = server
+    _local_api_thread = thread
+    _local_api_bound_ip = address
+    print(f"[API] Local HTTPS listener started on {address}:{local_api_port()}")
+
+
+def _stop_local_api_listener(*, wait_for_lease=False):
+    """Close the local TLS listener; socket loss expires manual movement leases."""
+    global _local_api_server, _local_api_thread, _local_api_bound_ip
+    server, thread = _local_api_server, _local_api_thread
+    if server is not None:
+        server.should_exit = True
+    if thread is not None and thread is not threading.current_thread():
+        thread.join(timeout=5.0)
+        if thread.is_alive():
+            print("[API] Local HTTPS listener did not stop within 5 seconds")
+            return False
+    _local_api_server = None
+    _local_api_thread = None
+    _local_api_bound_ip = None
+    if wait_for_lease and server is not None:
+        # The embedded API's 500 ms movement lease sends normal STOP after the
+        # local WebSocket disconnects. Wait before advertising the new endpoint.
+        time.sleep(0.65)
+    return True
+
+
+def _monitor_local_api(app, validate_api_tls_bind, pinning_confirmed):
+    """Rebind the local listener when NetworkManager changes the Wi-Fi address."""
+    from core.local_api_access import ipv4_for_interface
+
+    while not _local_api_monitor_stop.wait(1.0):
+        try:
+            address = ipv4_for_interface()
+            if address == _local_api_bound_ip:
+                continue
+            with _local_api_lock:
+                if address == _local_api_bound_ip:
+                    continue
+                if _local_api_server is not None:
+                    if not _stop_local_api_listener(wait_for_lease=True):
+                        continue
+                if address is not None:
+                    _start_local_api_listener(
+                        address,
+                        app,
+                        validate_api_tls_bind,
+                        pinning_confirmed,
+                    )
+                else:
+                    print("[API] Wi-Fi address unavailable; local HTTPS listener stopped")
+        except Exception as exc:
+            print(f"[API] Local HTTPS rebind failed ({type(exc).__name__})")
+
+
 def _start_api_server():
-    """Start the mobile API on this process's existing motor/serial transport."""
-    global _api_server, _api_thread
+    """Start the loopback API and optional pinned-TLS local hotspot listener."""
+    global _api_server, _api_thread, _local_api_monitor_thread
 
     try:
         import sys
@@ -448,7 +543,13 @@ def _start_api_server():
         import uvicorn
         from api.config import get_api_tls_files, validate_api_tls_bind
         from api.main import app, services
-        from core.config import api_host, api_port, api_tls_android_trust_confirmed
+        from core.config import (
+            api_host,
+            api_local_tls_pinning_confirmed,
+            api_port,
+            api_tls_android_trust_confirmed,
+        )
+        from core.local_api_access import enabled as local_api_enabled
         from core.robot_manager import RobotCommandManager
 
         host = api_host()
@@ -487,13 +588,35 @@ def _start_api_server():
         _api_thread.start()
         scheme = "https" if certfile and keyfile else "http"
         print(f"[API] Started at {scheme}://{host}:{port}; shares ESP32 transport")
+
+        if local_api_enabled():
+            if not api_local_tls_pinning_confirmed():
+                raise ValueError(
+                    "Set THASHU_API_LOCAL_TLS_PINNING_CONFIRMED=1 only after "
+                    "the Thashu app validates the BLE-delivered certificate pin"
+                )
+            _local_api_monitor_stop.clear()
+            _local_api_monitor_thread = threading.Thread(
+                target=_monitor_local_api,
+                args=(app, validate_api_tls_bind, True),
+                name="thashu-local-api-monitor",
+                daemon=True,
+            )
+            _local_api_monitor_thread.start()
+            print("[API] Local hotspot HTTPS monitoring enabled")
     except Exception as exc:
         print(f"[API] Startup failed ({type(exc).__name__}); robot voice/runtime remains available")
 
 
 def _stop_api_server():
-    """Stop Uvicorn cleanly before closing the shared ESP32 transport."""
-    global _api_server, _api_thread
+    """Stop both API listeners before closing the shared ESP32 transport."""
+    global _api_server, _api_thread, _local_api_monitor_thread
+    _local_api_monitor_stop.set()
+    if _local_api_monitor_thread is not None and _local_api_monitor_thread is not threading.current_thread():
+        _local_api_monitor_thread.join(timeout=2.0)
+    _local_api_monitor_thread = None
+    with _local_api_lock:
+        _stop_local_api_listener()
     if _api_server is not None:
         _api_server.should_exit = True
     if _api_thread is not None and _api_thread is not threading.current_thread():
