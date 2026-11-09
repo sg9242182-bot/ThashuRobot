@@ -30,7 +30,21 @@ def api_port() -> int:
 
 
 def api_token() -> str | None:
-    return os.getenv("THASHU_API_TOKEN")
+    configured = os.getenv("THASHU_API_TOKEN")
+    if configured:
+        return configured
+    state_home = Path(os.getenv("XDG_DATA_HOME", Path.home() / ".local/share"))
+    token_path = Path(
+        os.getenv(
+            "THASHU_LOCAL_API_STATE_DIR",
+            state_home / "thashu" / "local_api",
+        )
+    ).expanduser() / "api.token"
+    try:
+        value = token_path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return None
+    return value or None
 
 
 def api_state_db_path() -> Path:
