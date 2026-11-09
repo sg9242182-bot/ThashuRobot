@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../services/wifi_provisioning_client.dart';
+
 class SettingsPage extends StatefulWidget {
   const SettingsPage({
     super.key,
@@ -27,6 +29,12 @@ class _SettingsPageState extends State<SettingsPage> {
   final TextEditingController _tokenController = TextEditingController();
   bool _saving = false;
   String? _message;
+  final TextEditingController _hotspotSsidController = TextEditingController();
+  final TextEditingController _hotspotPasswordController = TextEditingController();
+  final WifiProvisioningClient _wifiProvisioningClient = WifiProvisioningClient();
+  bool _provisioning = false;
+  bool _provisioningFailed = false;
+  String? _provisioningMessage;
 
   @override
   void initState() {
@@ -46,7 +54,35 @@ class _SettingsPageState extends State<SettingsPage> {
   void dispose() {
     _addressController.dispose();
     _tokenController.dispose();
+    _hotspotSsidController.dispose();
+    _hotspotPasswordController.dispose();
     super.dispose();
+  }
+
+  Future<void> _provisionHotspot() async {
+    if (_provisioning) return;
+    setState(() {
+      _provisioning = true;
+      _provisioningFailed = false;
+      _provisioningMessage = 'Searching for Thashu over Bluetooth…';
+    });
+    try {
+      final result = await _wifiProvisioningClient.provision(
+        ssid: _hotspotSsidController.text,
+        password: _hotspotPasswordController.text,
+      );
+      if (!mounted) return;
+      setState(() => _provisioningMessage = result);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _provisioningFailed = true;
+        _provisioningMessage = error.toString().replaceFirst('Bad state: ', '');
+      });
+    } finally {
+      _hotspotPasswordController.clear();
+      if (mounted) setState(() => _provisioning = false);
+    }
   }
 
   Future<void> _save() async {
@@ -94,6 +130,91 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  Widget _buildHotspotProvisioningCard(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Connect Thashu to this phone’s hotspot',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Turn on this phone’s hotspot. Enter its exact name and password, '
+              'then hold the Pi setup button for 3 seconds. Tap Connect & send '
+              'within the 60-second setup window.',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              key: const ValueKey('hotspot-ssid-field'),
+              controller: _hotspotSsidController,
+              enabled: !_provisioning,
+              autocorrect: false,
+              textInputAction: TextInputAction.next,
+              decoration: const InputDecoration(
+                labelText: 'Hotspot name (SSID)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              key: const ValueKey('hotspot-password-field'),
+              controller: _hotspotPasswordController,
+              enabled: !_provisioning,
+              obscureText: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) {
+                if (!_provisioning) _provisionHotspot();
+              },
+              decoration: const InputDecoration(
+                labelText: 'Hotspot password',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              key: const ValueKey('provision-hotspot-button'),
+              onPressed: _provisioning ? null : _provisionHotspot,
+              icon: _provisioning
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.bluetooth_searching),
+              label: Text(_provisioning ? 'Connecting…' : 'Connect & send'),
+            ),
+            if (_provisioningMessage != null) ...[
+              const SizedBox(height: 10),
+              Semantics(
+                liveRegion: true,
+                child: Text(
+                  _provisioningMessage!,
+                  style: TextStyle(
+                    color: _provisioningFailed
+                        ? Theme.of(context).colorScheme.error
+                        : Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(height: 8),
+            Text(
+              'The password is sent over encrypted Bluetooth and cleared from '
+              'this screen after the attempt. This joins the Pi to Wi-Fi; it '
+              'does not by itself confirm that the app can reach the Pi API.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListView(
@@ -103,6 +224,8 @@ class _SettingsPageState extends State<SettingsPage> {
         const SizedBox(height: 16),
         Text('Robot connection', style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 8),
+        _buildHotspotProvisioningCard(context),
+        const SizedBox(height: 12),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
