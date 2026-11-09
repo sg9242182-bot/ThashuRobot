@@ -1735,7 +1735,10 @@ async def move(request: MoveRequest):
             if not services.mobile_client_connected():
                 raise HTTPException(
                     status_code=503,
-                    detail={"error": "app_disconnected"},
+                    detail={
+                        "error": "app_disconnected",
+                        "error_code": "APP_DISCONNECTED",
+                    },
                 )
             raise HTTPException(
                 status_code=503,
@@ -1882,7 +1885,10 @@ async def renew_movement_lease(lease_id: str, request: LeaseRenewalRequest):
     if not services.mobile_client_connected():
         raise HTTPException(
             status_code=409,
-            detail={"error": "app_disconnected"},
+            detail={
+                        "error": "app_disconnected",
+                        "error_code": "APP_DISCONNECTED",
+                    },
         )
     try:
         return await services.renew_movement_lease(
