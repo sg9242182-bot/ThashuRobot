@@ -218,6 +218,28 @@ Physical robot movement tests remain deferred to final project-wide verification
 - [x] No unresolved contract mismatch is hidden; STOP sends the documented `request_id`, and remaining integration limits are recorded in `mobile/flutter/SETUP.md` against the reviewed API snapshot `5f196387`.
 - [x] A teammate can reproduce the local setup and understand the current changes from `mobile/flutter/SETUP.md`.
 
+## Phase 9 — App-only offline hotspot onboarding
+
+### Objective
+Let an operator provision Thashu from the Thashu app alone and then connect to the Pi locally without requiring Tailscale, nRF Connect, or internet access.
+
+### Checklist
+- [ ] Integrate the physical-button-gated BLE Wi-Fi provisioning service into Settings using the Pi service/characteristic UUIDs and status strings from the reviewed provisioning branch; do not fork or change the Pi BLE protocol without agreement.
+- [ ] Keep the existing 3-second Pi-button hold and 60-second provisioning window. The app must explain the timing, scan only for Thashu's service, request the minimum OS Bluetooth permissions, and send credentials through the encrypted GATT characteristic.
+- [ ] Collect hotspot SSID/password only for the provisioning attempt; never persist or log the password and clear it from memory/UI after success or failure.
+- [ ] Show the Pi-reported provisioning status truthfully: found, waiting, credentials sent, connecting, connected, expired, invalid, or failed. A BLE write ACK is not proof that Wi-Fi or the Pi API is reachable.
+- [ ] Agree with Vishal and Tharun on local API discovery, API listening/binding, TLS trust, and API-token enrollment. The current Pi API defaults to loopback and the approved HTTPS path is Tailscale+Caddy; BLE Wi-Fi provisioning alone does not make local API access work.
+- [ ] After the backend contract is approved, let the app discover/select the Pi on the local hotspot and initialize the existing REST and WebSocket clients without a manually typed Tailscale address or nRF Connect.
+- [ ] Verify the actual target Android phone can reach a Pi client on its own hotspot; if Android hotspot routing prevents this, agree on a supported local-network topology before presenting setup as successful.
+- [ ] Test with internet access disabled: app-only BLE provisioning, hotspot join, secure API status, telemetry/WebSocket, stale recovery, app reconnect, and Pi restart. Do not send movement commands in the onboarding test.
+- [ ] Keep the existing Tailscale connection as an optional developer/test path until the offline path is verified; do not remove it prematurely.
+
+### Exit criteria
+- [ ] A fresh phone can complete pairing and local API setup entirely in the Thashu app with no helper app or internet.
+- [ ] The phone trusts the Pi's local API securely; no global cleartext exception or public port forwarding is used.
+- [ ] Status and telemetry work across app reconnect and Pi restart, with no movement command sent by provisioning.
+- [ ] Flutter formatting, analysis, tests, Android build, and supervised phone/Pi verification pass; evidence and remaining limits are recorded.
+
 ## Phase completion record
 
 For each phase, record:
