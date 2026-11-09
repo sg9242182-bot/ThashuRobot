@@ -605,10 +605,11 @@ def _start_api_server():
         local_enabled = local_api_enabled()
         pinning_confirmed = api_local_tls_pinning_confirmed()
         if local_enabled and not pinning_confirmed:
-            raise ValueError(
-                "Set THASHU_API_LOCAL_TLS_PINNING_CONFIRMED=1 only after "
-                "the Thashu app validates the BLE-delivered certificate pin"
+            print(
+                "[API] Local HTTPS disabled: app certificate pinning is not "
+                "confirmed; loopback API remains available"
             )
+            local_enabled = False
         if local_enabled:
             # Persist the robot process's configured token before root-owned
             # BLE provisioning can return the app connection bundle.
