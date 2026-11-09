@@ -15,7 +15,6 @@ from pathlib import Path
 import secrets
 import socket
 import ssl
-import stat
 import subprocess
 import tempfile
 
@@ -172,50 +171,60 @@ def ensure_local_api_material(ip_address: str) -> dict[str, str]:
     if ":" in address:
         raise ValueError("Local API currently supports IPv4 Wi-Fi addresses only")
     directory = _ensure_dir()
-    cert_path, key_path, ip_path = _certificate_paths()
-    token = ensure_api_token()
-    current_ip = ip_path.read_text(encoding="ascii").strip() if ip_path.exists() else ""
-    if not cert_path.exists() or not key_path.exists() or current_ip != address:
-        with tempfile.TemporaryDirectory(prefix=".tls-", dir=directory) as tmp:
-            temp = Path(tmp)
-            temp_cert = temp / "server.crt"
-            temp_key = temp / "server.key"
-            completed = subprocess.run(
-                [
-                    "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
-                    "-sha256", "-days", "3650",
-                    "-subj", f"/CN={address}",
-                    "-addext", f"subjectAltName=IP:{address}",
-                    "-keyout", str(temp_key), "-out", str(temp_cert),
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=30,
-                check=False,
-            )
-            if completed.returncode != 0:
-                raise RuntimeError("Could not create the local HTTPS certificate")
-            os.chmod(temp_key, 0o600)
-            os.chmod(temp_cert, 0o644)
-            _apply_owner(temp_key)
-            _apply_owner(temp_cert)
-            os.replace(temp_cert, cert_path)
-            os.replace(temp_key, key_path)
-            _atomic_secret(ip_path, address)
-    pem = ssl.PEM_cert_to_DER_cert(cert_path.read_text(encoding="ascii"))
-    fingerprint = hashlib.sha256(pem).hexdigest()
-    _apply_owner(cert_path)
-    _apply_owner(key_path)
-    os.chmod(cert_path, 0o644)
-    os.chmod(key_path, 0o600)
-    return {
-        "api_base_url": f"https://{address}:{local_api_port()}",
-        "server_cert_sha256": fingerprint,
-        "api_token": token,
-        "certfile": str(cert_path),
-        "keyfile": str(key_path),
-    }
-
+    lock_path = directory / ".material.lock"
+    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        _apply_owner(lock_path)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        cert_path, key_path, ip_path = _certificate_paths()
+        token = ensure_api_token()
+        current_ip = ip_path.read_text(encoding="ascii").strip() if ip_path.exists() else ""
+        if not cert_path.exists() or not key_path.exists() or current_ip != address:
+            with tempfile.TemporaryDirectory(prefix=".tls-", dir=directory) as tmp:
+                temp = Path(tmp)
+                temp_cert = temp / "server.crt"
+                temp_key = temp / "server.key"
+                completed = subprocess.run(
+                    [
+                        "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                        "-sha256", "-days", "3650",
+                        "-subj", f"/CN={address}",
+                        "-addext", f"subjectAltName=IP:{address}",
+                        "-keyout", str(temp_key), "-out", str(temp_cert),
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=30,
+                    check=False,
+                )
+                if completed.returncode != 0:
+                    raise RuntimeError("Could not create the local HTTPS certificate")
+                os.chmod(temp_key, 0o600)
+                os.chmod(temp_cert, 0o644)
+                _apply_owner(temp_key)
+                _apply_owner(temp_cert)
+                os.replace(temp_cert, cert_path)
+                os.replace(temp_key, key_path)
+                _atomic_secret(ip_path, address)
+        pem = ssl.PEM_cert_to_DER_cert(cert_path.read_text(encoding="ascii"))
+        fingerprint = hashlib.sha256(pem).hexdigest()
+        _apply_owner(cert_path)
+        _apply_owner(key_path)
+        os.chmod(cert_path, 0o644)
+        os.chmod(key_path, 0o600)
+        return {
+            "api_base_url": f"https://{address}:{local_api_port()}",
+            "server_cert_sha256": fingerprint,
+            "api_token": token,
+            "certfile": str(cert_path),
+            "keyfile": str(key_path),
+        }
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
 def connection_info() -> bytes:
     """Return the BLE handoff only after Wi-Fi has a local address."""
