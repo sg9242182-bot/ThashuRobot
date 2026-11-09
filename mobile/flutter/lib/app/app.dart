@@ -172,7 +172,7 @@ class _ZenoNavigationShellState extends State<ZenoNavigationShell> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('ZENO controller')),
+      appBar: AppBar(title: const Text('Thashu Controller')),
       body: _selectedIndex == 0
           ? DashboardPage(apiClient: _apiClient)
           : _selectedIndex == 1
