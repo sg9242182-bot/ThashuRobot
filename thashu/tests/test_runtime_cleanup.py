@@ -1,9 +1,23 @@
+import sys
 import threading
 import unittest
+from types import ModuleType
 from unittest.mock import patch
 
 from hardware.gpio_control import GPIOControl
-from voice.audio_manager import AudioManager
+
+# Runtime cleanup tests exercise AudioManager.stop() without audio hardware.
+# Stub its optional DSP/audio backend imports so CI need not install or load
+# NumPy, PortAudio, or device drivers just to test resource cleanup.
+_numpy_stub = ModuleType("numpy")
+_numpy_stub.ndarray = object
+_sounddevice_stub = ModuleType("sounddevice")
+_sounddevice_stub.InputStream = object
+with patch.dict(
+    sys.modules,
+    {"numpy": _numpy_stub, "sounddevice": _sounddevice_stub},
+):
+    from voice.audio_manager import AudioManager
 
 
 class FakeThread:
