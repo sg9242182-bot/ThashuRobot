@@ -17,7 +17,7 @@ with patch.dict(
     sys.modules,
     {"numpy": _numpy_stub, "sounddevice": _sounddevice_stub},
 ):
-    from voice.audio_manager import AudioManager
+    from voice.audio_manager import AudioManager  # noqa: E402
 
 
 class FakeThread:
