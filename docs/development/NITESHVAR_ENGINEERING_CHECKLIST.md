@@ -240,10 +240,10 @@ Let an operator provision Thashu from the Thashu app alone and then connect to t
 - [ ] Flutter formatting, analysis, tests, Android build, and supervised phone/Pi verification pass; evidence and remaining limits are recorded.
 
 ### Current implementation record
-- **Status:** In progress — backend implementation is on draft PR #18; no tests or Pi hardware checks are claimed.
-- **Evidence:** Draft PR [#18](https://github.com/sg9242182-bot/ThashuRobot/pull/18) adds `thashu/core/local_api_access.py`, the opt-in listener in `thashu/main.py`, encrypted BLE connection-info in `thashu/hardware/wifi_provisioning.py`, its systemd unit, and setup documentation. User reports the existing BLE-to-hotspot connection succeeded with nRF Connect; that does not verify this app integration or this branch's updated Pi server.
-- **Open issues:** Flutter connection-info consumption and TLS pinning; Python/import/service checks; target Pi BLE, hotspot, HTTPS, WebSocket, address-change, and restart verification.
-- **Dependency owner:** Tharun — run the updated Pi service/runtime verification. Niteshvar — connect the app to the new info characteristic and pin TLS for REST/WSS. Both — supervised phone/Pi end-to-end check.
+- **Status:** In progress — backend implementation is on draft PR #18; end-to-end acceptance remains open.
+- **Evidence:** Draft PR [#18](https://github.com/sg9242182-bot/ThashuRobot/pull/18) adds `thashu/core/local_api_access.py`, the opt-in listener in `thashu/main.py`, encrypted BLE connection-info in `thashu/hardware/wifi_provisioning.py`, its systemd unit, and setup documentation. User-reported Pi smoke check (2026-11-09): imports passed in the Pi virtual environment; the draft BLE service opened through the GPIO button; nRF Connect provisioned the phone hotspot, observed connection, and read `...0004` with all three expected fields (`api_base_url`, `server_cert_sha256`, `api_token`). Secret values were not shared. This does not verify Flutter integration, TLS pin validation, API reachability, changed-address rebind, or restart.
+- **Open issues:** Flutter connection-info consumption and TLS pinning; local HTTPS/API/WebSocket and address-change/restart checks on the target devices. No movement command was sent during provisioning.
+- **Dependency owner:** Tharun — verify the local HTTPS runtime and address-change/restart behavior after app pinning is ready. Niteshvar — connect the app to the info characteristic and pin TLS for REST/WSS. Both — supervised phone/Pi end-to-end check.
 
 ## Phase completion record
 
