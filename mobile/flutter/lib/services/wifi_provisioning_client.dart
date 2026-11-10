@@ -66,7 +66,6 @@ class PiConnectionHandoff {
 }
 
 abstract interface class WifiProvisioningService {
-  @override
   Future<PiConnectionHandoff> provision({
     required String ssid,
     required String password,
@@ -80,6 +79,7 @@ class WifiProvisioningClient implements WifiProvisioningService {
   static const statusUuid = '8c6d0003-7a4b-4f61-b7a5-927f4e2a1000';
   static const connectionInfoUuid = '8c6d0004-7a4b-4f61-b7a5-927f4e2a1000';
 
+  @override
   Future<PiConnectionHandoff> provision({
     required String ssid,
     required String password,
