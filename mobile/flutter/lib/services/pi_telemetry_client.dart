@@ -88,25 +88,17 @@ class PiTelemetryClient {
     String? certificateSha256Fingerprint,
     PiTelemetryTransport? transport,
   }) : _baseUri = _validateBaseUri(baseUri),
-       _certificateSha256Fingerprint = _validateCertificatePin(
-         baseUri,
-         certificateSha256Fingerprint,
-       ),
        // Keep the token parameter public without exposing the stored token.
        // ignore: prefer_initializing_formals
        _bearerToken = bearerToken,
-       _transport = transport ??
-           IoPiTelemetryTransport(
-             origin: _validateBaseUri(baseUri),
-             certificateSha256Fingerprint: _validateCertificatePin(
-               baseUri,
-               certificateSha256Fingerprint,
-             ),
-           );
+       _transport = _createTransport(
+         baseUri,
+         certificateSha256Fingerprint,
+         transport,
+       );
 
   final Uri _baseUri;
   final String? _bearerToken;
-  final String? _certificateSha256Fingerprint;
   final PiTelemetryTransport _transport;
   final StreamController<TelemetryConnectionState> _states =
       StreamController<TelemetryConnectionState>.broadcast();
@@ -245,6 +237,23 @@ class PiTelemetryClient {
     if (pin == null || pin.isEmpty) return null;
     if (uri.scheme != 'https') throw ArgumentError.value(value, 'certificateSha256Fingerprint', 'A certificate pin requires HTTPS.');
     return PiCertificatePin.normalize(pin);
+  }
+
+  static PiTelemetryTransport _createTransport(
+    Uri origin,
+    String? certificateSha256Fingerprint,
+    PiTelemetryTransport? transport,
+  ) {
+    final validatedOrigin = _validateBaseUri(origin);
+    final validatedPin = _validateCertificatePin(
+      validatedOrigin,
+      certificateSha256Fingerprint,
+    );
+    return transport ??
+        IoPiTelemetryTransport(
+          origin: validatedOrigin,
+          certificateSha256Fingerprint: validatedPin,
+        );
   }
 
   static Uri _validateBaseUri(Uri uri) {
