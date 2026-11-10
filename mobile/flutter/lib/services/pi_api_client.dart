@@ -108,9 +108,20 @@ class PiApiClient {
     PiApiTransport? transport,
     this.requestTimeout = const Duration(seconds: 5),
   }) : _baseUri = _validateBaseUri(baseUri),
+       _certificateSha256Fingerprint = _validateCertificatePin(
+         baseUri,
+         certificateSha256Fingerprint,
+       ),
        // ignore: prefer_initializing_formals
        _bearerToken = bearerToken,
-       _transport = transport ?? IoPiApiTransport();
+       _transport = transport ??
+           IoPiApiTransport(
+             origin: _validateBaseUri(baseUri),
+             certificateSha256Fingerprint: _validateCertificatePin(
+               baseUri,
+               certificateSha256Fingerprint,
+             ),
+           );
 
   final Uri _baseUri;
   final String? _bearerToken;
