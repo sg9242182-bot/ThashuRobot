@@ -150,14 +150,21 @@ class WifiProvisioningClient {
       // The Pi requires an encrypted reliable GATT write. Android/iOS perform
       // link encryption when the protected characteristic is accessed.
       await credentials.write(payload, withoutResponse: false, allowLongWrite: true);
-      onStatus?.call('received');
+      onStatus?.call('credentials_sent');
 
       // The Pi's physical-button window lasts 60 seconds. Do not retry the
       // one-time connection-info read: a successful read consumes the handoff.
       final deadline = DateTime.now().add(const Duration(seconds: 60));
       while (DateTime.now().isBefore(deadline)) {
         await Future<void>.delayed(const Duration(seconds: 2));
-        currentStatus = await _readStatus(status);
+        try {
+          currentStatus = await _readStatus(status);
+        } on Exception {
+          // Preserve the bounded setup attempt if the Pi briefly drops BLE
+          // while joining the phone hotspot.
+          onStatus?.call('connecting');
+          continue;
+        }
         onStatus?.call(currentStatus);
         switch (currentStatus) {
           case 'connected':
