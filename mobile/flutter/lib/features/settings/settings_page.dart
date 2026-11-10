@@ -6,17 +6,21 @@ class SettingsPage extends StatefulWidget {
   const SettingsPage({
     super.key,
     this.initialAddress,
+    this.initialCertificateFingerprint,
     this.tokenConfigured = false,
     this.isLoading = false,
     this.onSaveConnection,
+    this.onSaveConnectionWithPin,
     this.onClearConnection,
     this.onOpenManualControl,
   });
 
   final String? initialAddress;
+  final String? initialCertificateFingerprint;
   final bool tokenConfigured;
   final bool isLoading;
   final Future<String?> Function(String address, String token)? onSaveConnection;
+  final Future<String?> Function(String address, String token, String fingerprint)? onSaveConnectionWithPin;
   final Future<void> Function()? onClearConnection;
   final VoidCallback? onOpenManualControl;
 
@@ -27,6 +31,7 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   late final TextEditingController _addressController;
   final TextEditingController _tokenController = TextEditingController();
+  late final TextEditingController _fingerprintController;
   bool _saving = false;
   String? _message;
   final TextEditingController _hotspotSsidController = TextEditingController();
@@ -40,6 +45,7 @@ class _SettingsPageState extends State<SettingsPage> {
   void initState() {
     super.initState();
     _addressController = TextEditingController(text: widget.initialAddress ?? '');
+    _fingerprintController = TextEditingController(text: widget.initialCertificateFingerprint ?? '');
   }
 
   @override
@@ -48,12 +54,16 @@ class _SettingsPageState extends State<SettingsPage> {
     if (oldWidget.initialAddress != widget.initialAddress) {
       _addressController.text = widget.initialAddress ?? '';
     }
+    if (oldWidget.initialCertificateFingerprint != widget.initialCertificateFingerprint) {
+      _fingerprintController.text = widget.initialCertificateFingerprint ?? '';
+    }
   }
 
   @override
   void dispose() {
     _addressController.dispose();
     _tokenController.dispose();
+    _fingerprintController.dispose();
     _hotspotSsidController.dispose();
     _hotspotPasswordController.dispose();
     super.dispose();
@@ -67,12 +77,18 @@ class _SettingsPageState extends State<SettingsPage> {
       _provisioningMessage = 'Searching for Thashu over Bluetooth…';
     });
     try {
-      final result = await _wifiProvisioningClient.provision(
+      final handoff = await _wifiProvisioningClient.provision(
         ssid: _hotspotSsidController.text,
         password: _hotspotPasswordController.text,
       );
       if (!mounted) return;
-      setState(() => _provisioningMessage = result);
+      setState(() {
+        _addressController.text = handoff.apiBaseUrl;
+        _fingerprintController.text = handoff.serverCertSha256;
+        _tokenController.text = handoff.apiToken;
+        _provisioningMessage =
+            'The Pi joined Wi-Fi. Review the connection details, then tap Save connection. No robot command was sent.';
+      });
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -80,28 +96,35 @@ class _SettingsPageState extends State<SettingsPage> {
         _provisioningMessage = error.toString().replaceFirst('Bad state: ', '');
       });
     } finally {
-      if (mounted) {
-        _hotspotPasswordController.clear();
-        setState(() => _provisioning = false);
-      }
+      _hotspotSsidController.clear();
+      _hotspotPasswordController.clear();
+      if (mounted) setState(() => _provisioning = false);
     }
   }
 
   Future<void> _save() async {
-    final callback = widget.onSaveConnection;
-    if (callback == null || _saving) return;
+    final callback = widget.onSaveConnectionWithPin;
+    final legacyCallback = widget.onSaveConnection;
+    if ((callback == null && legacyCallback == null) || _saving) return;
     setState(() {
       _saving = true;
       _message = null;
     });
     try {
-      final message = await callback(
-        _addressController.text,
-        _tokenController.text,
-      );
+      final message = callback != null
+          ? await callback(
+              _addressController.text,
+              _tokenController.text,
+              _fingerprintController.text,
+            )
+          : await legacyCallback!(
+              _addressController.text,
+              _tokenController.text,
+            );
       if (!mounted) return;
       setState(() => _message = message);
-      if (message == null || !message.startsWith('Could not') && !message.startsWith('Enter ')) {
+      if (message == null ||
+          (!message.startsWith('Could not') && !message.startsWith('Enter '))) {
         _tokenController.clear();
       }
     } catch (error) {
@@ -123,6 +146,7 @@ class _SettingsPageState extends State<SettingsPage> {
       setState(() {
         _addressController.clear();
         _tokenController.clear();
+        _fingerprintController.clear();
         _message = 'Saved Pi connection settings were removed from this phone.';
       });
     } catch (error) {
@@ -206,9 +230,9 @@ class _SettingsPageState extends State<SettingsPage> {
             ],
             const SizedBox(height: 8),
             Text(
-              'The password is sent over encrypted Bluetooth and cleared from '
-              'this screen after the attempt. This joins the Pi to Wi-Fi; it '
-              'does not by itself confirm that the app can reach the Pi API.',
+              'The password is sent over encrypted Bluetooth and cleared after the attempt. '
+              'The Pi returns its HTTPS address, certificate pin, and token once '
+              'it reports connected. Review them and tap Save; this sends no robot command.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
@@ -242,7 +266,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   autocorrect: false,
                   decoration: const InputDecoration(
                     labelText: 'Pi API address',
-                    hintText: 'https://thashu.local:8000',
+                    hintText: 'https://<Pi Wi-Fi IPv4>:8443',
                     helperText: 'Use the Pi HTTPS address on the same Wi-Fi or phone hotspot.',
                   ),
                 ),
@@ -259,6 +283,19 @@ class _SettingsPageState extends State<SettingsPage> {
                     hintText: widget.tokenConfigured
                         ? 'Saved securely; leave blank to keep it'
                         : 'Enter the Pi API token',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  key: const ValueKey('pi-certificate-fingerprint-field'),
+                  controller: _fingerprintController,
+                  enabled: !_saving && !widget.isLoading,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  decoration: const InputDecoration(
+                    labelText: 'Pi certificate SHA-256 fingerprint',
+                    hintText: 'sha256: followed by 64 lowercase hex characters',
+                    helperText: 'Required for the Pi local HTTPS listener on port 8443.',
                   ),
                 ),
                 const SizedBox(height: 12),
