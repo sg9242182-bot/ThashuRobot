@@ -688,11 +688,13 @@ class ApiServices:
                 )
                 self.start_ack_tracking(command_id, sequence)
                 _log_command_outcome(
+                    request_id=request_id,
                     command_id=command_id,
                     command="stop",
                     outcome="lease_expired",
                     http_status=202,
                     control_mode=manager.mode.value,
+                    esp32_sequence=sequence,
                 )
         except Exception:
             logger.exception("Normal STOP dispatch failed after movement lease ended")
@@ -848,6 +850,19 @@ class ApiServices:
                         status,
                     )
 
+        record = self.command_result(command_id)
+        if record is not None and record.get("request_id") is not None:
+            _log_command_outcome(
+                request_id=record["request_id"],
+                command_id=command_id,
+                command=record["command"],
+                outcome=status,
+                http_status=None,
+                error_code=error_code,
+                control_mode=record.get("control_mode"),
+                esp32_sequence=sequence,
+                source="esp32_ack",
+            )
         await self._publish_command_result(command_id, status, error_code)
 
     def start_ack_tracking(self, command_id, sequence):
@@ -1178,17 +1193,26 @@ def _log_command_outcome(
     http_status: int,
     error_code: str | None = None,
     control_mode: str | None = None,
+    request_id: str | None = None,
+    esp32_sequence: int | None = None,
+    source: str = "pi_api",
 ):
-    """Write one sanitized JSON log record for a move or stop request."""
+    """Write a sanitized JSON record correlating API commands with ESP32 ACKs."""
     record = {
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
         "component": "pi_api",
         "event": "robot_command",
+        "source": source,
         "command_id": command_id,
         "command": command,
         "outcome": outcome,
-        "http_status": http_status,
     }
+    if http_status is not None:
+        record["http_status"] = http_status
+    if request_id is not None:
+        record["request_id"] = request_id
+    if esp32_sequence is not None:
+        record["esp32_sequence"] = esp32_sequence
     if error_code is not None:
         record["error_code"] = error_code
     if control_mode is not None:
@@ -1723,6 +1747,7 @@ async def move(request: MoveRequest):
         if existing is not None:
             response = _replay_command_request(existing, action, request_id)
             _log_command_outcome(
+                request_id=request_id,
                 command_id=response.command_id,
                 command=request.direction,
                 outcome="duplicate_replay",
@@ -1763,6 +1788,7 @@ async def move(request: MoveRequest):
                 control_mode=control_mode,
             )
             _log_command_outcome(
+                request_id=request_id,
                 command_id=command_id,
                 command=request.direction,
                 outcome=outcome,
@@ -1861,11 +1887,13 @@ async def move(request: MoveRequest):
                 control_mode=manager.mode.value,
             )
         _log_command_outcome(
+            request_id=request_id,
             command_id=command_id,
             command=request.direction,
             outcome="dispatched",
             http_status=202,
             control_mode=manager.mode.value,
+            esp32_sequence=sequence,
         )
         result = services.command_result(command_id)
         result["lease_id"] = command_id
@@ -1925,6 +1953,7 @@ async def stop(request: StopRequest):
         if existing is not None:
             response = _replay_command_request(existing, action, request_id)
             _log_command_outcome(
+                request_id=request_id,
                 command_id=response.command_id,
                 command="stop",
                 outcome="duplicate_replay",
@@ -1955,6 +1984,7 @@ async def stop(request: StopRequest):
                 control_mode=manager.mode.value,
             )
             _log_command_outcome(
+                request_id=request_id,
                 command_id=command_id,
                 command="stop",
                 outcome="failed",
@@ -1973,6 +2003,15 @@ async def stop(request: StopRequest):
                 error=detail,
                 control_mode=manager.mode.value,
             )
+            _log_command_outcome(
+                request_id=request_id,
+                command_id=command_id,
+                command="stop",
+                outcome="failed",
+                http_status=503,
+                error_code="COMMAND_OUTCOME_UNKNOWN",
+                control_mode=manager.mode.value,
+            )
             raise HTTPException(status_code=503, detail=detail)
 
         manager = await services.robot_manager()
@@ -1984,11 +2023,13 @@ async def stop(request: StopRequest):
         )
         services.start_ack_tracking(command_id, sequence)
         _log_command_outcome(
+            request_id=request_id,
             command_id=command_id,
             command="stop",
             outcome="dispatched",
             http_status=202,
             control_mode=manager.mode.value,
+            esp32_sequence=sequence,
         )
         return CommandResponse(**services.command_result(command_id))
 
