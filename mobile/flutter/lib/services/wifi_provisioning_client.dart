@@ -140,8 +140,8 @@ class WifiProvisioningClient {
       }
 
       var currentStatus = await _readStatus(status);
-      if (currentStatus == 'expired' || currentStatus == 'invalid') {
-        throw StateError('The Pi setup window expired. Hold its button for 3 seconds and retry.');
+      if (currentStatus != 'waiting') {
+        throw StateError('The Pi is not waiting for Wi-Fi credentials. Hold its button for 3 seconds and retry.');
       }
       final payload = utf8.encode(jsonEncode({'ssid': ssid, 'password': password}));
       // The Pi requires an encrypted reliable GATT write. Android/iOS perform
