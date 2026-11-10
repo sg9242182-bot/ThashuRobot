@@ -861,7 +861,7 @@ class ApiServices:
                 error_code=error_code,
                 control_mode=record.get("control_mode"),
                 esp32_sequence=sequence,
-                source="esp32_ack",
+                source="ack_tracker",
             )
         await self._publish_command_result(command_id, status, error_code)
 
@@ -1190,7 +1190,7 @@ def _log_command_outcome(
     command_id: str,
     command: str,
     outcome: str,
-    http_status: int,
+    http_status: int | None,
     error_code: str | None = None,
     control_mode: str | None = None,
     request_id: str | None = None,
