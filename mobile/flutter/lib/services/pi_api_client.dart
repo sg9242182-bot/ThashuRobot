@@ -108,24 +108,16 @@ class PiApiClient {
     PiApiTransport? transport,
     this.requestTimeout = const Duration(seconds: 5),
   }) : _baseUri = _validateBaseUri(baseUri),
-       _certificateSha256Fingerprint = _validateCertificatePin(
-         baseUri,
-         certificateSha256Fingerprint,
-       ),
        // ignore: prefer_initializing_formals
        _bearerToken = bearerToken,
-       _transport = transport ??
-           IoPiApiTransport(
-             origin: _validateBaseUri(baseUri),
-             certificateSha256Fingerprint: _validateCertificatePin(
-               baseUri,
-               certificateSha256Fingerprint,
-             ),
-           );
+       _transport = _createTransport(
+         baseUri,
+         certificateSha256Fingerprint,
+         transport,
+       );
 
   final Uri _baseUri;
   final String? _bearerToken;
-  final String? _certificateSha256Fingerprint;
   final PiApiTransport _transport;
   final Duration requestTimeout;
   Future<RobotCommandResult>? _moveInFlight;
@@ -133,6 +125,23 @@ class PiApiClient {
   String? _moveInFlightMode;
   Future<RobotCommandResult>? _stopInFlight;
   String? _stopInFlightRequestId;
+
+  static PiApiTransport _createTransport(
+    Uri origin,
+    String? certificateSha256Fingerprint,
+    PiApiTransport? transport,
+  ) {
+    final validatedOrigin = _validateBaseUri(origin);
+    final validatedPin = _validateCertificatePin(
+      validatedOrigin,
+      certificateSha256Fingerprint,
+    );
+    return transport ??
+        IoPiApiTransport(
+          origin: validatedOrigin,
+          certificateSha256Fingerprint: validatedPin,
+        );
+  }
 
   static Uri _validateBaseUri(Uri uri) {
     if (!uri.hasAuthority ||
