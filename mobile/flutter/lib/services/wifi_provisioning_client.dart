@@ -86,8 +86,9 @@ class WifiProvisioningClient {
     final validPsk = (passwordBytes.length >= 8 && passwordBytes.length <= 63) ||
         (password.length == 64 && RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(password));
     if (!validPsk || password.contains(RegExp(r'[\r\n\x00]'))) {
+      passwordBytes.fillRange(0, passwordBytes.length, 0);
       throw const FormatException('Use a WPA2 password with 8–63 characters.');
-    }
+    }    passwordBytes.fillRange(0, passwordBytes.length, 0);
 
     await _requestBluetoothPermissions();
     if (!await FlutterBluePlus.isSupported) {
