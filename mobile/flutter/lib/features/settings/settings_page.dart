@@ -69,6 +69,19 @@ class _SettingsPageState extends State<SettingsPage> {
     super.dispose();
   }
 
+  String _provisioningStatusMessage(String status) => switch (status) {
+    'found' => 'Thashu found. Connecting over Bluetooth…',
+    'waiting' => 'The Pi setup window is ready. Sending Wi-Fi credentials…',
+    'received' => 'The Pi received credentials. Waiting for its Wi-Fi connection…',
+    'connecting' => 'The Pi is connecting to the hotspot…',
+    'connected' => 'The Pi reports connected. Reading its one-time secure handoff…',
+    'failed' => 'The Pi reports that Wi-Fi setup failed.',
+    'invalid' => 'The Pi rejected the Wi-Fi credentials.',
+    'expired' => 'The Pi setup window expired. Hold the button for 3 seconds and retry.',
+    'idle' => 'The Pi setup window is not active. Hold the button for 3 seconds and retry.',
+    _ => 'Waiting for the Pi setup status…',
+  };
+
   Future<void> _provisionHotspot() async {
     if (_provisioning) return;
     setState(() {
@@ -80,6 +93,10 @@ class _SettingsPageState extends State<SettingsPage> {
       final handoff = await _wifiProvisioningClient.provision(
         ssid: _hotspotSsidController.text,
         password: _hotspotPasswordController.text,
+        onStatus: (status) {
+          if (!mounted) return;
+          setState(() => _provisioningMessage = _provisioningStatusMessage(status));
+        },
       );
       if (!mounted) return;
       setState(() {
