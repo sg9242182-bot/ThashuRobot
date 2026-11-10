@@ -230,6 +230,13 @@ class _SettingsPageState extends State<SettingsPage> {
             ],
             const SizedBox(height: 8),
             Text(
+              'The Pi setup uses encrypted Bluetooth and its physical-button window. '
+              'The current pairing design has no passkey, so it does not protect '
+              'against an active nearby impersonation attack; security review is pending.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 8),
+            Text(
               'The password is sent over encrypted Bluetooth and cleared after the attempt. '
               'The Pi returns its HTTPS address, certificate pin, and token once '
               'it reports connected. Review them and tap Save; this sends no robot command.',
