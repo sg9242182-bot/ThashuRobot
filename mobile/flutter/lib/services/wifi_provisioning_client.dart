@@ -78,8 +78,10 @@ class WifiProvisioningClient {
   }) async {
     final ssidBytes = utf8.encode(ssid);
     if (ssidBytes.isEmpty || ssidBytes.length > 32) {
+      ssidBytes.fillRange(0, ssidBytes.length, 0);
       throw const FormatException('SSID must be 1 to 32 UTF-8 bytes.');
     }
+    ssidBytes.fillRange(0, ssidBytes.length, 0);
     final passwordBytes = utf8.encode(password);
     final validPsk = (passwordBytes.length >= 8 && passwordBytes.length <= 63) ||
         (password.length == 64 && RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(password));
@@ -149,7 +151,11 @@ class WifiProvisioningClient {
       final payload = utf8.encode(jsonEncode({'ssid': ssid, 'password': password}));
       // The Pi requires an encrypted reliable GATT write. Android/iOS perform
       // link encryption when the protected characteristic is accessed.
-      await credentials.write(payload, withoutResponse: false, allowLongWrite: true);
+      try {
+        await credentials.write(payload, withoutResponse: false, allowLongWrite: true);
+      } finally {
+        payload.fillRange(0, payload.length, 0);
+      }
       onStatus?.call('credentials_sent');
 
       // The Pi's physical-button window lasts 60 seconds. Do not retry the
@@ -168,7 +174,12 @@ class WifiProvisioningClient {
         onStatus?.call(currentStatus);
         switch (currentStatus) {
           case 'connected':
-            return PiConnectionHandoff.fromBytes(await connectionInfo.read());
+            final handoffBytes = await connectionInfo.read();
+            try {
+              return PiConnectionHandoff.fromBytes(handoffBytes);
+            } finally {
+              handoffBytes.fillRange(0, handoffBytes.length, 0);
+            }
           case 'failed':
             throw StateError('The Pi could not join that hotspot. Check its SSID, password, and WPA2 setting.');
           case 'invalid':
