@@ -348,7 +348,7 @@ Example dispatch record:
 Example final ACK result:
 
 ```json
-{"command":"forward","component":"pi_api","control_mode":"MANUAL","error_code":"ACK_TIMEOUT","esp32_sequence":42,"event":"robot_command","outcome":"timed_out","request_id":"<uuid>","command_id":"<uuid>","source":"esp32_ack","timestamp":"<UTC timestamp>"}
+{"command":"forward","component":"pi_api","control_mode":"MANUAL","error_code":"ACK_TIMEOUT","esp32_sequence":42,"event":"robot_command","outcome":"timed_out","request_id":"<uuid>","command_id":"<uuid>","source":"ack_tracker","timestamp":"<UTC timestamp>"}
 ```
 
 Use `request_id` to follow one app action across retries, `command_id` to find its persisted result, and `esp32_sequence` to correlate the Pi log with the serial ACK line. `dispatched` still means only that the Pi wrote the command; it does not confirm physical movement.
