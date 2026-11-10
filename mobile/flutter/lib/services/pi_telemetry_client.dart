@@ -69,8 +69,11 @@ class _IoPiTelemetrySocket implements PiTelemetrySocket {
 
   @override
   Future<void> close() async {
-    await _socket.close();
-    _client.close(force: true);
+    try {
+      await _socket.close();
+    } finally {
+      _client.close(force: true);
+    }
   }
 }
 
