@@ -337,7 +337,7 @@ The app should treat `dispatched` as “the Pi wrote the command to its serial t
 
 ## Command logs
 
-The API writes sanitized JSON command logs. The dispatch record includes UTC timestamp, component, source, request ID, command ID, command, ESP32 sequence, outcome, HTTP status, and control mode. When the ACK wait finishes, a second record uses the same request ID, command ID, and ESP32 sequence with `source: "esp32_ack"` and the final outcome (`acknowledged`, `safety_error`, or `timed_out`). The asynchronous result record has no HTTP status. Failure records include a stable error code. Bearer tokens, authorization headers, raw telemetry, and raw ACK frames are not included.
+The API writes sanitized JSON command logs. The dispatch record includes UTC timestamp, component, source, request ID, command ID, command, ESP32 sequence, outcome, HTTP status, and control mode. When the ACK wait finishes, a second record uses the same request ID, command ID, and ESP32 sequence with `source: "ack_tracker"` and the final outcome (`acknowledged`, `safety_error`, or `timed_out`). The asynchronous result record has no HTTP status. Failure records include a stable error code. Bearer tokens, authorization headers, raw telemetry, and raw ACK frames are not included.
 
 Example dispatch record:
 
