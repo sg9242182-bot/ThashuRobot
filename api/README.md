@@ -337,15 +337,21 @@ The app should treat `dispatched` as “the Pi wrote the command to its serial t
 
 ## Command logs
 
-The API writes one sanitized JSON log record for each move or stop request outcome. Records include a timestamp, component, command ID, command, outcome, HTTP status, and the control mode on dispatch. Failure records include a stable error code. Bearer tokens and request authorization headers are not included.
+The API writes sanitized JSON command logs. The dispatch record includes UTC timestamp, component, source, request ID, command ID, command, ESP32 sequence, outcome, HTTP status, and control mode. When the ACK wait finishes, a second record uses the same request ID, command ID, and ESP32 sequence with `source: "esp32_ack"` and the final outcome (`acknowledged`, `safety_error`, or `timed_out`). The asynchronous result record has no HTTP status. Failure records include a stable error code. Bearer tokens, authorization headers, raw telemetry, and raw ACK frames are not included.
 
-Example:
+Example dispatch record:
 
 ```json
-{"command":"forward","component":"pi_api","control_mode":"MANUAL","event":"robot_command","http_status":202,"outcome":"dispatched","command_id":"<uuid>","timestamp":"<UTC timestamp>"}
+{"command":"forward","component":"pi_api","control_mode":"MANUAL","esp32_sequence":42,"event":"robot_command","http_status":202,"outcome":"dispatched","request_id":"<uuid>","command_id":"<uuid>","source":"pi_api","timestamp":"<UTC timestamp>"}
 ```
 
-Use the response's `command_id` to find its matching API log entry. A `dispatched` log still means the Pi wrote the command to the serial transport; it does not confirm ESP32 acknowledgement or physical movement.
+Example final ACK result:
+
+```json
+{"command":"forward","component":"pi_api","control_mode":"MANUAL","error_code":"ACK_TIMEOUT","esp32_sequence":42,"event":"robot_command","outcome":"timed_out","request_id":"<uuid>","command_id":"<uuid>","source":"esp32_ack","timestamp":"<UTC timestamp>"}
+```
+
+Use `request_id` to follow one app action across retries, `command_id` to find its persisted result, and `esp32_sequence` to correlate the Pi log with the serial ACK line. `dispatched` still means only that the Pi wrote the command; it does not confirm physical movement.
 
 
 ## Phase 12: HTTPS for phone access
