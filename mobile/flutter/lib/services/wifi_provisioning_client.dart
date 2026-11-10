@@ -74,6 +74,7 @@ class WifiProvisioningClient {
   Future<PiConnectionHandoff> provision({
     required String ssid,
     required String password,
+    void Function(String status)? onStatus,
   }) async {
     final ssidBytes = utf8.encode(ssid);
     if (ssidBytes.isEmpty || ssidBytes.length > 32) {
@@ -122,6 +123,7 @@ class WifiProvisioningClient {
         ),
       );
       await FlutterBluePlus.stopScan();
+      onStatus?.call('found');
       await device.connect(license: License.free);
       final services = await device.discoverServices();
       final service = _firstOrNull(
@@ -143,10 +145,12 @@ class WifiProvisioningClient {
       if (currentStatus != 'waiting') {
         throw StateError('The Pi is not waiting for Wi-Fi credentials. Hold its button for 3 seconds and retry.');
       }
+      onStatus?.call('waiting');
       final payload = utf8.encode(jsonEncode({'ssid': ssid, 'password': password}));
       // The Pi requires an encrypted reliable GATT write. Android/iOS perform
       // link encryption when the protected characteristic is accessed.
       await credentials.write(payload, withoutResponse: false, allowLongWrite: true);
+      onStatus?.call('received');
 
       // The Pi's physical-button window lasts 60 seconds. Do not retry the
       // one-time connection-info read: a successful read consumes the handoff.
@@ -154,6 +158,7 @@ class WifiProvisioningClient {
       while (DateTime.now().isBefore(deadline)) {
         await Future<void>.delayed(const Duration(seconds: 2));
         currentStatus = await _readStatus(status);
+        onStatus?.call(currentStatus);
         switch (currentStatus) {
           case 'connected':
             return PiConnectionHandoff.fromBytes(await connectionInfo.read());
