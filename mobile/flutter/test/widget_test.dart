@@ -17,7 +17,7 @@ void main() {
   ) async {
     await tester.pumpWidget(const MyApp());
 
-    expect(find.text('ZENO controller'), findsOneWidget);
+    expect(find.text('Thashu Controller'), findsOneWidget);
     final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
     expect(app.theme?.useMaterial3, isTrue);
     expect(find.text('Dashboard'), findsWidgets);
@@ -45,7 +45,7 @@ void main() {
     const placeholders = [
       '',
       'The Pi address and token are not configured. Controls remain disabled until the Pi API is connected.',
-      'Robot connection settings',
+      'Robot connection',
       'Placeholder: Diagnostics will appear when data is available.',
       'Recovery actions unavailable',
     ];
@@ -64,24 +64,28 @@ void main() {
     }
   });
 
-  testWidgets('Phase 7 pages show honest unavailable states without controls', (
+  testWidgets('Settings exposes the current connection and onboarding fields', (
     tester,
   ) async {
     await tester.pumpWidget(const MyApp());
 
     await tester.tap(find.byKey(const ValueKey('nav-destination-2')));
     await tester.pumpAndSettle();
-    expect(find.text('Robot connection settings'), findsOneWidget);
-    expect(find.text('Competition Mode'), findsOneWidget);
+    expect(find.text('Robot connection'), findsOneWidget);
+    expect(find.text('Connect Thashu to this phone’s hotspot'), findsOneWidget);
+    expect(find.byKey(const ValueKey('hotspot-ssid-field')), findsOneWidget);
+    expect(find.byKey(const ValueKey('hotspot-password-field')), findsOneWidget);
+    expect(find.byKey(const ValueKey('pi-address-field')), findsOneWidget);
+    expect(find.byKey(const ValueKey('pi-token-field')), findsOneWidget);
     expect(
-      find.textContaining('No API-approved connection fields'),
+      find.byKey(const ValueKey('pi-certificate-fingerprint-field')),
       findsOneWidget,
     );
+    expect(find.text('Competition Mode'), findsOneWidget);
     expect(
       find.textContaining('Use normal STOP to request a stop.'),
       findsOneWidget,
     );
-    expect(find.byType(TextField), findsNothing);
     final openManualControl = find.text('Open Manual Control');
     await tester.ensureVisible(openManualControl);
     await tester.tap(openManualControl);
@@ -100,8 +104,6 @@ void main() {
       find.textContaining('no shell or direct hardware commands'),
       findsOneWidget,
     );
-    expect(find.byType(FilledButton), findsNothing);
-    expect(find.byType(ElevatedButton), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
