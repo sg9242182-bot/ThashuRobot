@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:thashu_app/services/pinned_pi_tls.dart';
+import 'package:thashu_app/services/pi_api_client.dart';
+import 'package:thashu_app/services/pi_telemetry_client.dart';
 
 void main() {
   const sha256Abc =
@@ -28,6 +30,35 @@ void main() {
       ),
       throwsArgumentError,
     );
+  });
+
+  test('local port 8443 requires a pin for REST and telemetry', () async {
+    final origin = Uri.parse('https://192.168.1.42:8443');
+    expect(
+      () => PiApiClient(baseUri: origin, bearerToken: 'token'),
+      throwsArgumentError,
+    );
+    expect(
+      () => PiTelemetryClient(baseUri: origin, bearerToken: 'token'),
+      throwsArgumentError,
+    );
+
+    final api = PiApiClient(
+      baseUri: origin,
+      bearerToken: 'token',
+      certificateSha256Fingerprint: sha256Abc,
+    );
+    api.close();
+    final telemetry = PiTelemetryClient(
+      baseUri: origin,
+      bearerToken: 'token',
+      certificateSha256Fingerprint: sha256Abc,
+    );
+    expect(
+      telemetry.telemetryUri,
+      Uri.parse('wss://192.168.1.42:8443/api/v1/telemetry'),
+    );
+    await telemetry.dispose();
   });
 
   test('creates a pinned HTTPS client without accepting all certificates', () {
