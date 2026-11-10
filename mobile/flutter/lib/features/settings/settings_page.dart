@@ -13,6 +13,7 @@ class SettingsPage extends StatefulWidget {
     this.onSaveConnectionWithPin,
     this.onClearConnection,
     this.onOpenManualControl,
+    this.wifiProvisioningClient,
   });
 
   final String? initialAddress;
@@ -23,6 +24,7 @@ class SettingsPage extends StatefulWidget {
   final Future<String?> Function(String address, String token, String fingerprint)? onSaveConnectionWithPin;
   final Future<void> Function()? onClearConnection;
   final VoidCallback? onOpenManualControl;
+  final WifiProvisioningService? wifiProvisioningClient;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -36,7 +38,7 @@ class _SettingsPageState extends State<SettingsPage> {
   String? _message;
   final TextEditingController _hotspotSsidController = TextEditingController();
   final TextEditingController _hotspotPasswordController = TextEditingController();
-  final WifiProvisioningClient _wifiProvisioningClient = WifiProvisioningClient();
+  late final WifiProvisioningService _wifiProvisioningClient;
   bool _provisioning = false;
   bool _provisioningFailed = false;
   String? _provisioningMessage;
@@ -44,6 +46,8 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void initState() {
     super.initState();
+    _wifiProvisioningClient =
+        widget.wifiProvisioningClient ?? WifiProvisioningClient();
     _addressController = TextEditingController(text: widget.initialAddress ?? '');
     _fingerprintController = TextEditingController(text: widget.initialCertificateFingerprint ?? '');
   }
