@@ -72,7 +72,8 @@ class _SettingsPageState extends State<SettingsPage> {
   String _provisioningStatusMessage(String status) => switch (status) {
     'found' => 'Thashu found. Connecting over Bluetooth…',
     'waiting' => 'The Pi setup window is ready. Sending Wi-Fi credentials…',
-    'received' => 'The Pi received credentials. Waiting for its Wi-Fi connection…',
+    'credentials_sent' => 'Credentials sent. Waiting for the Pi to report receipt…',
+    'received' => 'The Pi reports that it received the credentials. Waiting for its Wi-Fi connection…',
     'connecting' => 'The Pi is connecting to the hotspot…',
     'connected' => 'The Pi reports connected. Reading its one-time secure handoff…',
     'failed' => 'The Pi reports that Wi-Fi setup failed.',
