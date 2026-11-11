@@ -3,12 +3,15 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../models/telemetry_event.dart';
+import '../../models/pi_diagnostics.dart';
+import '../../services/pi_api_client.dart';
 import '../../services/pi_telemetry_client.dart';
 
 class TelemetryDiagnosticsPage extends StatefulWidget {
-  const TelemetryDiagnosticsPage({super.key, this.client});
+  const TelemetryDiagnosticsPage({super.key, this.client, this.apiClient});
 
   final PiTelemetryClient? client;
+  final PiApiClient? apiClient;
 
   @override
   State<TelemetryDiagnosticsPage> createState() =>
@@ -25,11 +28,15 @@ class _TelemetryDiagnosticsPageState extends State<TelemetryDiagnosticsPage> {
   DateTime? _sensorPiReceivedAt;
   bool _sensorFresh = false;
   bool _hasCurrentConnectionEvent = false;
+  PiDiagnosticsSnapshot? _diagnostics;
+  bool _loadingDiagnostics = false;
+  String? _diagnosticsError;
 
   @override
   void initState() {
     super.initState();
     _attachClient();
+    unawaited(_refreshDiagnostics());
   }
 
   @override
@@ -38,6 +45,11 @@ class _TelemetryDiagnosticsPageState extends State<TelemetryDiagnosticsPage> {
     if (oldWidget.client != widget.client) {
       _cancelSubscriptions();
       _attachClient();
+    }
+    if (oldWidget.apiClient != widget.apiClient) {
+      _diagnostics = null;
+      _diagnosticsError = null;
+      unawaited(_refreshDiagnostics());
     }
   }
 
@@ -118,6 +130,84 @@ class _TelemetryDiagnosticsPageState extends State<TelemetryDiagnosticsPage> {
     if (mounted) setState(() => _state = client.state);
   }
 
+  Future<void> _refreshDiagnostics() async {
+    final api = widget.apiClient;
+    if (api == null || _loadingDiagnostics) return;
+    setState(() {
+      _loadingDiagnostics = true;
+      _diagnosticsError = null;
+    });
+    try {
+      final snapshot = await api.getDiagnostics();
+      if (!mounted) return;
+      setState(() => _diagnostics = snapshot);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _diagnosticsError = error.toString());
+    } finally {
+      if (mounted) setState(() => _loadingDiagnostics = false);
+    }
+  }
+
+  Widget _diagnosticsCard() {
+    final snapshot = _diagnostics;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Expanded(child: Text('Robot diagnostics')),
+                IconButton(
+                  tooltip: 'Refresh diagnostics',
+                  onPressed: apiClient == null || _loadingDiagnostics
+                      ? null
+                      : _refreshDiagnostics,
+                  icon: _loadingDiagnostics
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.refresh),
+                ),
+              ],
+            ),
+            if (apiClient == null)
+              const Text('Configure the Pi connection to load diagnostics.')
+            else if (_diagnosticsError != null && snapshot == null)
+              Text('Could not load diagnostics: $_diagnosticsError')
+            else if (snapshot == null)
+              const Text('Loading diagnostics…')
+            else ...[
+              Text('Snapshot: ${snapshot.observedAt.toIso8601String()}'),
+              for (final check in snapshot.checks) ...[
+                const Divider(height: 16),
+                Text('${_diagnosticLabel(check.name)} · ${check.status}'),
+                Text('Source: ${check.source}'),
+                Text('Reason: ${check.reasonCode}'),
+                if (check.name == 'sensor_telemetry')
+                  Text('Telemetry age: ${check.ageMs?.toString() ?? 'unavailable'} ms'),
+                Text('Checked: ${check.observedAt.toIso8601String()}'),
+              ],
+              if (_diagnosticsError != null)
+                Text('Refresh failed; showing the last snapshot. $_diagnosticsError'),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _diagnosticLabel(String name) => switch (name) {
+    'api_liveness' => 'API liveness',
+    'esp32_transport' => 'ESP32 transport',
+    'sensor_telemetry' => 'Sensor telemetry',
+    'controller_readiness' => 'Controller readiness',
+    _ => name,
+  };
+
   String get _stateLabel => switch (_state) {
     TelemetryConnectionState.disconnected => 'Disconnected',
     TelemetryConnectionState.connecting => 'Connecting',
@@ -168,6 +258,8 @@ class _TelemetryDiagnosticsPageState extends State<TelemetryDiagnosticsPage> {
             subtitle: Text(client == null ? 'Not configured' : _stateLabel),
           ),
         ),
+        _diagnosticsCard(),
+        const SizedBox(height: 8),
         if (client == null) ...[
           const Text('Pi telemetry is not configured.'),
           const SizedBox(height: 4),
@@ -179,16 +271,6 @@ class _TelemetryDiagnosticsPageState extends State<TelemetryDiagnosticsPage> {
             'Placeholder: Diagnostics will appear when data is available.',
           ),
           const SizedBox(height: 16),
-          const Card(
-            child: ListTile(
-              leading: Icon(Icons.help_outline),
-              title: Text('Robot self-checks unavailable'),
-              subtitle: Text(
-                'The current API does not provide PASS, WARNING, FAIL, or '
-                'UNKNOWN diagnostic results.',
-              ),
-            ),
-          ),
         ] else ...[
           if (_state == TelemetryConnectionState.failed)
             const Card(
