@@ -230,7 +230,13 @@ current `wlan0` IPv4 address at port `8443`. It binds to that one address;
 it does not bind to `0.0.0.0`. The two Uvicorn listeners share one asyncio
 event loop and the existing ESP32 manager.
 
-The BLE provisioning service adds encrypted, read-only characteristic
+The BLE provisioning service uses authenticated BLE numeric comparison. During
+pairing, Thashu speaks the six-digit value shown by Android. The user accepts
+the phone prompt only when the numbers match, then short-clicks GPIO 17 to
+approve on the Pi. The setup is rejected if the values differ, the prompt is
+not authenticated, or the Pi confirmation times out. Credential writes and
+connection-info reads require authenticated encryption. The service adds
+read-only characteristic
 `8c6d0004-7a4b-4f61-b7a5-927f4e2a1000`. After the credentials write succeeds
 and the Pi reports `connected`, the app must read it before the existing
 60-second button window closes. It returns JSON fields `api_base_url`,
@@ -243,10 +249,18 @@ The Pi stores the persistent token, TLS key, certificate, and current IP under
 certificate. The TLS certificate is regenerated when the Wi-Fi IPv4 address
 changes, and its IP subject alternative name matches the new URL. The token is
 kept stable across address changes and restarts. The certificate pin is
-delivered only over the encrypted GATT connection during the Pi-button-gated
+delivered only over the authenticated encrypted GATT connection during the Pi-button-gated
 window; credentials, token, and private key are not logged.
 
-### Enable only after Flutter certificate pinning is integrated
+The local listener is gated to the connection profile created by provisioning.
+It starts only if NetworkManager reports that exact profile UUID active on
+`wlan0`. HTTP and WebSocket requests must also originate at the active
+hotspot's gateway address (the phone hosting the hotspot). Other clients and
+other Wi-Fi profiles are denied. This is an application access restriction in
+addition to binding to the `wlan0` address; verify the phone's observed source
+address on hardware before enabling the listener.
+
+### Enable only after Flutter pinning and profile gating are reviewed
 
 Do not set the following flags until the app validates the BLE-delivered
 certificate fingerprint for both HTTPS and WSS:
@@ -274,10 +288,15 @@ It does not own the motor controller or ESP32 serial port.
 
 ### Verification still required
 
-- The Pi-side connection-info GATT addition and local HTTPS listener have not
-  yet been run on hardware.
-- Flutter must read the new characteristic, persist the returned URL/token/pin,
-  and implement certificate pinning for HTTP and WebSocket.
+- Verify Android/Pi authenticated numeric comparison on hardware, including a
+  mismatch and timeout. A short click after comparing the code is required on
+  the Pi; a long hold still shuts down.
+- Verify the phone hotspot is reported as the active provisioned NetworkManager
+  UUID, and that the phone's source address equals the gateway address used by
+  the access gate. A mismatch must deny the request.
+- Flutter's integrated handoff build reads the new characteristic, stores URL,
+  token, and pin securely, and pins HTTPS and WSS; still verify the live
+  certificate-match and certificate-change cases on the target phone.
 - Verify from the target phone that it can reach a Pi client connected to that
   phone's hotspot, with internet disabled.
 - Verify HTTPS health/status and authenticated telemetry, then repeat after

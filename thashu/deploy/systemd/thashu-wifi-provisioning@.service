@@ -10,6 +10,10 @@ WorkingDirectory=/home/%i/ThashuRobot/thashu
 Environment=PYTHONUNBUFFERED=1
 Environment=THASHU_LOCAL_API_STATE_DIR=/home/%i/.local/share/thashu/local_api
 Environment=THASHU_LOCAL_API_OWNER=%i
+Environment=XDG_DATA_HOME=/home/%i/.local/share
+Environment=THASHU_MODELS_DIR=/home/%i/.local/share/thashu/models
+Environment=THASHU_PIPER_BIN=/home/%i/piper/piper/piper
+Environment=THASHU_AUDIO_OUTPUT=sysdefault:CARD=Headphones
 ExecStart=/home/%i/.venvs/thashu/bin/python -m hardware.wifi_provisioning
 Restart=on-failure
 RestartSec=3

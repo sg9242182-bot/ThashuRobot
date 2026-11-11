@@ -55,6 +55,76 @@ def token_path() -> Path:
     return state_dir() / "api.token"
 
 
+def provisioned_hotspot_profile_path() -> Path:
+    return state_dir() / "hotspot-profile.uuid"
+
+
+def remember_hotspot_profile(connection_uuid: str) -> None:
+    """Persist the exact NetworkManager profile created by BLE provisioning."""
+    import uuid
+
+    normalized = str(uuid.UUID(connection_uuid))
+    _ensure_dir()
+    _atomic_secret(provisioned_hotspot_profile_path(), normalized)
+
+
+def provisioned_hotspot_network(interface: str | None = None) -> dict[str, str] | None:
+    """Return network details only while the provisioned NM profile is active."""
+    import subprocess
+
+    name = interface or wifi_interface()
+    try:
+        expected_uuid = provisioned_hotspot_profile_path().read_text(encoding="ascii").strip()
+    except (OSError, UnicodeError):
+        return None
+    if not expected_uuid:
+        return None
+
+    def device_value(field: str) -> str | None:
+        try:
+            result = subprocess.run(
+                ["nmcli", "-g", field, "device", "show", name],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        value = result.stdout.strip() if result.returncode == 0 else ""
+        return value if value and value != "--" else None
+
+    active_uuid = device_value("GENERAL.CON-UUID")
+    gateway = device_value("IP4.GATEWAY")
+    address = ipv4_for_interface(name)
+    try:
+        expected_uuid = str(__import__("uuid").UUID(expected_uuid))
+        gateway = str(ipaddress.IPv4Address(gateway)) if gateway else ""
+    except ValueError:
+        return None
+    if active_uuid != expected_uuid or address is None or not gateway:
+        return None
+    return {"interface": name, "address": address, "gateway": gateway, "profile_uuid": expected_uuid}
+
+
+def local_api_peer_allowed(server_host: str, peer_host: str, port: int | None = None) -> bool:
+    """Restrict the TLS listener to the active provisioned profile and phone gateway."""
+    try:
+        expected_port = local_api_port()
+        actual_port = expected_port if port is None else int(port)
+        server_ip = str(ipaddress.IPv4Address(server_host))
+        peer_ip = str(ipaddress.IPv4Address(peer_host))
+    except (ValueError, TypeError):
+        return False
+    network = provisioned_hotspot_network()
+    return bool(
+        actual_port == expected_port
+        and network is not None
+        and server_ip == network["address"]
+        and peer_ip == network["gateway"]
+    )
+
+
 def ipv4_for_interface(interface: str | None = None) -> str | None:
     """Return one global IPv4 address assigned to the configured Wi-Fi device."""
     name = interface or wifi_interface()
@@ -228,9 +298,10 @@ def ensure_local_api_material(ip_address: str) -> dict[str, str]:
 
 def connection_info() -> bytes:
     """Return the BLE handoff only after Wi-Fi has a local address."""
-    address = ipv4_for_interface()
-    if address is None:
-        raise RuntimeError("Wi-Fi address is not ready")
+    network = provisioned_hotspot_network()
+    if network is None:
+        raise RuntimeError("The provisioned phone hotspot is not active")
+    address = network["address"]
     material = ensure_local_api_material(address)
     public = {
         "api_base_url": material["api_base_url"],

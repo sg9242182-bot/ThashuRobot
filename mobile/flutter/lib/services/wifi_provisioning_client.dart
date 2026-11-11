@@ -29,7 +29,9 @@ class PiConnectionHandoff {
           }).isNotEmpty ||
           decoded.keys.toSet().length != 3 ||
           decoded.values.any((value) => value is! String)) {
-        throw const FormatException('Connection info must contain exactly api_base_url, server_cert_sha256, and api_token.');
+        throw const FormatException(
+          'Connection info must contain exactly api_base_url, server_cert_sha256, and api_token.',
+        );
       }
 
       final apiBaseUrl = decoded['api_base_url'] as String;
@@ -50,7 +52,9 @@ class PiConnectionHandoff {
           token.isEmpty ||
           token.trim() != token ||
           token.contains(RegExp(r'\s'))) {
-        throw const FormatException('Connection info contains an invalid HTTPS address, fingerprint, or token.');
+        throw const FormatException(
+          'Connection info contains an invalid HTTPS address, fingerprint, or token.',
+        );
       }
       return PiConnectionHandoff(
         apiBaseUrl: apiBaseUrl,
@@ -92,8 +96,10 @@ class WifiProvisioningClient implements WifiProvisioningService {
     }
     ssidBytes.fillRange(0, ssidBytes.length, 0);
     final passwordBytes = utf8.encode(password);
-    final validPsk = (passwordBytes.length >= 8 && passwordBytes.length <= 63) ||
-        (password.length == 64 && RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(password));
+    final validPsk =
+        (passwordBytes.length >= 8 && passwordBytes.length <= 63) ||
+        (password.length == 64 &&
+            RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(password));
     if (!validPsk || password.contains(RegExp(r'[\r\n\x00]'))) {
       passwordBytes.fillRange(0, passwordBytes.length, 0);
       throw const FormatException('Use a WPA2 password with 8–63 characters.');
@@ -107,9 +113,12 @@ class WifiProvisioningClient implements WifiProvisioningService {
     await FlutterBluePlus.adapterState
         .where((state) => state == BluetoothAdapterState.on)
         .first
-        .timeout(const Duration(seconds: 20), onTimeout: () {
-      throw StateError('Turn on Bluetooth, then try again.');
-    });
+        .timeout(
+          const Duration(seconds: 20),
+          onTimeout: () {
+            throw StateError('Turn on Bluetooth, then try again.');
+          },
+        );
 
     BluetoothDevice? device;
     StreamSubscription<List<ScanResult>>? scanSubscription;
@@ -138,6 +147,12 @@ class WifiProvisioningClient implements WifiProvisioningService {
       await FlutterBluePlus.stopScan();
       onStatus?.call('found');
       await device.connect(license: License.nonprofit);
+      if (Platform.isAndroid) {
+        onStatus?.call('pairing_check');
+        // Force Android's system numeric-comparison prompt before accessing
+        // the Pi's authenticated GATT characteristics.
+        await device.createBond(timeout: 45);
+      }
       final services = await device.discoverServices();
       final service = _firstOrNull(
         services.where(
@@ -156,14 +171,21 @@ class WifiProvisioningClient implements WifiProvisioningService {
 
       var currentStatus = await _readStatus(status);
       if (currentStatus != 'waiting') {
-        throw StateError('The Pi is not waiting for Wi-Fi credentials. Short-click its button and retry.');
+        throw StateError(
+          'The Pi is not waiting for Wi-Fi credentials. Short-click its button and retry.',
+        );
       }
       onStatus?.call('waiting');
-      final payload = utf8.encode(jsonEncode({'ssid': ssid, 'password': password}));
-      // The Pi requires an encrypted reliable GATT write. Android/iOS perform
-      // link encryption when the protected characteristic is accessed.
+      final payload = utf8.encode(
+        jsonEncode({'ssid': ssid, 'password': password}),
+      );
+      // The Pi requires an authenticated encrypted reliable GATT write.
       try {
-        await credentials.write(payload, withoutResponse: false, allowLongWrite: true);
+        await credentials.write(
+          payload,
+          withoutResponse: false,
+          allowLongWrite: true,
+        );
       } finally {
         payload.fillRange(0, payload.length, 0);
       }
@@ -192,12 +214,18 @@ class WifiProvisioningClient implements WifiProvisioningService {
               handoffBytes.fillRange(0, handoffBytes.length, 0);
             }
           case 'failed':
-            throw StateError('The Pi could not join that hotspot. Check its SSID, password, and WPA2 setting.');
+            throw StateError(
+              'The Pi could not join that hotspot. Check its SSID, password, and WPA2 setting.',
+            );
           case 'invalid':
           case 'expired':
-            throw StateError('The Pi setup window expired. Short-click its button and retry.');
+            throw StateError(
+              'The Pi setup window expired. Short-click its button and retry.',
+            );
           case 'idle':
-            throw StateError('The Pi setup window is not active. Short-click its button and retry.');
+            throw StateError(
+              'The Pi setup window is not active. Short-click its button and retry.',
+            );
           case 'waiting':
           case 'received':
           case 'connecting':
@@ -206,7 +234,9 @@ class WifiProvisioningClient implements WifiProvisioningService {
             throw StateError('The Pi returned an unrecognized setup status.');
         }
       }
-      throw StateError('The Pi did not finish joining the hotspot within the setup window.');
+      throw StateError(
+        'The Pi did not finish joining the hotspot within the setup window.',
+      );
     } finally {
       await FlutterBluePlus.stopScan();
       await scanSubscription?.cancel();
@@ -219,12 +249,11 @@ class WifiProvisioningClient implements WifiProvisioningService {
   BluetoothCharacteristic? _characteristic(
     BluetoothService service,
     String uuid,
-  ) =>
-      _firstOrNull(
-        service.characteristics.where(
-          (entry) => entry.uuid.toString().toLowerCase() == uuid,
-        ),
-      );
+  ) => _firstOrNull(
+    service.characteristics.where(
+      (entry) => entry.uuid.toString().toLowerCase() == uuid,
+    ),
+  );
 
   Future<String> _readStatus(BluetoothCharacteristic status) async {
     final value = utf8.decode(await status.read()).trim().toLowerCase();
@@ -256,7 +285,9 @@ class WifiProvisioningClient implements WifiProvisioningService {
         Permission.bluetoothConnect,
       ].request();
       if (results.values.any((status) => !status.isGranted)) {
-        throw StateError('Allow Bluetooth scan and connect permissions for setup.');
+        throw StateError(
+          'Allow Bluetooth scan and connect permissions for setup.',
+        );
       }
     } else if (Platform.isIOS) {
       final status = await Permission.bluetooth.request();

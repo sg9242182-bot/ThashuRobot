@@ -19,6 +19,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from starlette.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from api.hotspot_access import HotspotListenerAccessMiddleware
 
 from pydantic import BaseModel, ConfigDict, Field
 from uuid import UUID, uuid4
@@ -1483,6 +1484,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.add_middleware(CommandBodySizeLimitMiddleware)
+app.add_middleware(HotspotListenerAccessMiddleware)
 
 
 _HTTP_STATUS_ERROR_CODES = {

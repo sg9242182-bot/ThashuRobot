@@ -439,8 +439,8 @@ def _run_api_servers(primary_server, app, validate_api_tls_bind, pinning_confirm
     """
     from core.local_api_access import (
         ensure_local_api_material,
-        ipv4_for_interface,
         local_api_port,
+        provisioned_hotspot_network,
     )
 
     async def run():
@@ -468,7 +468,8 @@ def _run_api_servers(primary_server, app, validate_api_tls_bind, pinning_confirm
             while not primary_server.should_exit:
                 if local_enabled:
                     try:
-                        address = await asyncio.to_thread(ipv4_for_interface)
+                        network = await asyncio.to_thread(provisioned_hotspot_network)
+                        address = network["address"] if network is not None else None
                         if address != local_ip:
                             if local_server is not None:
                                 local_server.should_exit = True
