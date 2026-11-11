@@ -477,6 +477,72 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('telemetry disconnect stops lease renewals', (tester) async {
+    _useTallManualViewport(tester);
+    final telemetryTransport = _FakePiTelemetryTransport();
+    final telemetryClient = PiTelemetryClient(
+      baseUri: Uri.parse('http://pi.test:8000'),
+      bearerToken: 'test-token',
+      transport: telemetryTransport,
+    );
+    final apiTransport = _FakePiTransport([
+      const PiApiHttpResponse(
+        statusCode: 200,
+        body:
+            '{"api":"ok","esp32_transport":"connected",'
+            '"control_mode":"MANUAL","controller_readiness":"unknown"}',
+      ),
+      const PiApiHttpResponse(
+        statusCode: 202,
+        body:
+            '{"request_id":"b1234567-89ab-4cde-8f01-23456789abcd",'
+            '"command_id":"lease-1","lease_id":"lease-1","command":"forward",'
+            '"status":"dispatched","control_mode":"MANUAL",'
+            '"error_code":null,"timestamp":"2026-11-10T12:00:00Z"}',
+      ),
+      const PiApiHttpResponse(
+        statusCode: 200,
+        body:
+            '{"lease_id":"lease-1","status":"active",'
+            '"expires_at":"2026-11-10T12:00:00Z"}',
+      ),
+    ]);
+    final apiClient = PiApiClient(
+      baseUri: Uri.parse('http://pi.test:8000'),
+      bearerToken: 'test-token',
+      transport: apiTransport,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: _ManualControlHarness(
+          apiClient: apiClient,
+          telemetryClient: telemetryClient,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(telemetryClient.state, TelemetryConnectionState.connected);
+
+    final forward = find.byKey(const ValueKey('move-forward-button'));
+    await _scrollTo(tester, forward);
+    final gesture = await tester.startGesture(tester.getCenter(forward));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pump();
+    expect(apiTransport.postCount, 2);
+
+    await telemetryClient.disconnect();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 750));
+    expect(apiTransport.postCount, 2);
+
+    await gesture.up();
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await telemetryClient.dispose();
+  });
+
   testWidgets(
     'manual move disables repeats while pending and reports dispatch honestly',
     (tester) async {
@@ -902,6 +968,26 @@ Future<void> _scrollTo(WidgetTester tester, Finder finder) async {
   }
   await tester.ensureVisible(finder);
   await tester.pumpAndSettle();
+}
+
+class _FakePiTelemetryTransport implements PiTelemetryTransport {
+  final _FakePiTelemetrySocket socket = _FakePiTelemetrySocket();
+
+  @override
+  Future<PiTelemetrySocket> connect(
+    Uri uri, {
+    required Map<String, String> headers,
+  }) async => socket;
+}
+
+class _FakePiTelemetrySocket implements PiTelemetrySocket {
+  final _messages = StreamController<Object?>.broadcast();
+
+  @override
+  Stream<Object?> get messages => _messages.stream;
+
+  @override
+  Future<void> close() => _messages.close();
 }
 
 class _FakePiTransport implements PiApiTransport {
