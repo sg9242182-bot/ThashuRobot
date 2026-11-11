@@ -9,6 +9,7 @@ import 'package:thashu_app/features/manual_control/manual_control_page.dart';
 import 'package:thashu_app/main.dart';
 import 'package:thashu_app/models/robot_move_request.dart';
 import 'package:thashu_app/services/pi_api_client.dart';
+import 'package:thashu_app/services/pi_telemetry_client.dart';
 import 'package:thashu_app/widgets/zeno_offline_notice.dart';
 
 void main() {
@@ -352,6 +353,128 @@ void main() {
           .onPressed,
       isNotNull,
     );
+  });
+
+  testWidgets('held movement renews every 250ms and release stops renewals', (
+    tester,
+  ) async {
+    _useTallManualViewport(tester);
+    final transport = _FakePiTransport([
+      const PiApiHttpResponse(
+        statusCode: 200,
+        body:
+            '{"api":"ok","esp32_transport":"connected",'
+            '"control_mode":"MANUAL","controller_readiness":"unknown"}',
+      ),
+      const PiApiHttpResponse(
+        statusCode: 202,
+        body:
+            '{"request_id":"b1234567-89ab-4cde-8f01-23456789abcd",'
+            '"command_id":"lease-1","lease_id":"lease-1","command":"forward",'
+            '"status":"dispatched","control_mode":"MANUAL",'
+            '"error_code":null,"timestamp":"2026-11-10T12:00:00Z"}',
+      ),
+      const PiApiHttpResponse(
+        statusCode: 200,
+        body:
+            '{"lease_id":"lease-1","status":"active",'
+            '"expires_at":"2026-11-10T12:00:00Z"}',
+      ),
+    ]);
+    final client = PiApiClient(
+      baseUri: Uri.parse('http://pi.test:8000'),
+      bearerToken: 'test-token',
+      transport: transport,
+    );
+    await tester.pumpWidget(
+      MaterialApp(home: _ManualControlHarness(apiClient: client)),
+    );
+    await tester.pumpAndSettle();
+    final button = find.byKey(const ValueKey('move-forward-button'));
+    await _scrollTo(tester, button);
+    final gesture = await tester.startGesture(tester.getCenter(button));
+    await tester.pump();
+    await tester.pump();
+    expect(transport.postCount, 1);
+
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pump();
+    expect(transport.postCount, 2);
+    expect(transport.lastPostUri!.path, '/api/v1/robot/commands/lease-1/renew');
+    expect(transport.lastJsonBody, containsPair('request_id', isA<String>()));
+
+    await gesture.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 750));
+    expect(transport.postCount, 2);
+  });
+
+  testWidgets('STOP cancels held movement lease renewals', (tester) async {
+    _useTallManualViewport(tester);
+    final transport = _FakePiTransport([
+      const PiApiHttpResponse(
+        statusCode: 200,
+        body:
+            '{"api":"ok","esp32_transport":"connected",'
+            '"control_mode":"MANUAL","controller_readiness":"unknown"}',
+      ),
+      const PiApiHttpResponse(
+        statusCode: 202,
+        body:
+            '{"request_id":"b1234567-89ab-4cde-8f01-23456789abcd",'
+            '"command_id":"lease-1","lease_id":"lease-1","command":"forward",'
+            '"status":"dispatched","control_mode":"MANUAL",'
+            '"error_code":null,"timestamp":"2026-11-10T12:00:00Z"}',
+      ),
+      const PiApiHttpResponse(
+        statusCode: 200,
+        body:
+            '{"lease_id":"lease-1","status":"active",'
+            '"expires_at":"2026-11-10T12:00:00Z"}',
+      ),
+      const PiApiHttpResponse(
+        statusCode: 202,
+        body:
+            '{"request_id":"c1234567-89ab-4cde-8f01-23456789abcd",'
+            '"command_id":"cmd-stop","command":"stop","status":"dispatched",'
+            '"control_mode":"MANUAL","error_code":null,'
+            '"timestamp":"2026-11-10T12:00:01Z"}',
+      ),
+      const PiApiHttpResponse(
+        statusCode: 200,
+        body:
+            '{"api":"ok","esp32_transport":"connected",'
+            '"control_mode":"MANUAL","controller_readiness":"unknown"}',
+      ),
+    ]);
+    final client = PiApiClient(
+      baseUri: Uri.parse('http://pi.test:8000'),
+      bearerToken: 'test-token',
+      transport: transport,
+    );
+    await tester.pumpWidget(
+      MaterialApp(home: _ManualControlHarness(apiClient: client)),
+    );
+    await tester.pumpAndSettle();
+    final forward = find.byKey(const ValueKey('move-forward-button'));
+    await _scrollTo(tester, forward);
+    final gesture = await tester.startGesture(tester.getCenter(forward));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pump();
+    expect(transport.postCount, 2);
+
+    final stop = find.byKey(const ValueKey('manual-stop-button'));
+    await tester.tap(stop);
+    await tester.pumpAndSettle();
+    expect(transport.lastPostUri!.path, '/api/v1/robot/stop');
+    expect(transport.postCount, 3);
+
+    await tester.pump(const Duration(milliseconds: 750));
+    expect(transport.postCount, 3);
+    await gesture.up();
+    await tester.pump();
   });
 
   testWidgets(
@@ -748,13 +871,18 @@ void _expectStopRequestBody(Object? body) {
 }
 
 class _ManualControlHarness extends StatelessWidget {
-  const _ManualControlHarness({this.apiClient});
+  const _ManualControlHarness({this.apiClient, this.telemetryClient});
 
   final PiApiClient? apiClient;
+  final PiTelemetryClient? telemetryClient;
 
   @override
-  Widget build(BuildContext context) =>
-      Scaffold(body: ManualControlPage(apiClient: apiClient));
+  Widget build(BuildContext context) => Scaffold(
+    body: ManualControlPage(
+      apiClient: apiClient,
+      telemetryClient: telemetryClient,
+    ),
+  );
 }
 
 void _useTallManualViewport(WidgetTester tester) {
