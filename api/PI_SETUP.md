@@ -294,8 +294,10 @@ It does not own the motor controller or ESP32 serial port.
 ### Verification still required
 
 - Verify Android/Pi authenticated numeric comparison on hardware, including a
-  mismatch and timeout. A short click after comparing the code is required on
-  the Pi; a long hold still shuts down.
+  mismatch and timeout. Tharun reports matching-code pairing and status read
+  passed using nRF Connect on 2026-11-11; the Flutter app flow and rejection
+  cases remain unverified. A short click after comparing the code is required
+  on the Pi; a long hold still shuts down.
 - Verify the phone hotspot is reported as the active provisioned NetworkManager
   UUID, and that the phone's source address equals the gateway address used by
   the access gate. A mismatch must deny the request.

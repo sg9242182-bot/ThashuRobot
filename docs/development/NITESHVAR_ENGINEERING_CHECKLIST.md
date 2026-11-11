@@ -231,7 +231,8 @@ Provision Wi-Fi through the app and consume the Pi's one-time local HTTPS connec
 - [x] Require authenticated BLE numeric comparison for credential writes and connection-info reads; speak the phone's comparison value, require the user to compare/accept on Android, and require a second Pi button click to authorize.
 - [x] Enable the HTTPS/WSS listener only for the active NetworkManager profile created by provisioning; reject HTTP and WebSocket clients except the active hotspot gateway address.
 - [x] Update app instructions for numeric comparison and the button mapping: first short click opens the BLE window, a matching comparison needs a second short click, and a 3-second hold shuts down Thashu.
-- [ ] Verify Android/Pi negotiate authenticated numeric comparison and that mismatches/timeout fail closed on the Pi.
+- [x] Tharun reports a matching numeric comparison accepted after the Pi button confirmation using nRF Connect; the status characteristic was readable afterward (2026-11-11). This verifies the BLE bond/status read, not the app handoff.
+- [ ] Verify a mismatched comparison and missing Pi-button approval fail closed. An earlier rejection was observed, but it was not confirmed as a controlled test.
 - [ ] Verify the Android hotspot source address matches NetworkManager's gateway address; confirm other clients and non-provisioned profiles are denied.
 - [ ] Obtain Vishal's review of the revised BLE pairing and hotspot listener restrictions.
 - [ ] Verify the Android phone can reach the Pi's local HTTPS listener over the phone hotspot with internet disabled.
@@ -246,7 +247,7 @@ Provision Wi-Fi through the app and consume the Pi's one-time local HTTPS connec
 
 ### Phase completion record
 - **Status:** In progress — Pi backend PR #18 and Flutter PR #19 are drafts; app/Pi integration is not yet accepted.
-- **Evidence:** Backend now requires BlueZ authenticated-encryption GATT flags and authenticated numeric comparison with an audible code plus physical confirmation. The local HTTPS/WebSocket gate checks the provisioned NetworkManager profile and gateway source. Flutter integration commit `0d699b2` parses/stores the 3-field handoff and pins HTTPS/WSS. Tharun ran Flutter analysis, all 62 tests, Android debug build, and installed the APK on a phone. No live numeric-comparison pairing or app-to-Pi HTTPS/WSS check has been run against this secured implementation.
+- **Evidence:** Backend requires BlueZ authenticated-encryption GATT flags and numeric comparison with an audible code plus physical confirmation. The local HTTPS/WebSocket gate checks the provisioned NetworkManager profile and gateway source. Tharun reports that nRF Connect pairing succeeded after matching the spoken/displayed code and short-clicking the Pi button; the status characteristic then read successfully (2026-11-11). The screenshot from the app still showed the older `0d699b2` APK, so Flutter's new pairing flow has not been verified. No credential handoff or HTTPS/WSS test has been reported.
 - **Open issues:** Verify PR #19's latest head with formatter/analyzer/tests/Android build; obtain Vishal's security-contract review; complete supervised HTTPS/WSS and restart/address-change checks on the phone and Pi.
 - **Dependency owner:** Vishal — review BLE/TLS/token security. Tharun — verify local HTTPS and arrange supervised phone/Pi checks. Niteshvar — validate current Flutter head/build and support integration.
 
