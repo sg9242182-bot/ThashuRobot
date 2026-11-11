@@ -75,6 +75,7 @@ void main() {
     expect(find.text('Connect Thashu to this phone’s hotspot'), findsOneWidget);
     expect(find.byKey(const ValueKey('hotspot-ssid-field')), findsOneWidget);
     expect(find.byKey(const ValueKey('hotspot-password-field')), findsOneWidget);
+    await _scrollTo(tester, find.byKey(const ValueKey('pi-address-field')));
     expect(find.byKey(const ValueKey('pi-address-field')), findsOneWidget);
     expect(find.byKey(const ValueKey('pi-token-field')), findsOneWidget);
     expect(
@@ -769,7 +770,7 @@ Future<void> _scrollTo(WidgetTester tester, Finder finder) async {
     await tester.scrollUntilVisible(
       finder,
       240,
-      scrollable: find.byType(Scrollable).first,
+      scrollable: find.byType(ListView).first,
     );
   }
   await tester.ensureVisible(finder);
