@@ -4,6 +4,7 @@ import 'dart:io';
 
 import '../core/pi_api_exception.dart';
 import '../models/pi_health.dart';
+import '../models/pi_diagnostics.dart';
 import '../models/pi_status.dart';
 import '../models/robot_command.dart';
 import '../models/robot_mode.dart';
@@ -198,6 +199,40 @@ class PiApiClient {
   /// Checks API liveness only; this does not confirm robot or ESP32 readiness.
   Future<PiHealth> getHealth() =>
       _getJson('/health', authenticated: false, parser: PiHealth.fromJson);
+
+  /// Reads the authenticated, read-only diagnostics snapshot.
+  Future<PiDiagnosticsSnapshot> getDiagnostics() => _getJson(
+    '/api/v1/diagnostics',
+    authenticated: true,
+    parser: PiDiagnosticsSnapshot.fromJson,
+  );
+
+  /// Renews only an already-dispatched movement lease; this does not resend motion.
+  Future<void> renewMovementLease({
+    required String leaseId,
+    required String requestId,
+  }) async {
+    _validateRequestId(requestId);
+    final id = leaseId.trim();
+    if (id.isEmpty) {
+      throw ArgumentError.value(leaseId, 'leaseId', 'Must not be empty.');
+    }
+    await _postJson<bool>(
+      '/api/v1/robot/commands/${Uri.encodeComponent(id)}/renew',
+      {'request_id': requestId},
+      authenticated: true,
+      parser: (json) {
+        if (json['lease_id'] != id || json['status'] != 'active') {
+          throw const FormatException('The movement lease is no longer active.');
+        }
+        final expiresAt = json['expires_at'];
+        if (expiresAt is! String || DateTime.tryParse(expiresAt) == null) {
+          throw const FormatException('Expected an active lease expiry timestamp.');
+        }
+        return true;
+      },
+    );
+  }
 
   Future<RobotModeResponse> setMode(RobotMode mode) => _postJson(
     '/api/v1/robot/mode',
