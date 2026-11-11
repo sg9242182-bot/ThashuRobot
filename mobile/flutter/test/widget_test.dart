@@ -67,6 +67,11 @@ void main() {
   testWidgets('Settings exposes the current connection and onboarding fields', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(400, 4000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
     await tester.pumpWidget(const MyApp());
 
     await tester.tap(find.byKey(const ValueKey('nav-destination-2')));
@@ -75,7 +80,6 @@ void main() {
     expect(find.text('Connect Thashu to this phone’s hotspot'), findsOneWidget);
     expect(find.byKey(const ValueKey('hotspot-ssid-field')), findsOneWidget);
     expect(find.byKey(const ValueKey('hotspot-password-field')), findsOneWidget);
-    await _scrollTo(tester, find.byKey(const ValueKey('pi-address-field')));
     expect(find.byKey(const ValueKey('pi-address-field')), findsOneWidget);
     expect(find.byKey(const ValueKey('pi-token-field')), findsOneWidget);
     expect(
@@ -496,14 +500,9 @@ void main() {
         MaterialApp(home: _ManualControlHarness(apiClient: client)),
       );
       await tester.pumpAndSettle();
-      await _scrollTo(tester, find.byKey(const ValueKey('manual-stop-button')));
       await tester.tap(find.byKey(const ValueKey('manual-stop-button')));
       await tester.pumpAndSettle();
 
-      await _scrollTo(
-        tester,
-        find.textContaining('physical stopping are not confirmed'),
-      );
       expect(transport.lastPostUri!.path, '/api/v1/robot/stop');
       _expectStopRequestBody(transport.lastJsonBody);
       expect(
@@ -759,7 +758,7 @@ class _ManualControlHarness extends StatelessWidget {
 }
 
 void _useTallManualViewport(WidgetTester tester) {
-  tester.view.physicalSize = const Size(400, 1800);
+  tester.view.physicalSize = const Size(400, 4000);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
@@ -770,7 +769,7 @@ Future<void> _scrollTo(WidgetTester tester, Finder finder) async {
     await tester.scrollUntilVisible(
       finder,
       240,
-      scrollable: find.byType(ListView).first,
+      scrollable: find.byType(Scrollable).first,
     );
   }
   await tester.ensureVisible(finder);
