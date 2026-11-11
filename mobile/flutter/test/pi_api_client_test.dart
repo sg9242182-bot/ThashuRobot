@@ -56,6 +56,52 @@ void main() {
       },
     );
 
+    test('loads authenticated diagnostics using the approved schema', () async {
+      transport.responses.add(
+        const PiApiHttpResponse(
+          statusCode: 200,
+          body: '{"observed_at":"2026-11-10T12:00:00Z","checks":['
+              '{"name":"sensor_telemetry","status":"WARNING",'
+              '"observed_at":"2026-11-10T12:00:00Z",'
+              '"source":"complete_sensor_tel_received_at",'
+              '"reason_code":"TELEMETRY_STALE","age_ms":1200}]}',
+        ),
+      );
+
+      final result = await client.getDiagnostics();
+
+      expect(transport.lastUri!.path, '/api/v1/diagnostics');
+      expect(transport.lastHeaders!['Authorization'], 'Bearer test-token');
+      expect(result.observedAt, DateTime.utc(2026, 11, 10, 12));
+      expect(result.checks.single.name, 'sensor_telemetry');
+      expect(result.checks.single.status, 'WARNING');
+      expect(result.checks.single.ageMs, 1200);
+    });
+
+    test('renews an active movement lease without resending motion', () async {
+      transport.responses.add(
+        const PiApiHttpResponse(
+          statusCode: 200,
+          body: '{"lease_id":"lease-1","status":"active",'
+              '"expires_at":"2026-11-10T12:00:00Z"}',
+        ),
+      );
+
+      await client.renewMovementLease(
+        leaseId: 'lease-1',
+        requestId: 'd1234567-89ab-4cde-8f01-23456789abcd',
+      );
+
+      expect(
+        transport.lastUri!.path,
+        '/api/v1/robot/commands/lease-1/renew',
+      );
+      expect(transport.lastJsonBody, {
+        'request_id': 'd1234567-89ab-4cde-8f01-23456789abcd',
+      });
+      expect(transport.lastHeaders!['Authorization'], 'Bearer test-token');
+    });
+
     test('sends the confirmed mode request with the bearer token', () async {
       transport.responses.add(
         const PiApiHttpResponse(
