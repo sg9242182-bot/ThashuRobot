@@ -147,6 +147,7 @@ class _ManualControlPageState extends State<ManualControlPage>
 
   void _onTelemetryState(TelemetryConnectionState state) {
     final connected = state == TelemetryConnectionState.connected;
+    final hadActiveLease = _activeLeaseId != null;
     if (!connected) _stopMovementRenewals();
     if (!mounted) {
       _telemetryConnected = connected;
@@ -154,7 +155,7 @@ class _ManualControlPageState extends State<ManualControlPage>
     }
     setState(() {
       _telemetryConnected = connected;
-      if (!connected && _activeLeaseId != null) {
+      if (!connected && hadActiveLease) {
         _message = 'Telemetry disconnected. Lease renewal stopped; the Pi lease '
             'will expire according to its configured timeout. Physical stopping '
             'is not confirmed.';
