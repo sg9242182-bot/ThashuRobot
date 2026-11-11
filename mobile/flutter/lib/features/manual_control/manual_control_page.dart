@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/pi_api_exception.dart';
@@ -6,14 +8,16 @@ import '../../models/robot_mode.dart';
 import '../../models/pi_status.dart';
 import '../../models/robot_move_request.dart';
 import '../../services/pi_api_client.dart';
+import '../../services/pi_telemetry_client.dart';
 import '../../widgets/zeno_offline_notice.dart';
 
 /// Manual controls use only the Pi's confirmed REST API.
 /// A dispatched response is not treated as proof of physical movement/stop.
 class ManualControlPage extends StatefulWidget {
-  const ManualControlPage({super.key, this.apiClient});
+  const ManualControlPage({super.key, this.apiClient, this.telemetryClient});
 
   final PiApiClient? apiClient;
+  final PiTelemetryClient? telemetryClient;
 
   @override
   State<ManualControlPage> createState() => _ManualControlPageState();
@@ -28,6 +32,15 @@ class _ManualControlPageState extends State<ManualControlPage>
   bool _moveBusy = false;
   bool _stopBusy = false;
   bool _appPaused = false;
+  bool _telemetryConnected = true;
+  StreamSubscription<TelemetryConnectionState>? _telemetryStateSubscription;
+  Timer? _leaseRenewalTimer;
+  bool _leaseRenewalInFlight = false;
+  String? _activeLeaseId;
+  String? _heldDirection;
+  int? _heldPointer;
+  int _holdGeneration = 0;
+  bool _suppressNextDirectionTap = false;
   double _speed = 200;
   String? _message;
   String? _commandId;
@@ -36,6 +49,7 @@ class _ManualControlPageState extends State<ManualControlPage>
   bool get _manualReady =>
       widget.apiClient != null &&
       !_appPaused &&
+      (widget.telemetryClient == null || _telemetryConnected) &&
       !_loadingStatus &&
       !_statusStale &&
       _status?.api == 'ok' &&
@@ -59,6 +73,7 @@ class _ManualControlPageState extends State<ManualControlPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _attachTelemetryClient();
     if (widget.apiClient != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _refreshStatus());
     }
@@ -67,13 +82,23 @@ class _ManualControlPageState extends State<ManualControlPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _stopMovementRenewals();
+    unawaited(_telemetryStateSubscription?.cancel());
     super.dispose();
   }
 
   @override
   void didUpdateWidget(covariant ManualControlPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.telemetryClient != widget.telemetryClient) {
+      _stopMovementRenewals();
+      unawaited(_telemetryStateSubscription?.cancel());
+      _telemetryStateSubscription = null;
+      _telemetryConnected = true;
+      _attachTelemetryClient();
+    }
     if (oldWidget.apiClient != widget.apiClient) {
+      _stopMovementRenewals();
       _status = null;
       _statusStale = false;
       _message = null;
@@ -99,6 +124,7 @@ class _ManualControlPageState extends State<ManualControlPage>
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden) {
       if (!_appPaused) {
+        _stopMovementRenewals();
         setState(() {
           _appPaused = true;
           _statusStale = true;
@@ -108,6 +134,112 @@ class _ManualControlPageState extends State<ManualControlPage>
         });
       }
     }
+  }
+
+  void _attachTelemetryClient() {
+    final client = widget.telemetryClient;
+    _telemetryConnected = client == null ||
+        client.state == TelemetryConnectionState.connected;
+    if (client == null) return;
+    _telemetryStateSubscription = client.states.listen(_onTelemetryState);
+    unawaited(client.connect());
+  }
+
+  void _onTelemetryState(TelemetryConnectionState state) {
+    final connected = state == TelemetryConnectionState.connected;
+    if (!connected) _stopMovementRenewals();
+    if (!mounted) {
+      _telemetryConnected = connected;
+      return;
+    }
+    setState(() {
+      _telemetryConnected = connected;
+      if (!connected && _activeLeaseId != null) {
+        _message = 'Telemetry disconnected. Lease renewal stopped; the Pi lease '
+            'will expire according to its configured timeout. Physical stopping '
+            'is not confirmed.';
+      }
+    });
+  }
+
+  void _stopMovementRenewals() {
+    _holdGeneration++;
+    _heldDirection = null;
+    _heldPointer = null;
+    _activeLeaseId = null;
+    _leaseRenewalTimer?.cancel();
+    _leaseRenewalTimer = null;
+  }
+
+  void _startMovementRenewals(String leaseId, int generation) {
+    if (_heldDirection == null ||
+        _holdGeneration != generation ||
+        (widget.telemetryClient != null && !_telemetryConnected)) {
+      return;
+    }
+    _activeLeaseId = leaseId;
+    _leaseRenewalTimer?.cancel();
+    _leaseRenewalTimer = Timer.periodic(
+      const Duration(milliseconds: 250),
+      (_) => unawaited(_renewMovementLease(leaseId, generation)),
+    );
+  }
+
+  Future<void> _renewMovementLease(String leaseId, int generation) async {
+    final client = widget.apiClient;
+    if (client == null ||
+        _leaseRenewalInFlight ||
+        _heldDirection == null ||
+        _holdGeneration != generation ||
+        (widget.telemetryClient != null && !_telemetryConnected)) {
+      return;
+    }
+    _leaseRenewalInFlight = true;
+    try {
+      await client.renewMovementLease(
+        leaseId: leaseId,
+        requestId: RobotRequestId.generate(),
+      );
+    } catch (error) {
+      _leaseRenewalTimer?.cancel();
+      _leaseRenewalTimer = null;
+      _activeLeaseId = null;
+      if (mounted && _holdGeneration == generation) {
+        setState(() {
+          _message = 'Movement lease renewal failed. The Pi will apply its '
+              'lease timeout; physical stopping is not confirmed. '
+              '${_errorMessage(error)}';
+        });
+      }
+    } finally {
+      _leaseRenewalInFlight = false;
+    }
+  }
+
+  void _onDirectionPointerDown(int pointer, String direction, bool enabled) {
+    if (!enabled || _heldPointer != null) return;
+    _heldPointer = pointer;
+    _suppressNextDirectionTap = true;
+    _holdGeneration++;
+    final generation = _holdGeneration;
+    _heldDirection = direction;
+    unawaited(_move(direction, holdGeneration: generation));
+  }
+
+  void _onDirectionPointerUp(int pointer) {
+    if (_heldPointer != pointer) return;
+    _stopMovementRenewals();
+    scheduleMicrotask(() => _suppressNextDirectionTap = false);
+  }
+
+  void _onDirectionTap(String direction) {
+    if (_suppressNextDirectionTap) {
+      _suppressNextDirectionTap = false;
+      return;
+    }
+    // Accessibility activation is a single move; the Pi lease expires without
+    // a hold renewal because no physical pointer is being held.
+    unawaited(_move(direction));
   }
 
   Future<void> _refreshStatus({bool clearMessage = true}) async {
@@ -137,6 +269,7 @@ class _ManualControlPageState extends State<ManualControlPage>
   }
 
   Future<void> _setMode(String mode) async {
+    _stopMovementRenewals();
     final client = widget.apiClient;
     if (client == null ||
         _modeBusy ||
@@ -169,7 +302,7 @@ class _ManualControlPageState extends State<ManualControlPage>
     }
   }
 
-  Future<void> _move(String direction) async {
+  Future<void> _move(String direction, {int? holdGeneration}) async {
     final client = widget.apiClient;
     final mode = _status?.controlMode;
     if (client == null || !_manualReady || mode == null) return;
@@ -192,8 +325,14 @@ class _ManualControlPageState extends State<ManualControlPage>
         _commandStatus = result.status;
         _message = _commandMessage(result);
       });
+      if (holdGeneration != null &&
+          result.leaseId != null &&
+          result.leaseId!.isNotEmpty) {
+        _startMovementRenewals(result.leaseId!, holdGeneration);
+      }
     } catch (error) {
       if (!mounted) return;
+      _stopMovementRenewals();
       setState(() {
         if (_isConnectionUncertain(error)) {
           _statusStale = true;
@@ -207,6 +346,7 @@ class _ManualControlPageState extends State<ManualControlPage>
   }
 
   Future<void> _stop() async {
+    _stopMovementRenewals();
     final client = widget.apiClient;
     if (client == null || _stopBusy) return;
     setState(() {
@@ -609,20 +749,37 @@ class _ManualControlPageState extends State<ManualControlPage>
     return SizedBox(
       width: 100,
       height: 64,
-      child: FilledButton.tonal(
-        key: ValueKey('move-$direction-button'),
-        onPressed: enabled ? () => _move(direction) : null,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 20),
-            const SizedBox(height: 2),
-            Text(
-              '${words.first}\n${words.skip(1).join(' ')}',
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 10),
+      child: Listener(
+        onPointerDown: enabled
+            ? (event) => _onDirectionPointerDown(event.pointer, direction, enabled)
+            : null,
+        onPointerUp: (event) => _onDirectionPointerUp(event.pointer),
+        onPointerCancel: (event) => _onDirectionPointerUp(event.pointer),
+        child: Semantics(
+          button: true,
+          enabled: enabled,
+          label: label,
+          onTap: enabled ? () => _onDirectionTap(direction) : null,
+          child: ExcludeSemantics(
+            child: FilledButton.tonal(
+              key: ValueKey('move-$direction-button'),
+              // Pointer-down starts motion; this callback is suppressed for
+              // touch taps to prevent a second dispatch on pointer-up.
+              onPressed: enabled ? () => _onDirectionTap(direction) : null,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 20),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${words.first}\\n${words.skip(1).join(' ')}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 10),
+                  ),
+                ],
+              ),
             ),
-          ],
+          ),
         ),
       ),
     );
