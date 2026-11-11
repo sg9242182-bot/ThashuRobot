@@ -214,7 +214,7 @@ class _ZenoNavigationShellState extends State<ZenoNavigationShell> {
       body: _selectedIndex == 0
           ? DashboardPage(apiClient: _apiClient)
           : _selectedIndex == 1
-          ? ManualControlPage(apiClient: _apiClient)
+          ? ManualControlPage(apiClient: _apiClient, telemetryClient: _telemetryClient)
           : _selectedIndex == 2
           ? SettingsPage(
               initialAddress: _connectionAddress,
@@ -226,7 +226,7 @@ class _ZenoNavigationShellState extends State<ZenoNavigationShell> {
               onOpenManualControl: () => setState(() => _selectedIndex = 1),
             )
           : _selectedIndex == 3
-          ? TelemetryDiagnosticsPage(client: _telemetryClient)
+          ? TelemetryDiagnosticsPage(client: _telemetryClient, apiClient: _apiClient)
           : _selectedIndex == 4
           ? const DeveloperRecoveryPage()
           : Center(
