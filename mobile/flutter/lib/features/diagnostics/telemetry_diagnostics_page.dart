@@ -162,7 +162,7 @@ class _TelemetryDiagnosticsPageState extends State<TelemetryDiagnosticsPage> {
                 const Expanded(child: Text('Robot diagnostics')),
                 IconButton(
                   tooltip: 'Refresh diagnostics',
-                  onPressed: apiClient == null || _loadingDiagnostics
+                  onPressed: widget.apiClient == null || _loadingDiagnostics
                       ? null
                       : _refreshDiagnostics,
                   icon: _loadingDiagnostics
@@ -174,7 +174,7 @@ class _TelemetryDiagnosticsPageState extends State<TelemetryDiagnosticsPage> {
                 ),
               ],
             ),
-            if (apiClient == null)
+            if (widget.apiClient == null)
               const Text('Configure the Pi connection to load diagnostics.')
             else if (_diagnosticsError != null && snapshot == null)
               Text('Could not load diagnostics: $_diagnosticsError')
