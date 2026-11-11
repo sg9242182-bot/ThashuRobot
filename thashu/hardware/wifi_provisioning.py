@@ -1,8 +1,8 @@
-"""Physical-button-gated BLE Wi-Fi setup for NetworkManager.
+"""Physical-button-gated BLE provisioning for a NetworkManager Wi-Fi profile.
 
-Run as root under the project virtualenv. A short GPIO 17 click opens BLE
-provisioning for 60 seconds; a 3-second hold requests graceful shutdown.
-Credential writes require encrypted BLE and an active window. Secrets are never logged.
+Run as root under the project virtualenv. Advertising is enabled only after the
+GPIO 17 button is held for three seconds; credential writes require an encrypted
+BLE link and an active 60-second window. Secrets are never logged.
 """
 from __future__ import annotations
 
@@ -10,14 +10,10 @@ import asyncio
 import json
 import os
 import re
-import signal
-import subprocess
 import threading
 import time
 import uuid
 from pathlib import Path
-
-from hardware.button_gesture import ButtonGesture
 
 import RPi.GPIO as GPIO
 from dbus_next.errors import DBusError
@@ -30,6 +26,7 @@ from bluez_peripheral.util import Adapter, get_message_bus
 
 
 BUTTON_PIN = 17
+HOLD_SECONDS = 3.0
 WINDOW_SECONDS = 60.0
 SERVICE_UUID = "8c6d0001-7a4b-4f61-b7a5-927f4e2a1000"
 CREDENTIALS_UUID = "8c6d0002-7a4b-4f61-b7a5-927f4e2a1000"
@@ -109,65 +106,6 @@ class ProvisionState:
 
 
 STATE = ProvisionState()
-
-
-def _is_robot_main_process(pid: int, project_dir: Path) -> bool:
-    """Match only main.py launched from this robot checkout."""
-    process_dir = Path("/proc") / str(pid)
-    try:
-        args = [part.decode("utf-8", errors="replace") for part in (process_dir / "cmdline").read_bytes().split(b"\0") if part]
-        cwd = (process_dir / "cwd").resolve()
-    except OSError:
-        return False
-    script_paths = []
-    for arg in args[1:]:
-        if Path(arg).name == "main.py":
-            script = Path(arg)
-            script_paths.append(script if script.is_absolute() else cwd / script)
-    return any(script.resolve() == project_dir / "main.py" for script in script_paths)
-
-
-def _shutdown_robot() -> None:
-    """Ask main.py to run its cleanup path, then power off the Pi."""
-    project_dir = Path(__file__).resolve().parents[1]
-    robot_pid = next((
-        int(entry.name)
-        for entry in Path("/proc").iterdir()
-        if entry.name.isdigit()
-        and int(entry.name) != os.getpid()
-        and _is_robot_main_process(int(entry.name), project_dir)
-    ), None)
-    if robot_pid is not None:
-        try:
-            os.kill(robot_pid, signal.SIGINT)
-            deadline = time.monotonic() + 8.0
-            while time.monotonic() < deadline and _is_robot_main_process(robot_pid, project_dir):
-                time.sleep(0.1)
-            if _is_robot_main_process(robot_pid, project_dir):
-                print("[SYSTEM] Robot cleanup did not finish within 8 seconds; continuing system shutdown.")
-            else:
-                print("[SYSTEM] Robot cleanup completed.")
-        except ProcessLookupError:
-            pass
-        except PermissionError:
-            print("[SYSTEM] Could not signal the robot process; continuing system shutdown.")
-    else:
-        print("[SYSTEM] Robot process is not running; shutting down the Pi.")
-
-    try:
-        result = subprocess.run(
-            ["shutdown", "now"],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=10,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        print("[SYSTEM] Power-off request failed.")
-        return
-    if result.returncode != 0:
-        print("[SYSTEM] Power-off request failed.")
-
 
 
 def _keyfile_escape(value: str) -> str:
@@ -312,31 +250,34 @@ async def run() -> None:
     agent = NoIoAgent()
     await agent.register(bus)
     adapter = await Adapter.get_first(bus)
-    print("[BLE SETUP] Ready; short-click GPIO 17 for a 60-second setup window; hold for 3 seconds to shut down.")
+    print("[BLE SETUP] Ready; hold the Pi button for 3 seconds to open a 60-second setup window.")
 
-    button = ButtonGesture(hold_seconds=3.0, min_click_seconds=0.06)
+    press_started = None
+    hold_consumed = False
     advertised_until = 0.0
+    advert = None
     try:
         while True:
             now = time.monotonic()
             pressed = GPIO.input(BUTTON_PIN) == GPIO.LOW
-            action = button.update(pressed, now)
+            if pressed and press_started is None:
+                press_started = now
+            elif not pressed:
+                press_started = None
+                hold_consumed = False
 
-            if action == "ble" and now >= advertised_until:
+            if (
+                press_started is not None
+                and now - press_started >= HOLD_SECONDS
+                and now >= advertised_until
+                and not hold_consumed
+            ):
                 STATE.arm()
+                hold_consumed = True
                 advertised_until = now + WINDOW_SECONDS
                 advert = Advertisement("Thashu Setup", [SERVICE_UUID], appearance=0, timeout=int(WINDOW_SECONDS))
                 await advert.register(bus, adapter)
-                print("[BLE SETUP] Short click detected; pairing window open for 60 seconds.")
-            elif action == "shutdown":
-                STATE.disarm()
-                print("[SYSTEM] Three-second button hold detected; shutting down cleanly.")
-                threading.Thread(
-                    target=_shutdown_robot,
-                    name="thashu-button-shutdown",
-                    daemon=True,
-                ).start()
-
+                print("[BLE SETUP] Pairing window open for 60 seconds.")
             if advertised_until and now >= advertised_until:
                 advertised_until = 0.0
                 if STATE.get_status() not in {"connected", "failed", "invalid"}:
