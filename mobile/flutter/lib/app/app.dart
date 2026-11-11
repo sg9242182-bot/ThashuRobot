@@ -44,6 +44,7 @@ class _ZenoNavigationShellState extends State<ZenoNavigationShell> {
   late PiApiClient? _apiClient = widget.apiClient;
   late PiTelemetryClient? _telemetryClient = widget.telemetryClient;
   String? _connectionAddress;
+  String? _connectionCertificateFingerprint;
   bool _tokenConfigured = false;
   bool _ownsClients = false;
   bool _loadingSettings = false;
@@ -81,10 +82,19 @@ class _ZenoNavigationShellState extends State<ZenoNavigationShell> {
     try {
       final address = await _settings.readAddress();
       final token = await _settings.readToken();
+      final certificatePin = await _settings.readCertificatePin();
       if (address != null && address.isNotEmpty && token != null && token.isNotEmpty) {
         final uri = Uri.parse(address);
-        final api = PiApiClient(baseUri: uri, bearerToken: token);
-        final telemetry = PiTelemetryClient(baseUri: uri, bearerToken: token);
+        final api = PiApiClient(
+          baseUri: uri,
+          bearerToken: token,
+          certificateSha256Fingerprint: certificatePin,
+        );
+        final telemetry = PiTelemetryClient(
+          baseUri: uri,
+          bearerToken: token,
+          certificateSha256Fingerprint: certificatePin,
+        );
         if (!mounted) {
           api.close();
           unawaited(telemetry.dispose());
@@ -92,6 +102,7 @@ class _ZenoNavigationShellState extends State<ZenoNavigationShell> {
         }
         setState(() {
           _connectionAddress = address;
+          _connectionCertificateFingerprint = certificatePin;
           _tokenConfigured = true;
           _apiClient = api;
           _telemetryClient = telemetry;
@@ -100,6 +111,7 @@ class _ZenoNavigationShellState extends State<ZenoNavigationShell> {
       } else if (mounted) {
         setState(() {
           _connectionAddress = address;
+          _connectionCertificateFingerprint = certificatePin;
           _tokenConfigured = token?.isNotEmpty ?? false;
         });
       }
@@ -110,18 +122,42 @@ class _ZenoNavigationShellState extends State<ZenoNavigationShell> {
     }
   }
 
-  Future<String?> _saveConnection(String address, String token) async {
+  Future<String?> _saveConnection(
+    String address,
+    String token,
+    String certificateFingerprint,
+  ) async {
     try {
       final existingToken = await _settings.readToken();
+      final existingAddress = await _settings.readAddress();
+      final existingPin = await _settings.readCertificatePin();
       final effectiveToken = token.trim().isEmpty ? existingToken : token.trim();
       if (effectiveToken == null || effectiveToken.isEmpty) {
         return 'Enter the Pi Bearer token before saving.';
       }
 
-      await _settings.save(baseUrl: address, bearerToken: token);
-      final uri = Uri.parse(address.trim().replaceFirst(RegExp(r'/+$'), ''));
-      final api = PiApiClient(baseUri: uri, bearerToken: effectiveToken);
-      final telemetry = PiTelemetryClient(baseUri: uri, bearerToken: effectiveToken);
+      final normalizedAddress = address.trim().replaceFirst(RegExp(r'/+$'), '');
+      final sameAddress = existingAddress?.trim().replaceFirst(RegExp(r'/+$'), '') ==
+          normalizedAddress;
+      final effectivePin = certificateFingerprint.trim().isNotEmpty
+          ? certificateFingerprint.trim()
+          : (sameAddress ? existingPin : null);
+      await _settings.save(
+        baseUrl: normalizedAddress,
+        bearerToken: token,
+        certificateSha256Fingerprint: effectivePin,
+      );
+      final uri = Uri.parse(normalizedAddress);
+      final api = PiApiClient(
+        baseUri: uri,
+        bearerToken: effectiveToken,
+        certificateSha256Fingerprint: effectivePin,
+      );
+      final telemetry = PiTelemetryClient(
+        baseUri: uri,
+        bearerToken: effectiveToken,
+        certificateSha256Fingerprint: effectivePin,
+      );
       _disposeOwnedClients();
 
       if (!mounted) {
@@ -131,6 +167,7 @@ class _ZenoNavigationShellState extends State<ZenoNavigationShell> {
       }
       setState(() {
         _connectionAddress = uri.toString();
+        _connectionCertificateFingerprint = effectivePin;
         _tokenConfigured = true;
         _apiClient = api;
         _telemetryClient = telemetry;
@@ -148,6 +185,7 @@ class _ZenoNavigationShellState extends State<ZenoNavigationShell> {
     if (!mounted) return;
     setState(() {
       _connectionAddress = null;
+      _connectionCertificateFingerprint = null;
       _tokenConfigured = false;
       _apiClient = widget.apiClient;
       _telemetryClient = widget.telemetryClient;
@@ -180,9 +218,10 @@ class _ZenoNavigationShellState extends State<ZenoNavigationShell> {
           : _selectedIndex == 2
           ? SettingsPage(
               initialAddress: _connectionAddress,
+              initialCertificateFingerprint: _connectionCertificateFingerprint,
               tokenConfigured: _tokenConfigured,
               isLoading: _loadingSettings,
-              onSaveConnection: _saveConnection,
+              onSaveConnectionWithPin: _saveConnection,
               onClearConnection: _clearConnection,
               onOpenManualControl: () => setState(() => _selectedIndex = 1),
             )

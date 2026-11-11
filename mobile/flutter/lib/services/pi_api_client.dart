@@ -9,6 +9,7 @@ import '../models/robot_command.dart';
 import '../models/robot_mode.dart';
 import '../models/robot_move_request.dart';
 import '../models/robot_move_validator.dart';
+import 'pinned_pi_tls.dart';
 
 class PiApiHttpResponse {
   const PiApiHttpResponse({
@@ -39,8 +40,15 @@ abstract interface class PiApiTransport {
 }
 
 class IoPiApiTransport implements PiApiTransport {
-  IoPiApiTransport({HttpClient? httpClient})
-    : _httpClient = httpClient ?? HttpClient();
+  IoPiApiTransport({
+    required Uri origin,
+    String? certificateSha256Fingerprint,
+    HttpClient? httpClient,
+  }) : _httpClient = httpClient ??
+           createPiTlsClient(
+             origin: origin,
+             certificateSha256Fingerprint: certificateSha256Fingerprint,
+           );
 
   final HttpClient _httpClient;
 
@@ -96,12 +104,17 @@ class PiApiClient {
     required Uri baseUri,
     // Keep the parameter public and the stored token private.
     String? bearerToken,
+    String? certificateSha256Fingerprint,
     PiApiTransport? transport,
     this.requestTimeout = const Duration(seconds: 5),
   }) : _baseUri = _validateBaseUri(baseUri),
        // ignore: prefer_initializing_formals
        _bearerToken = bearerToken,
-       _transport = transport ?? IoPiApiTransport();
+       _transport = _createTransport(
+         baseUri,
+         certificateSha256Fingerprint,
+         transport,
+       );
 
   final Uri _baseUri;
   final String? _bearerToken;
@@ -112,6 +125,23 @@ class PiApiClient {
   String? _moveInFlightMode;
   Future<RobotCommandResult>? _stopInFlight;
   String? _stopInFlightRequestId;
+
+  static PiApiTransport _createTransport(
+    Uri origin,
+    String? certificateSha256Fingerprint,
+    PiApiTransport? transport,
+  ) {
+    final validatedOrigin = _validateBaseUri(origin);
+    final validatedPin = _validateCertificatePin(
+      validatedOrigin,
+      certificateSha256Fingerprint,
+    );
+    return transport ??
+        IoPiApiTransport(
+          origin: validatedOrigin,
+          certificateSha256Fingerprint: validatedPin,
+        );
+  }
 
   static Uri _validateBaseUri(Uri uri) {
     if (!uri.hasAuthority ||
@@ -124,6 +154,22 @@ class PiApiClient {
       );
     }
     return uri;
+  }
+
+  static String? _validateCertificatePin(Uri uri, String? value) {
+    final pin = value?.trim();
+    if (uri.port == 8443 && (pin == null || pin.isEmpty)) {
+      throw ArgumentError.value(
+        value,
+        'certificateSha256Fingerprint',
+        'The Pi local HTTPS listener requires its certificate fingerprint.',
+      );
+    }
+    if (pin == null || pin.isEmpty) return null;
+    if (uri.scheme != 'https') {
+      throw ArgumentError.value(value, 'certificateSha256Fingerprint', 'A certificate pin requires HTTPS.');
+    }
+    return PiCertificatePin.normalize(pin);
   }
 
   Uri _endpoint(String path) => _baseUri.resolve(path);
