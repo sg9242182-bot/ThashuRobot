@@ -100,8 +100,11 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('nav-destination-3')));
     await tester.pumpAndSettle();
-    expect(find.text('Robot self-checks unavailable'), findsOneWidget);
-    expect(find.textContaining('does not provide PASS'), findsOneWidget);
+    expect(find.text('Robot diagnostics'), findsOneWidget);
+    expect(
+      find.text('Configure the Pi connection to load diagnostics.'),
+      findsOneWidget,
+    );
 
     await tester.tap(find.byKey(const ValueKey('nav-destination-4')));
     await tester.pumpAndSettle();
@@ -466,7 +469,9 @@ void main() {
     expect(transport.postCount, 2);
 
     final stop = find.byKey(const ValueKey('manual-stop-button'));
-    await tester.tap(stop);
+    final stopAction = tester.widget<FilledButton>(stop).onPressed;
+    expect(stopAction, isNotNull);
+    stopAction!();
     await tester.pumpAndSettle();
     expect(transport.lastPostUri!.path, '/api/v1/robot/stop');
     expect(transport.postCount, 3);
@@ -532,7 +537,7 @@ void main() {
     await tester.pump();
     expect(apiTransport.postCount, 2);
 
-    await telemetryClient.disconnect();
+    telemetryTransport.socket.disconnect();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 750));
     expect(apiTransport.postCount, 2);
@@ -987,7 +992,13 @@ class _FakePiTelemetrySocket implements PiTelemetrySocket {
   Stream<Object?> get messages => _messages.stream;
 
   @override
-  Future<void> close() => _messages.close();
+  Future<void> close() async {
+    disconnect();
+  }
+
+  void disconnect() {
+    unawaited(_messages.close());
+  }
 }
 
 class _FakePiTransport implements PiApiTransport {
