@@ -263,7 +263,7 @@ Validate the end-to-end path with the owners of the connected components.
 - [ ] Confirm the app's client behavior against real backend responses. Pi-local `curl` requests verified basic REST responses. The HTTPS-only Flutter connection form and secure runtime client wiring are now present on `phase-12-pi-api-https`; Flutter build and phone-to-Pi verification remain pending.
 - [x] Agree on Tailscale MagicDNS + Caddy with generic Pi name `thashu-robot`; keep FastAPI on loopback and proxy from Caddy bound to the Pi's Tailscale IP. Do not expose port 8000 or use Funnel. Pi configuration and Android checks remain pending; see `api/PI_SETUP.md`.
 - [ ] Confirm command acknowledgements and telemetry match ESP32 behavior with Tharun.
-- [ ] Test mode changes, movement, stop, emergency stop, diagnostics, and reconnection in the agreed safe test environment.
+- [ ] Test mode changes, movement, STOP, diagnostics, and reconnection in the agreed safe test environment. Latched Emergency Stop was removed from Phase 3 scope and is not implemented; do not test or claim it in Phase 9.
 - [ ] Verify logs allow a request/command to be traced across API, robot manager, and ESP32 transport where supported.
 - [ ] Fix contract mismatches at the agreed source of truth rather than adding one-off client workarounds.
 - [ ] Document the tested firmware/backend/app versions and the test result.
