@@ -506,7 +506,7 @@ void main() {
       expect(transport.lastPostUri!.path, '/api/v1/robot/stop');
       _expectStopRequestBody(transport.lastJsonBody);
       expect(
-        find.textContaining('physical stopping are not confirmed'),
+        find.textContaining('physical stopping is not confirmed'),
         findsOneWidget,
       );
       expect(tester.takeException(), isNull);
