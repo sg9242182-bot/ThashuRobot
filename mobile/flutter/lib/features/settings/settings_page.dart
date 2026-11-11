@@ -20,8 +20,14 @@ class SettingsPage extends StatefulWidget {
   final String? initialCertificateFingerprint;
   final bool tokenConfigured;
   final bool isLoading;
-  final Future<String?> Function(String address, String token)? onSaveConnection;
-  final Future<String?> Function(String address, String token, String fingerprint)? onSaveConnectionWithPin;
+  final Future<String?> Function(String address, String token)?
+  onSaveConnection;
+  final Future<String?> Function(
+    String address,
+    String token,
+    String fingerprint,
+  )?
+  onSaveConnectionWithPin;
   final Future<void> Function()? onClearConnection;
   final VoidCallback? onOpenManualControl;
   final WifiProvisioningService? wifiProvisioningClient;
@@ -37,7 +43,8 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _saving = false;
   String? _message;
   final TextEditingController _hotspotSsidController = TextEditingController();
-  final TextEditingController _hotspotPasswordController = TextEditingController();
+  final TextEditingController _hotspotPasswordController =
+      TextEditingController();
   late final WifiProvisioningService _wifiProvisioningClient;
   bool _provisioning = false;
   bool _provisioningFailed = false;
@@ -48,8 +55,12 @@ class _SettingsPageState extends State<SettingsPage> {
     super.initState();
     _wifiProvisioningClient =
         widget.wifiProvisioningClient ?? WifiProvisioningClient();
-    _addressController = TextEditingController(text: widget.initialAddress ?? '');
-    _fingerprintController = TextEditingController(text: widget.initialCertificateFingerprint ?? '');
+    _addressController = TextEditingController(
+      text: widget.initialAddress ?? '',
+    );
+    _fingerprintController = TextEditingController(
+      text: widget.initialCertificateFingerprint ?? '',
+    );
   }
 
   @override
@@ -58,7 +69,8 @@ class _SettingsPageState extends State<SettingsPage> {
     if (oldWidget.initialAddress != widget.initialAddress) {
       _addressController.text = widget.initialAddress ?? '';
     }
-    if (oldWidget.initialCertificateFingerprint != widget.initialCertificateFingerprint) {
+    if (oldWidget.initialCertificateFingerprint !=
+        widget.initialCertificateFingerprint) {
       _fingerprintController.text = widget.initialCertificateFingerprint ?? '';
     }
   }
@@ -75,15 +87,20 @@ class _SettingsPageState extends State<SettingsPage> {
 
   String _provisioningStatusMessage(String status) => switch (status) {
     'found' => 'Thashu found. Connecting over Bluetooth…',
+    'pairing_check' => 'Compare the six digits spoken by Thashu with the phone pairing prompt. Accept only if they match, then short-click the Pi button to confirm.',
     'waiting' => 'The Pi setup window is ready. Sending Wi-Fi credentials…',
-    'credentials_sent' => 'Credentials sent. Waiting for the Pi to report receipt…',
+    'credentials_sent' =>
+      'Credentials sent. Waiting for the Pi to report receipt…',
     'received' => 'The Pi reports that it received the credentials. Waiting for its Wi-Fi connection…',
     'connecting' => 'The Pi is connecting to the hotspot…',
-    'connected' => 'The Pi reports connected. Reading its one-time secure handoff…',
+    'connected' =>
+      'The Pi reports connected. Reading its one-time secure handoff…',
     'failed' => 'The Pi reports that Wi-Fi setup failed.',
     'invalid' => 'The Pi rejected the Wi-Fi credentials.',
-    'expired' => 'The Pi setup window expired. Hold the button for 3 seconds and retry.',
-    'idle' => 'The Pi setup window is not active. Hold the button for 3 seconds and retry.',
+    'expired' =>
+      'The Pi setup window expired. Short-click the button and retry.',
+    'idle' =>
+      'The Pi setup window is not active. Short-click the button and retry.',
     _ => 'Waiting for the Pi setup status…',
   };
 
@@ -100,7 +117,9 @@ class _SettingsPageState extends State<SettingsPage> {
         password: _hotspotPasswordController.text,
         onStatus: (status) {
           if (!mounted) return;
-          setState(() => _provisioningMessage = _provisioningStatusMessage(status));
+          setState(
+            () => _provisioningMessage = _provisioningStatusMessage(status),
+          );
         },
       );
       if (!mounted) return;
@@ -108,8 +127,7 @@ class _SettingsPageState extends State<SettingsPage> {
         _addressController.text = handoff.apiBaseUrl;
         _fingerprintController.text = handoff.serverCertSha256;
         _tokenController.text = handoff.apiToken;
-        _provisioningMessage =
-            'The Pi joined Wi-Fi. Review the connection details, then tap Save connection. No robot command was sent.';
+        _provisioningMessage = 'The Pi joined Wi-Fi. Review the connection details, then tap Save connection. No robot command was sent.';
       });
     } catch (error) {
       if (!mounted) return;
@@ -150,7 +168,9 @@ class _SettingsPageState extends State<SettingsPage> {
         _tokenController.clear();
       }
     } catch (error) {
-      if (mounted) setState(() => _message = 'Could not save connection: $error');
+      if (mounted) {
+        setState(() => _message = 'Could not save connection: $error');
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -172,7 +192,11 @@ class _SettingsPageState extends State<SettingsPage> {
         _message = 'Saved Pi connection settings were removed from this phone.';
       });
     } catch (error) {
-      if (mounted) setState(() => _message = 'Could not clear connection settings: $error');
+      if (mounted) {
+        setState(
+          () => _message = 'Could not clear connection settings: $error',
+        );
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -192,7 +216,7 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: 8),
             const Text(
               'Turn on this phone’s hotspot. Enter its exact name and password, '
-              'then hold the Pi setup button for 3 seconds. Tap Connect & send '
+              'then short-click the Pi setup button. Tap Connect & send '
               'within the 60-second setup window.',
             ),
             const SizedBox(height: 12),
@@ -253,8 +277,9 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: 8),
             Text(
               'The Pi setup uses encrypted Bluetooth and its physical-button window. '
-              'The current pairing design has no passkey, so it does not protect '
-              'against an active nearby impersonation attack; security review is pending.',
+              'For pairing, compare the six digits spoken by Thashu with the '
+              'phone prompt. Accept only if they match, then short-click the Pi '
+              'button to confirm. Cancel if they differ.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 8),
@@ -390,9 +415,13 @@ class _SettingsPageState extends State<SettingsPage> {
                   label: const Text('Open Manual Control'),
                 ),
                 const SizedBox(height: 12),
-                const Text('1. Check connection and reported mode on Dashboard.'),
+                const Text(
+                  '1. Check connection and reported mode on Dashboard.',
+                ),
                 const SizedBox(height: 6),
-                const Text('2. Use the existing Manual Control screen for movement.'),
+                const Text(
+                  '2. Use the existing Manual Control screen for movement.',
+                ),
                 const SizedBox(height: 6),
                 const Text(
                   '3. Use normal STOP to request a stop. Emergency Stop is unavailable, '
