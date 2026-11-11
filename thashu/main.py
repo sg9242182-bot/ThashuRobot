@@ -7,7 +7,6 @@ import atexit
 import statistics
 
 import numpy as np
-import RPi.GPIO as GPIO
 
 from voice.audio_manager  import AudioManager
 from voice.wake_word      import WakeWordEngine
@@ -61,10 +60,6 @@ PENDING_MEMORY_CONFIRM_SECONDS = 120.0
 FACE_ENROLLMENT_SAMPLE_COUNT = 15
 FACE_ENROLLMENT_TIMEOUT_SECONDS = 180.0
 
-# ── Shutdown Button ───────────────────────────────────────────────────────────
-BUTTON_PIN = 17
-
-
 # ── Boot ──────────────────────────────────────────────────────────────────────
 runtime   = RuntimeStateMachine()
 event_bus = EventBus()
@@ -110,24 +105,6 @@ event_bus.subscribe(
     "RUNTIME_STATE_CHANGED",
     vision.on_runtime_state_changed,
 )
-
-
-# ── Shutdown Button Monitor ───────────────────────────────────────────────────
-def monitor_shutdown_button():
-    GPIO.setmode(GPIO.BCM)
-
-    # Internal pull-up resistor
-    GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-
-    print("[SYSTEM] Shutdown button monitoring started")
-
-    while not _shutdown_event.wait(0.1):
-        # Button pressed = LOW
-        if GPIO.input(BUTTON_PIN) == GPIO.LOW:
-            print("[SYSTEM] Shutdown button pressed")
-            _shutdown_runtime("physical shutdown button")
-            os.system("sudo shutdown now")
-            break
 
 
 # ── Collect spoken command ─────────────────────────────────────────────────────
@@ -709,19 +686,6 @@ def _shutdown_runtime(reason="process exit"):
     except Exception as exc:
         print(f"[SYSTEM] ESP32 transport shutdown warning: {exc}")
 
-    current = threading.current_thread()
-    for thread in threading.enumerate():
-        if thread.name == "thashu-shutdown-button" and thread is not current:
-            thread.join(timeout=0.5)
-            if thread.is_alive():
-                print("[SYSTEM] Shutdown-button monitor is still stopping")
-
-    try:
-        GPIO.cleanup()
-    except Exception as exc:
-        print(f"[SYSTEM] GPIO cleanup warning: {exc}")
-
-
 atexit.register(_shutdown_runtime)
 
 
@@ -1102,15 +1066,6 @@ def main():
 
     # Start systems
     audio.start()
-
-    # ── Start shutdown button monitor ───────────────────────────────────────
-    shutdown_thread = threading.Thread(
-        target=monitor_shutdown_button,
-        name="thashu-shutdown-button",
-        daemon=True,
-    )
-
-    shutdown_thread.start()
 
     # ── Startup sound ───────────────────────────────────────────────────────
 

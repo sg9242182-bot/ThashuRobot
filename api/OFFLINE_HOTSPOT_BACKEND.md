@@ -4,7 +4,7 @@ This document defines the Pi-side extension required for app-only phone-hotspot 
 
 ## Security and connection flow
 
-1. The operator holds the Pi GPIO 17 button for 3 seconds. The Pi advertises the existing BLE provisioning service for 60 seconds.
+1. The operator short-clicks the Pi GPIO 17 button. The Pi advertises the existing BLE provisioning service for 60 seconds. Holding the button for 3 seconds requests graceful robot cleanup and Pi shutdown.
 2. The operator starts provisioning in the Thashu app. The app writes the hotspot SSID/password through the encrypted GATT credentials characteristic. The password is never logged or persisted by the app.
 3. The Pi joins the hotspot and obtains its current Wi-Fi address.
 4. During the same physical authorization window, the app reads a new encrypted GATT connection-info characteristic. The Pi returns a small JSON bundle containing:
@@ -18,6 +18,7 @@ The Pi certificate is self-signed and includes the assigned Wi-Fi address as an 
 
 ## Bind and lifecycle
 
+- The root BLE provisioning service is the sole GPIO 17 owner. `main.py` does not claim that pin; a long hold interrupts the robot process so it runs its normal shutdown cleanup before the Pi powers off. Do not run a second button-monitor process.
 - API access on the local hotspot requires HTTPS and a non-loopback bind to the Pi's Wi-Fi address only. Do not bind to `0.0.0.0`, expose port 8000, or enable plain HTTP.
 - The existing loopback/Tailscale+Caddy setup remains available for development and is not required for offline hotspot access.
 - If NetworkManager assigns a different Pi address after reconnect/reboot, the operator repeats the button-gated app pairing to retrieve the current URL and certificate pin. The API never replays movement after restart; existing startup STOP/lease behavior remains unchanged.

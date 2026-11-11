@@ -1,8 +1,8 @@
 """Physical-button-gated BLE provisioning for a NetworkManager Wi-Fi profile.
 
-Run as root under the project virtualenv. Advertising is enabled only after the
-GPIO 17 button is held for three seconds; credential writes require an encrypted
-BLE link and an active 60-second window. Secrets are never logged.
+Run as root under the project virtualenv. A short GPIO 17 click opens a
+60-second BLE setup window; holding the button for three seconds shuts down
+the Pi. Credential writes require an encrypted BLE link. Secrets are never logged.
 """
 from __future__ import annotations
 
@@ -23,10 +23,14 @@ from bluez_peripheral.gatt.characteristic import CharacteristicFlags as CharFlag
 from bluez_peripheral.gatt.characteristic import characteristic
 from bluez_peripheral.gatt.service import Service
 from bluez_peripheral.util import Adapter, get_message_bus
+from hardware.shutdown_button import (
+    BUTTON_PIN,
+    HOLD_SECONDS,
+    ButtonGesture,
+    request_robot_shutdown,
+)
 
 
-BUTTON_PIN = 17
-HOLD_SECONDS = 3.0
 WINDOW_SECONDS = 60.0
 SERVICE_UUID = "8c6d0001-7a4b-4f61-b7a5-927f4e2a1000"
 CREDENTIALS_UUID = "8c6d0002-7a4b-4f61-b7a5-927f4e2a1000"
@@ -250,34 +254,36 @@ async def run() -> None:
     agent = NoIoAgent()
     await agent.register(bus)
     adapter = await Adapter.get_first(bus)
-    print("[BLE SETUP] Ready; hold the Pi button for 3 seconds to open a 60-second setup window.")
+    print("[BLE SETUP] Ready; short-click GPIO 17 for setup, or hold for 3 seconds to shut down.")
 
-    press_started = None
-    hold_consumed = False
+    button = ButtonGesture(hold_seconds=HOLD_SECONDS)
     advertised_until = 0.0
-    advert = None
     try:
         while True:
             now = time.monotonic()
             pressed = GPIO.input(BUTTON_PIN) == GPIO.LOW
-            if pressed and press_started is None:
-                press_started = now
-            elif not pressed:
-                press_started = None
-                hold_consumed = False
+            action = button.update(pressed, now)
 
-            if (
-                press_started is not None
-                and now - press_started >= HOLD_SECONDS
-                and now >= advertised_until
-                and not hold_consumed
-            ):
+            if action == "ble" and now >= advertised_until:
                 STATE.arm()
-                hold_consumed = True
                 advertised_until = now + WINDOW_SECONDS
-                advert = Advertisement("Thashu Setup", [SERVICE_UUID], appearance=0, timeout=int(WINDOW_SECONDS))
+                advert = Advertisement(
+                    "Thashu Setup",
+                    [SERVICE_UUID],
+                    appearance=0,
+                    timeout=int(WINDOW_SECONDS),
+                )
                 await advert.register(bus, adapter)
-                print("[BLE SETUP] Pairing window open for 60 seconds.")
+                print("[BLE SETUP] Short click detected; pairing window open for 60 seconds.")
+            elif action == "shutdown":
+                STATE.disarm()
+                print("[SYSTEM] Three-second button hold detected; shutting down cleanly.")
+                threading.Thread(
+                    target=request_robot_shutdown,
+                    name="thashu-button-shutdown",
+                    daemon=True,
+                ).start()
+
             if advertised_until and now >= advertised_until:
                 advertised_until = 0.0
                 if STATE.get_status() not in {"connected", "failed", "invalid"}:
