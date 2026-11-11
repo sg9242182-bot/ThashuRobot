@@ -227,7 +227,12 @@ class _ManualControlPageState extends State<ManualControlPage>
   }
 
   void _onDirectionPointerUp(int pointer) {
-    if (_heldPointer != pointer) return;
+    if (_heldPointer != pointer) {
+      if (_suppressNextDirectionTap) {
+        scheduleMicrotask(() => _suppressNextDirectionTap = false);
+      }
+      return;
+    }
     _stopMovementRenewals();
     scheduleMicrotask(() => _suppressNextDirectionTap = false);
   }
