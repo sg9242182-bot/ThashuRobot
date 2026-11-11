@@ -137,7 +137,7 @@ class WifiProvisioningClient implements WifiProvisioningService {
       );
       await FlutterBluePlus.stopScan();
       onStatus?.call('found');
-      await device.connect(license: License.free);
+      await device.connect(license: License.nonprofit);
       final services = await device.discoverServices();
       final service = _firstOrNull(
         services.where(
