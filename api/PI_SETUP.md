@@ -244,6 +244,11 @@ and the Pi reports `connected`, the app must read it before the existing
 token in secure storage. It must validate the exact TLS certificate pin for
 REST and WebSocket; Android's global cleartext setting is not changed.
 
+At service startup, Piper generates and caches three short WAV cues in the
+Thashu voice cache: Bluetooth setup opened, setup timed out, and shutdown
+starting. The service plays those cached WAVs for the corresponding events; if
+generation is unavailable, it falls back to live Piper speech.
+
 The Pi stores the persistent token, TLS key, certificate, and current IP under
 `~/.local/share/thashu/local_api/`. Files are owner-only except the public
 certificate. The TLS certificate is regenerated when the Wi-Fi IPv4 address

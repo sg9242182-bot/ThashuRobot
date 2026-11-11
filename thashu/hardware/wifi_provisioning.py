@@ -177,6 +177,25 @@ def _keyfile_escape(value: str) -> str:
             escaped.append(char)
     return "".join(escaped)
 
+
+def _announce_voice(fallback_text: str) -> None:
+    """Play a pre-generated Piper WAV, with live Piper speech as fallback."""
+    from voice.text_to_speech import play_cached_response, speak
+
+    if not play_cached_response(fallback_text):
+        speak(fallback_text)
+
+
+async def _prepare_announcement_wavs() -> None:
+    """Generate the three short Piper WAVs once before opening BLE setup."""
+    from voice.text_to_speech import prepare_command_voice_cache
+
+    await asyncio.to_thread(
+        prepare_command_voice_cache,
+        {"ble_setup_on", "ble_setup_timeout", "shutdown_starting"},
+    )
+
+
 def _validate_credentials(raw: bytes) -> tuple[str, str]:
     if len(raw) > 512:
         raise ValueError("credentials payload too large")
@@ -296,6 +315,7 @@ class WifiProvisioningService(Service):
 
 
 async def run() -> None:
+    await _prepare_announcement_wavs()
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
     bus = await get_message_bus()
@@ -349,9 +369,19 @@ async def run() -> None:
                     )
                     await advert.register(bus, adapter)
                     print("[BLE SETUP] Short click detected; pairing window open for 60 seconds.")
+                    asyncio.create_task(
+                        asyncio.to_thread(
+                            _announce_voice,
+                            "Bluetooth setup is on. You have sixty seconds to connect.",
+                        )
+                    )
             elif action == "shutdown":
                 STATE.disarm()
                 print("[SYSTEM] Three-second button hold detected; shutting down cleanly.")
+                await asyncio.to_thread(
+                    _announce_voice,
+                    "Shutting down now.",
+                )
                 threading.Thread(
                     target=request_robot_shutdown,
                     name="thashu-button-shutdown",
@@ -360,10 +390,19 @@ async def run() -> None:
 
             if advertised_until and now >= advertised_until:
                 advertised_until = 0.0
-                if STATE.get_status() not in {"connected", "failed", "invalid"}:
+                status = STATE.get_status()
+                timed_out = status not in {"connected", "failed", "invalid"}
+                if timed_out:
                     STATE.set_status("expired")
                 STATE.disarm()
                 print("[BLE SETUP] Pairing window closed.")
+                if timed_out:
+                    asyncio.create_task(
+                        asyncio.to_thread(
+                            _announce_voice,
+                            "Bluetooth setup timed out.",
+                        )
+                    )
             await asyncio.sleep(0.05)
     finally:
         STATE.disarm()
