@@ -63,6 +63,9 @@ class PiDiagnosticCheck {
       throw FormatException('Unsupported diagnostic status: $status.');
     }
     if (name == 'sensor_telemetry') {
+      if (!json.containsKey('age_ms')) {
+        throw const FormatException('"age_ms" is required for sensor_telemetry.');
+      }
       if (age != null && (age is! int || age < 0)) {
         throw const FormatException('"age_ms" must be a nonnegative integer or null.');
       }
