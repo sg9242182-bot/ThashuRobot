@@ -437,6 +437,10 @@ def _run_api_servers(primary_server, app, validate_api_tls_bind, pinning_confirm
     Both listeners share the same ApiServices instance/event loop. The local
     listener is rebound only to the configured Wi-Fi interface's current IP.
     """
+    # This runs in a separate thread, so it cannot see the local ``uvicorn``
+    # import inside ``_start_api_server``. Import it in this thread's scope.
+    import uvicorn
+
     from core.local_api_access import (
         ensure_local_api_material,
         ipv4_for_interface,
