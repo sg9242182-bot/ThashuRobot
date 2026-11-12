@@ -270,7 +270,11 @@ Install the physical-button BLE service from
 `thashu/deploy/systemd/thashu-wifi-provisioning@.service` after installing
 the project's Python requirements. The service runs as root for GPIO/BlueZ,
 but stores its generated token/key material for the configured robot account.
-It does not own the motor controller or ESP32 serial port.
+It does not own the motor controller or ESP32 serial port. It pre-generates
+cached Piper WAV announcements for BLE setup opening, timeout, and shutdown.
+On numeric-comparison pairing, it speaks the six-digit code; accept the phone
+prompt only when it matches, then short-click GPIO 17 to confirm on the Pi.
+The systemd unit points Piper and its voice cache at the robot user's files.
 
 ### Verification still required
 

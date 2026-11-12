@@ -17,7 +17,7 @@ from pathlib import Path
 
 import RPi.GPIO as GPIO
 from dbus_next.errors import DBusError
-from bluez_peripheral.agent import NoIoAgent
+from bluez_peripheral.agent import YesNoAgent
 from bluez_peripheral.advert import Advertisement
 from bluez_peripheral.gatt.characteristic import CharacteristicFlags as CharFlags
 from bluez_peripheral.gatt.characteristic import characteristic
@@ -45,6 +45,8 @@ class ProvisionState:
         self.armed_until = 0.0
         self.status = "idle"
         self.credentials_accepted = False
+        self.pairing_event: asyncio.Event | None = None
+        self.pairing_approved = False
 
     def armed(self) -> bool:
         with self.lock:
@@ -59,6 +61,11 @@ class ProvisionState:
     def disarm(self) -> None:
         with self.lock:
             self.armed_until = 0.0
+            event = self.pairing_event
+            self.pairing_event = None
+            self.pairing_approved = False
+        if event is not None:
+            event.set()
 
     def mark_credentials_accepted(self) -> bool:
         with self.lock:
@@ -108,6 +115,43 @@ class ProvisionState:
                     self.status = "expired"
             return self.status
 
+    def begin_pairing_confirmation(self, event: asyncio.Event) -> bool:
+        with self.lock:
+            if time.monotonic() >= self.armed_until or self.pairing_event is not None:
+                return False
+            self.pairing_event = event
+            self.pairing_approved = False
+            return True
+
+    def confirm_pairing(self) -> bool:
+        with self.lock:
+            event = self.pairing_event
+            if event is None or time.monotonic() >= self.armed_until:
+                return False
+            self.pairing_approved = True
+            event.set()
+            return True
+
+    def cancel_pairing_confirmation(self) -> None:
+        with self.lock:
+            event = self.pairing_event
+            self.pairing_approved = False
+        if event is not None:
+            event.set()
+
+    def pairing_was_approved(self) -> bool:
+        with self.lock:
+            return self.pairing_approved and time.monotonic() < self.armed_until
+
+    def end_pairing_confirmation(self) -> None:
+        with self.lock:
+            self.pairing_event = None
+            self.pairing_approved = False
+
+    def pairing_confirmation_pending(self) -> bool:
+        with self.lock:
+            return self.pairing_event is not None
+
 
 STATE = ProvisionState()
 
@@ -128,6 +172,24 @@ def _keyfile_escape(value: str) -> str:
         else:
             escaped.append(char)
     return "".join(escaped)
+
+
+def _announce_voice(text: str) -> None:
+    """Play the exact cached Piper WAV, synthesizing speech only as fallback."""
+    from voice.text_to_speech import play_cached_response, speak
+
+    if not play_cached_response(text):
+        speak(text)
+
+
+async def _prepare_announcement_wavs() -> None:
+    """Generate and cache the short button announcements before BLE is armed."""
+    from voice.text_to_speech import prepare_command_voice_cache
+
+    await asyncio.to_thread(
+        prepare_command_voice_cache,
+        {"ble_setup_on", "ble_setup_timeout", "shutdown_starting"},
+    )
 
 def _validate_credentials(raw: bytes) -> tuple[str, str]:
     if len(raw) > 512:
@@ -217,11 +279,17 @@ class WifiProvisioningService(Service):
     def status(self, _options) -> bytes:
         return STATE.get_status().encode("ascii")
 
-    @characteristic(CREDENTIALS_UUID, CharFlags.WRITE | CharFlags.ENCRYPT_WRITE | CharFlags.RELIABLE_WRITE)
+    @characteristic(
+        CREDENTIALS_UUID,
+        CharFlags.WRITE | CharFlags.ENCRYPT_AUTHENTICATED_WRITE | CharFlags.RELIABLE_WRITE,
+    )
     def credentials(self, _options):
         pass
 
-    @characteristic(CONNECTION_INFO_UUID, CharFlags.READ | CharFlags.ENCRYPT_READ)
+    @characteristic(
+        CONNECTION_INFO_UUID,
+        CharFlags.READ | CharFlags.ENCRYPT_AUTHENTICATED_READ,
+    )
     def connection_info(self, _options) -> bytes:
         return STATE.info()
 
@@ -246,12 +314,33 @@ class WifiProvisioningService(Service):
 
 
 async def run() -> None:
+    await _prepare_announcement_wavs()
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
     bus = await get_message_bus()
     service = WifiProvisioningService()
     await service.register(bus)
-    agent = NoIoAgent()
+    async def request_pairing_confirmation(passkey: int) -> bool:
+        if not STATE.armed():
+            return False
+        approval = asyncio.Event()
+        if not STATE.begin_pairing_confirmation(approval):
+            return False
+        try:
+            # The user compares these spoken digits with Android's prompt,
+            # accepts there only on a match, then short-clicks GPIO 17 here.
+            await asyncio.to_thread(_speak_pairing_code, passkey)
+            await asyncio.wait_for(approval.wait(), timeout=30.0)
+            return STATE.pairing_was_approved()
+        except Exception:
+            return False
+        finally:
+            STATE.end_pairing_confirmation()
+
+    def cancel_pairing_confirmation() -> None:
+        STATE.cancel_pairing_confirmation()
+
+    agent = YesNoAgent(request_pairing_confirmation, cancel_pairing_confirmation)
     await agent.register(bus)
     adapter = await Adapter.get_first(bus)
     print("[BLE SETUP] Ready; short-click GPIO 17 for setup, or hold for 3 seconds to shut down.")
@@ -264,20 +353,30 @@ async def run() -> None:
             pressed = GPIO.input(BUTTON_PIN) == GPIO.LOW
             action = button.update(pressed, now)
 
-            if action == "ble" and now >= advertised_until:
-                STATE.arm()
-                advertised_until = now + WINDOW_SECONDS
-                advert = Advertisement(
-                    "Thashu Setup",
-                    [SERVICE_UUID],
-                    appearance=0,
-                    timeout=int(WINDOW_SECONDS),
-                )
-                await advert.register(bus, adapter)
-                print("[BLE SETUP] Short click detected; pairing window open for 60 seconds.")
+            if action == "ble":
+                if STATE.pairing_confirmation_pending() and STATE.confirm_pairing():
+                    print("[BLE SETUP] Numeric comparison approved with the Pi button.")
+                elif now >= advertised_until:
+                    STATE.arm()
+                    advertised_until = now + WINDOW_SECONDS
+                    advert = Advertisement(
+                        "Thashu Setup",
+                        [SERVICE_UUID],
+                        appearance=0,
+                        timeout=int(WINDOW_SECONDS),
+                    )
+                    await advert.register(bus, adapter)
+                    print("[BLE SETUP] Short click detected; pairing window open for 60 seconds.")
+                    asyncio.create_task(
+                        asyncio.to_thread(
+                            _announce_voice,
+                            "Bluetooth setup is on. You have sixty seconds to connect.",
+                        )
+                    )
             elif action == "shutdown":
                 STATE.disarm()
                 print("[SYSTEM] Three-second button hold detected; shutting down cleanly.")
+                await asyncio.to_thread(_announce_voice, "Shutting down now.")
                 threading.Thread(
                     target=request_robot_shutdown,
                     name="thashu-button-shutdown",
@@ -286,14 +385,31 @@ async def run() -> None:
 
             if advertised_until and now >= advertised_until:
                 advertised_until = 0.0
-                if STATE.get_status() not in {"connected", "failed", "invalid"}:
+                status = STATE.get_status()
+                timed_out = status not in {"connected", "failed", "invalid"}
+                if timed_out:
                     STATE.set_status("expired")
                 STATE.disarm()
                 print("[BLE SETUP] Pairing window closed.")
+                if timed_out:
+                    asyncio.create_task(
+                        asyncio.to_thread(
+                            _announce_voice,
+                            "Bluetooth setup timed out.",
+                        )
+                    )
             await asyncio.sleep(0.05)
     finally:
         STATE.disarm()
         GPIO.cleanup()
+
+
+def _speak_pairing_code(passkey: int) -> None:
+    """Speak the six-digit BlueZ numeric-comparison code without logging it."""
+    digits = " ".join(f"{passkey:06d}")
+    from voice.text_to_speech import speak
+
+    speak(f"Bluetooth pairing code: {digits}. Compare it with the phone.")
 
 
 if __name__ == "__main__":
