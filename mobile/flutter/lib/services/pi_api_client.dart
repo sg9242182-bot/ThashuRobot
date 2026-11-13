@@ -49,7 +49,11 @@ class IoPiApiTransport implements PiApiTransport {
            createPiTlsClient(
              origin: origin,
              certificateSha256Fingerprint: certificateSha256Fingerprint,
-           );
+           ) {
+    // Uvicorn's default keep-alive timeout is 5 seconds. Close our pooled
+    // sockets sooner so a later REST call cannot reuse one the Pi has closed.
+    _httpClient.idleTimeout = const Duration(seconds: 3);
+  }
 
   final HttpClient _httpClient;
 
@@ -290,11 +294,16 @@ class PiApiClient {
       );
     }
 
-    final requestFuture = _postJson(
-      '/api/v1/robot/move',
-      request.toJson(),
-      authenticated: true,
-      parser: RobotCommandResult.fromJson,
+    // The move endpoint is idempotent by request_id. If the response is
+    // lost after dispatch, retry the identical request once to recover its
+    // existing command_id without dispatching the motors a second time.
+    final requestFuture = _retryMoveOnTransportError(
+      () => _postJson(
+        '/api/v1/robot/move',
+        request.toJson(),
+        authenticated: true,
+        parser: RobotCommandResult.fromJson,
+      ),
     );
     _moveInFlight = requestFuture;
     _moveInFlightRequest = request;
@@ -369,10 +378,35 @@ class PiApiClient {
     required T Function(Map<String, dynamic>) parser,
   }) async {
     final headers = _headers(authenticated: authenticated);
-    return _sendAndParse(
+    Future<T> request() => _sendAndParse(
       () => _transport.get(_endpoint(path), headers: headers),
       parser,
     );
+
+    try {
+      return await request();
+    } on PiApiException catch (error) {
+      // GET requests are read-only. Retry once if a pooled socket was closed
+      // by the Pi before it sent response headers. POST commands are never
+      // retried here; their request IDs govern retry safety separately.
+      if (error.code != 'connection_error') rethrow;
+      return request();
+    }
+  }
+
+  Future<RobotCommandResult> _retryMoveOnTransportError(
+    Future<RobotCommandResult> Function() send,
+  ) async {
+    try {
+      return await send();
+    } on PiApiException catch (error) {
+      if (!const {'connection_error', 'unreachable', 'timeout'}.contains(error.code)) {
+        rethrow;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      // The caller's closure retains the original request ID and exact action.
+      return send();
+    }
   }
 
   Future<T> _postJson<T>(

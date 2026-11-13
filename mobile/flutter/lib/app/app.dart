@@ -40,6 +40,7 @@ class ZenoNavigationShell extends StatefulWidget {
 
 class _ZenoNavigationShellState extends State<ZenoNavigationShell> {
   int _selectedIndex = 0;
+  bool _manualControlVisited = false;
   final PiConnectionSettings _settings = PiConnectionSettings();
   late PiApiClient? _apiClient = widget.apiClient;
   late PiTelemetryClient? _telemetryClient = widget.telemetryClient;
@@ -83,7 +84,10 @@ class _ZenoNavigationShellState extends State<ZenoNavigationShell> {
       final address = await _settings.readAddress();
       final token = await _settings.readToken();
       final certificatePin = await _settings.readCertificatePin();
-      if (address != null && address.isNotEmpty && token != null && token.isNotEmpty) {
+      if (address != null &&
+          address.isNotEmpty &&
+          token != null &&
+          token.isNotEmpty) {
         final uri = Uri.parse(address);
         final api = PiApiClient(
           baseUri: uri,
@@ -131,13 +135,16 @@ class _ZenoNavigationShellState extends State<ZenoNavigationShell> {
       final existingToken = await _settings.readToken();
       final existingAddress = await _settings.readAddress();
       final existingPin = await _settings.readCertificatePin();
-      final effectiveToken = token.trim().isEmpty ? existingToken : token.trim();
+      final effectiveToken = token.trim().isEmpty
+          ? existingToken
+          : token.trim();
       if (effectiveToken == null || effectiveToken.isEmpty) {
         return 'Enter the Pi Bearer token before saving.';
       }
 
       final normalizedAddress = address.trim().replaceFirst(RegExp(r'/+$'), '');
-      final sameAddress = existingAddress?.trim().replaceFirst(RegExp(r'/+$'), '') ==
+      final sameAddress =
+          existingAddress?.trim().replaceFirst(RegExp(r'/+$'), '') ==
           normalizedAddress;
       final effectivePin = certificateFingerprint.trim().isNotEmpty
           ? certificateFingerprint.trim()
@@ -201,6 +208,50 @@ class _ZenoNavigationShellState extends State<ZenoNavigationShell> {
     _ownsClients = false;
   }
 
+  void _selectPage(int index) {
+    setState(() {
+      _selectedIndex = index;
+      if (index == 1) _manualControlVisited = true;
+    });
+  }
+
+  Widget _buildSelectedPage() => switch (_selectedIndex) {
+    0 => DashboardPage(apiClient: _apiClient),
+    2 => SettingsPage(
+      initialAddress: _connectionAddress,
+      initialCertificateFingerprint: _connectionCertificateFingerprint,
+      tokenConfigured: _tokenConfigured,
+      isLoading: _loadingSettings,
+      onSaveConnectionWithPin: _saveConnection,
+      onClearConnection: _clearConnection,
+      onOpenManualControl: () => _selectPage(1),
+    ),
+    3 => TelemetryDiagnosticsPage(
+      client: _telemetryClient,
+      apiClient: _apiClient,
+    ),
+    4 => const DeveloperRecoveryPage(),
+    _ => Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(_icons[_selectedIndex], size: 48),
+          const SizedBox(height: 12),
+          Text(
+            _titles[_selectedIndex],
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
+          const ZenoOfflineNotice(),
+          const SizedBox(height: 12),
+          Text(
+            _placeholderMessages[_selectedIndex],
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    ),
+  };
+
   @override
   void dispose() {
     _disposeOwnedClients();
@@ -211,43 +262,20 @@ class _ZenoNavigationShellState extends State<ZenoNavigationShell> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Thashu Controller')),
-      body: _selectedIndex == 0
-          ? DashboardPage(apiClient: _apiClient)
-          : _selectedIndex == 1
-          ? ManualControlPage(apiClient: _apiClient, telemetryClient: _telemetryClient)
-          : _selectedIndex == 2
-          ? SettingsPage(
-              initialAddress: _connectionAddress,
-              initialCertificateFingerprint: _connectionCertificateFingerprint,
-              tokenConfigured: _tokenConfigured,
-              isLoading: _loadingSettings,
-              onSaveConnectionWithPin: _saveConnection,
-              onClearConnection: _clearConnection,
-              onOpenManualControl: () => setState(() => _selectedIndex = 1),
-            )
-          : _selectedIndex == 3
-          ? TelemetryDiagnosticsPage(client: _telemetryClient, apiClient: _apiClient)
-          : _selectedIndex == 4
-          ? const DeveloperRecoveryPage()
-          : Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(_icons[_selectedIndex], size: 48),
-                  const SizedBox(height: 12),
-                  Text(
-                    _titles[_selectedIndex],
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
-                  const ZenoOfflineNotice(),
-                  const SizedBox(height: 12),
-                  Text(
-                    _placeholderMessages[_selectedIndex],
-                    textAlign: TextAlign.center,
-                  ),
-                ],
+      body: Stack(
+        children: [
+          if (_selectedIndex != 1) _buildSelectedPage(),
+          if (_manualControlVisited)
+            Offstage(
+              offstage: _selectedIndex != 1,
+              child: ManualControlPage(
+                key: const ValueKey('manual-control-page'),
+                apiClient: _apiClient,
+                telemetryClient: _telemetryClient,
               ),
             ),
+        ],
+      ),
       bottomNavigationBar: SafeArea(
         top: false,
         child: SizedBox(
@@ -260,7 +288,7 @@ class _ZenoNavigationShellState extends State<ZenoNavigationShell> {
                   child: SizedBox.expand(
                     child: InkWell(
                       key: ValueKey('nav-destination-$index'),
-                      onTap: () => setState(() => _selectedIndex = index),
+                      onTap: () => _selectPage(index),
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         mainAxisSize: MainAxisSize.min,
@@ -272,7 +300,9 @@ class _ZenoNavigationShellState extends State<ZenoNavigationShell> {
                             ),
                             decoration: BoxDecoration(
                               color: _selectedIndex == index
-                                  ? Theme.of(context).colorScheme.secondaryContainer
+                                  ? Theme.of(context)
+                                        .colorScheme
+                                        .secondaryContainer
                                   : Colors.transparent,
                               borderRadius: BorderRadius.circular(24),
                             ),

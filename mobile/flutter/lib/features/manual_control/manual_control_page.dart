@@ -35,6 +35,8 @@ class _ManualControlPageState extends State<ManualControlPage>
   bool _telemetryConnected = true;
   StreamSubscription<TelemetryConnectionState>? _telemetryStateSubscription;
   Timer? _leaseRenewalTimer;
+  Timer? _commandPollTimer;
+  bool _checkingCommand = false;
   bool _leaseRenewalInFlight = false;
   String? _activeLeaseId;
   String? _heldDirection;
@@ -83,6 +85,7 @@ class _ManualControlPageState extends State<ManualControlPage>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _stopMovementRenewals();
+    _commandPollTimer?.cancel();
     unawaited(_telemetryStateSubscription?.cancel());
     super.dispose();
   }
@@ -138,8 +141,8 @@ class _ManualControlPageState extends State<ManualControlPage>
 
   void _attachTelemetryClient() {
     final client = widget.telemetryClient;
-    _telemetryConnected = client == null ||
-        client.state == TelemetryConnectionState.connected;
+    _telemetryConnected =
+        client == null || client.state == TelemetryConnectionState.connected;
     if (client == null) return;
     _telemetryStateSubscription = client.states.listen(_onTelemetryState);
     unawaited(client.connect());
@@ -156,7 +159,8 @@ class _ManualControlPageState extends State<ManualControlPage>
     setState(() {
       _telemetryConnected = connected;
       if (!connected && hadActiveLease) {
-        _message = 'Telemetry disconnected. Lease renewal stopped; the Pi lease '
+        _message =
+            'Telemetry disconnected. Lease renewal stopped; the Pi lease '
             'will expire according to its configured timeout. Physical stopping '
             'is not confirmed.';
       }
@@ -207,7 +211,8 @@ class _ManualControlPageState extends State<ManualControlPage>
       _activeLeaseId = null;
       if (mounted && _holdGeneration == generation) {
         setState(() {
-          _message = 'Movement lease renewal failed. The Pi will apply its '
+          _message =
+              'Movement lease renewal failed. The Pi will apply its '
               'lease timeout; physical stopping is not confirmed. '
               '${_errorMessage(error)}';
         });
@@ -331,6 +336,7 @@ class _ManualControlPageState extends State<ManualControlPage>
         _commandStatus = result.status;
         _message = _commandMessage(result);
       });
+      _trackCommandUntilFinal(result);
       if (holdGeneration != null &&
           result.leaseId != null &&
           result.leaseId!.isNotEmpty) {
@@ -339,13 +345,20 @@ class _ManualControlPageState extends State<ManualControlPage>
     } catch (error) {
       if (!mounted) return;
       _stopMovementRenewals();
+      final outcomeUncertain = _isConnectionUncertain(error);
       setState(() {
-        if (_isConnectionUncertain(error)) {
+        if (outcomeUncertain) {
           _statusStale = true;
           _commandStatus = 'unknown';
         }
         _message = _errorMessage(error);
       });
+      // Refresh connection/mode information without discarding the unknown
+      // command state. Movement stays locked until the outcome is resolved or
+      // a normal STOP is acknowledged.
+      if (outcomeUncertain) {
+        await _refreshStatus(clearMessage: false);
+      }
     } finally {
       if (mounted) setState(() => _moveBusy = false);
     }
@@ -373,6 +386,7 @@ class _ManualControlPageState extends State<ManualControlPage>
                   'is pending, and physical stopping is not confirmed.'
             : _commandMessage(result);
       });
+      _trackCommandUntilFinal(result);
       await _refreshStatus(clearMessage: false);
     } catch (error) {
       if (!mounted) return;
@@ -391,8 +405,13 @@ class _ManualControlPageState extends State<ManualControlPage>
   Future<void> _checkCommandResult() async {
     final client = widget.apiClient;
     final commandId = _commandId;
-    if (client == null || commandId == null || _moveBusy || _stopBusy) return;
-    setState(() => _message = null);
+    if (client == null ||
+        commandId == null ||
+        _moveBusy ||
+        _stopBusy ||
+        _checkingCommand)
+      return;
+    _checkingCommand = true;
     try {
       final result = await client.getCommand(commandId);
       if (!mounted) return;
@@ -400,16 +419,34 @@ class _ManualControlPageState extends State<ManualControlPage>
         _commandStatus = result.status;
         _message = _commandMessage(result);
       });
+      _trackCommandUntilFinal(result);
+      if (!{'dispatched', 'dispatching'}.contains(result.status)) {
+        await _refreshStatus(clearMessage: false);
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        if (_isConnectionUncertain(error)) {
-          _statusStale = true;
-          _commandStatus = 'unknown';
-        }
+        _commandStatus = 'unknown';
         _message = _errorMessage(error);
       });
+    } finally {
+      _checkingCommand = false;
     }
+  }
+
+  void _trackCommandUntilFinal(RobotCommandResult result) {
+    final pending =
+        result.status == 'dispatched' || result.status == 'dispatching';
+    if (!pending) {
+      _commandPollTimer?.cancel();
+      _commandPollTimer = null;
+      return;
+    }
+    if (_commandPollTimer?.isActive ?? false) return;
+    _commandPollTimer = Timer.periodic(
+      const Duration(milliseconds: 500),
+      (_) => unawaited(_checkCommandResult()),
+    );
   }
 
   String _commandMessage(RobotCommandResult result) => switch (result.status) {
@@ -757,7 +794,8 @@ class _ManualControlPageState extends State<ManualControlPage>
       height: 64,
       child: Listener(
         onPointerDown: enabled
-            ? (event) => _onDirectionPointerDown(event.pointer, direction, enabled)
+            ? (event) =>
+                  _onDirectionPointerDown(event.pointer, direction, enabled)
             : null,
         onPointerUp: (event) => _onDirectionPointerUp(event.pointer),
         onPointerCancel: (event) => _onDirectionPointerUp(event.pointer),
