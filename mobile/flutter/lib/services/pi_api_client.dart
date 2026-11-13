@@ -294,11 +294,16 @@ class PiApiClient {
       );
     }
 
-    final requestFuture = _postJson(
-      '/api/v1/robot/move',
-      request.toJson(),
-      authenticated: true,
-      parser: RobotCommandResult.fromJson,
+    // The move endpoint is idempotent by request_id. If the response is
+    // lost after dispatch, retry the identical request once to recover its
+    // existing command_id without dispatching the motors a second time.
+    final requestFuture = _retryMoveOnTransportError(
+      () => _postJson(
+        '/api/v1/robot/move',
+        request.toJson(),
+        authenticated: true,
+        parser: RobotCommandResult.fromJson,
+      ),
     );
     _moveInFlight = requestFuture;
     _moveInFlightRequest = request;
@@ -386,6 +391,21 @@ class PiApiClient {
       // retried here; their request IDs govern retry safety separately.
       if (error.code != 'connection_error') rethrow;
       return request();
+    }
+  }
+
+  Future<RobotCommandResult> _retryMoveOnTransportError(
+    Future<RobotCommandResult> Function() send,
+  ) async {
+    try {
+      return await send();
+    } on PiApiException catch (error) {
+      if (!const {'connection_error', 'unreachable', 'timeout'}.contains(error.code)) {
+        rethrow;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      // The caller's closure retains the original request ID and exact action.
+      return send();
     }
   }
 
