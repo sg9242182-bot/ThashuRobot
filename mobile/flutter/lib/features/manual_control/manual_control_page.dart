@@ -345,13 +345,20 @@ class _ManualControlPageState extends State<ManualControlPage>
     } catch (error) {
       if (!mounted) return;
       _stopMovementRenewals();
+      final outcomeUncertain = _isConnectionUncertain(error);
       setState(() {
-        if (_isConnectionUncertain(error)) {
+        if (outcomeUncertain) {
           _statusStale = true;
           _commandStatus = 'unknown';
         }
         _message = _errorMessage(error);
       });
+      // Refresh connection/mode information without discarding the unknown
+      // command state. Movement stays locked until the outcome is resolved or
+      // a normal STOP is acknowledged.
+      if (outcomeUncertain) {
+        await _refreshStatus(clearMessage: false);
+      }
     } finally {
       if (mounted) setState(() => _moveBusy = false);
     }
