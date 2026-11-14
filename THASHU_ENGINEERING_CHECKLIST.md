@@ -36,21 +36,11 @@ ESP32 NodeMCU
 
 2 × 0.96-inch OLED displays (robot eyes)
 
-3 existing front ToF sensors:
+6 × VL53L0X-compatible ToF sensors: front-left/center/right and rear-left/center/right.
 
-Front-left
+1 × 7Semi TCA9548A 8-channel I²C multiplexer at address 0x70. ToFs use channels 0–5; left/right OLEDs use channels 6/7.
 
-Front-center
-
-Front-right
-
-Rear sensing replacement (hardware follow-up; not yet physically validated):
-
-3 × rear ToF sensors, expected to match the existing VL53L0X firmware driver; confirm exact module model before flashing.
-
-TCA9548A 8-channel I²C multiplexer; rear-left/center/right use channels 0/1/2 at default mux address 0x70.
-
-The failed rear ultrasonic sensor is replaced in the target design; retain its wiring disconnected.
+The failed rear ultrasonic sensor is replaced in the target design; retain its wiring disconnected. The user identified the purchased rear ToF boards as GY-VL53L0X; verify breakout voltage before connecting power.
 
 Camera
 
@@ -672,17 +662,13 @@ ESP32 NodeMCU
 
 2 × 0.96-inch OLED displays (robot eyes)
 
-3 × VL53LDK ToF sensors:
+6 × VL53L0X-compatible ToF sensors:
 
-Front-left
+Front-left, front-center, front-right
 
-Front-center
+Rear-left, rear-center, rear-right
 
-Front-right
-
-1 × rear ultrasonic sensor
-
-Echo line uses a voltage divider for ESP32 safety
+1 × 7Semi TCA9548A 8-channel I²C multiplexer (0x70), used by all six ToFs and both OLEDs
 
 Camera
 
@@ -716,11 +702,7 @@ Motor control
 
 Hardware-level motor stop/safety
 
-OLED displays
-
-ToF sensors
-
-Rear ultrasonic
+OLED displays and six ToF sensors via the TCA9548A mux
 
 Servo hardware, if retained
 
@@ -1214,21 +1196,23 @@ Implementation present on this branch:
 
 \[x] Document private-LAN HTTPS setup and certificate trust requirements. No certificate or private key is committed.
 
-Rear ToF multiplexer firmware update (2026-11-09; software implemented, hardware validation pending):
+I²C multiplexer expansion (2026-11-14; firmware updated, hardware validation pending):
 
-\[x] Add three rear VL53L0X sensors on TCA9548A channels 0/1/2 while preserving the existing three front ToF sensors and their XSHUT/address assignments.
+\[x] Place all six VL53L0X ToF sensors on dedicated TCA9548A channels 0–5. Each sensor stays at its default address 0x29; front XSHUT/address reassignment is removed.
+
+\[x] Place the two same-address (0x3C) OLED displays on mux channels 6 and 7. The ESP32 enables both channels together and sends one shared frame to both displays, preserving animation bus time.
 
 \[x] Use all three rear sensors in ESP32 reverse and turn safety checks. A close obstacle or stale/unavailable rear channel blocks reverse; the existing 30 cm threshold remains.
 
 \[x] Preserve the existing Pi serial frame shape and `US_REAR` field. Firmware reports the nearest rear ToF distance in millimetres, or FAR when all three are out of range. The Pi parser continues to populate `rear_mm`, so no Pi code change is needed for current aggregate rear-clear/reverse-blocking behavior. Per-sensor rear-left/center/right values are not exposed to the Pi or app.
 
-\[ ] Confirm the purchased rear ToF module model is compatible with the firmware's Adafruit VL53L0X driver before flashing.
+\[ ] Wire the 7Semi TCA9548A at address 0x70: channels 0–5 are front-left/center/right and rear-left/center/right ToFs; channels 6–7 are the left/right OLEDs. The user identified the rear modules as GY-VL53L0X; confirm each board's supply/logic voltage and common ground before power-up. The two OLED channels are selected together so one frame is broadcast to both.
 
-\[ ] Wire and power the TCA9548A/rear sensors, compile and upload the firmware, and verify boot/READY plus front and rear telemetry.
+\[ ] Compile and upload the firmware; verify boot/READY, both OLEDs, and all six front/rear sensor readings.
 
-\[ ] With wheels raised, verify each rear sensor independently, FAR reporting in open space, reverse rejection at or inside 300 mm, and fail-closed rejection for missing/stale rear readings. Confirm the Pi receives the aggregate `rear_mm` value.
+\[ ] With wheels raised, verify each of the six sensors independently, FAR reporting in open space, reverse rejection at or inside 300 mm, and fail-closed rejection for missing/stale rear readings. Confirm the Pi receives the aggregate `rear_mm` value.
 
-This update is isolated on `phase-12-rear-tof-mux`; it has not been merged to `phase-12-pi-api-https` or `main`. The ESP32 sketch has not yet been compiled or physically tested.
+This update is isolated on `codex/all-i2c-devices-mux`; it has not been merged to `phase-12-pi-api-https` or `main`. The ESP32 sketch has not yet been compiled or physically tested.
 
 HTTPS deployment plan (2026-11-08; approved by Vishal): use Tailscale MagicDNS
 and Caddy with the generic Pi name `thashu-robot`. Caddy obtains its
@@ -1284,21 +1268,21 @@ Phase 12 acceptance:
 
 \---
 
-Rear ToF multiplexer hardware acceptance (started 2026-11-09)
+I²C multiplexer hardware acceptance (started 2026-11-09; expanded 2026-11-14)
 
 Status: SOFTWARE CHANGES PRESENT; HARDWARE VALIDATION PENDING
 
-\[x] Add TCA9548A channel selection and three rear ToF instances to the integrated ESP32 ToF manager.
+\[x] Add TCA9548A channel selection for six ToFs on channels 0–5 and both OLEDs on channels 6–7 to the integrated ESP32 firmware.
 
 \[x] Apply the existing 30 cm stop threshold and fail-closed freshness checks to each rear sensor for reverse safety.
 
 \[x] Retain Pi parser compatibility by reporting the nearest valid rear measurement in the legacy `US_REAR` telemetry slot (millimetres); report FAR only when all three are out of range. Missing/stale/invalid sensor data reports NA.
 
-\[ ] Confirm sensor model and module voltage requirements; use the existing VL53L0X firmware driver only if compatible.
+\[ ] Confirm all ToF breakout voltage requirements and the mux/OLED wiring before powering the assembled bus.
 
-\[ ] Compile and upload on the robot with the mux installed at I²C address 0x70; confirm existing front sensors still work.
+\[ ] Compile and upload on the robot with the mux installed at I²C address 0x70; confirm all six sensors and both OLEDs work.
 
-\[ ] Test rear-left, rear-center, and rear-right individually with wheels raised. Verify the aggregate rear telemetry changes, obstacles at 300 mm or nearer block reverse, all-FAR permits reverse when front/other interlocks are clear, and any missing/stale rear reading blocks reverse.
+\[ ] Test all six ToFs individually and the two OLEDs. With wheels raised, verify the aggregate rear telemetry changes, obstacles at 300 mm or nearer block reverse, all-FAR permits reverse when front/other interlocks are clear, and any missing/stale rear reading blocks reverse.
 
 \[ ] Confirm Pi sensor snapshot continues to expose the nearest rear value as `rear_mm`. No per-sensor rear values are currently sent to the Pi/app.
 

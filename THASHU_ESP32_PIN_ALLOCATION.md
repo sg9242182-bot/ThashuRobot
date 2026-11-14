@@ -11,9 +11,10 @@
 - 4 DC motors
 - 2 × Makerbazar TA6586 dual-channel motor-driver modules; each drives two motors independently (see [product listing](https://makerbazar.in/products/1-3v-14v-5a-dual-dc-motor-drive-module)). User-provided board photo shows header labels GND, 3V3, D0–D3, VT.
 - 4 × HC-89 interrupt sensors, one per motor (see [product listing](https://robocraze.com/products/hc-89-interrupt-sensor))
-- 3 × VL53LDK ToF sensors: front-left, front-center, front-right
+- 6 × VL53L0X-compatible ToF modules: front-left/center/right and rear-left/center/right
 - 2 × 0.96-inch OLED displays
-- 1 × HC-SR04 rear ultrasonic sensor
+- 1 × 7Semi TCA9548A 8-channel I²C multiplexer (address 0x70)
+- Legacy HC-SR04 rear ultrasonic module failed and is disconnected; the current integrated safety firmware uses three rear ToFs instead.
 - 2 × MG90S servos: camera pan and camera tilt
 - Ear servos are NOT part of the current design.
 
@@ -22,17 +23,17 @@
 | GPIO | Function | Direction | Hardware |
 |---:|---|---|---|
 | 2 | Unassigned (boot-strap pin; avoid use) | — | ESP32 |
-| 4 | Front-left ToF X | OUT | VL53LDK |
+| 4 | Unassigned (front-left ToF XSHUT no longer required with per-sensor mux channels) | — | ESP32 |
 | 5 | Camera PAN servo signal | OUT | MG90S |
 | 13 | TA6586 module 1 D0 (motor channel A input 1) | OUT | Motor driver |
 | 14 | Unassigned after M0 startup-twitch remap | — | ESP32 |
 | 15 | Encoder 1 DO (proposed; boot-log strap only) | IN/interrupt | HC-89 on motor 4 |
-| 16 | Front-center ToF X | OUT | VL53LDK |
-| 17 | Front-right ToF X | OUT | VL53LDK |
+| 16 | Unassigned (front-center ToF XSHUT no longer required with per-sensor mux channels) | — | ESP32 |
+| 17 | Unassigned (front-right ToF XSHUT no longer required with per-sensor mux channels) | — | ESP32 |
 | 18 | TA6586 module 2 D3 (motor channel B input 2) | OUT | Motor driver |
 | 19 | TA6586 module 2 D2 (motor channel B input 1) | OUT | Motor driver |
-| 21 | I2C SDA | I/O | 3 ToF + 2 OLED |
-| 22 | I2C SCL | I/O | 3 ToF + 2 OLED |
+| 21 | I2C SDA | I/O | TCA9548A upstream bus |
+| 22 | I2C SCL | I/O | TCA9548A upstream bus |
 | 23 | TA6586 module 2 D1 (motor channel A input 2) | OUT | Motor driver |
 | 25 | TA6586 module 2 D0 (motor channel A input 1) | OUT | Motor driver |
 | 26 | TA6586 module 1 D3 (motor channel B input 2) | OUT | Motor driver |
@@ -40,22 +41,27 @@
 | 12 | Camera TILT servo signal (provisional; cold-boot validation required) | OUT after startup | MG90S |
 | 33 | TA6586 module 1 D1 (motor channel A input 2) | OUT | Motor driver |
 | 35 | Encoder 2 DO (proposed) | IN/interrupt | HC-89 on motor 2 |
-| 36 | HC-SR04 ECHO (restored baseline; retain divider) | IN | HC-SR04 |
+| 36 | Unassigned (legacy rear ultrasonic not used by current ToF safety firmware) | — | ESP32 |
 | 39 | Encoder 3 DO (proposed) | IN/interrupt | HC-89 on motor 3 |
-| 32 | HC-SR04 TRIG | OUT | HC-SR04 |
+| 32 | Unassigned (legacy rear ultrasonic not used by current ToF safety firmware) | — | ESP32 |
 | 34 | Encoder 4 DO (M0 encoder; input-only GPIO) | IN/interrupt | HC-89 on motor 1 |
 
 ## I2C bus
 
-GPIO21 and GPIO22 are shared by all five I2C devices:
+GPIO21/22 connect only to the TCA9548A upstream SDA/SCL bus. The mux address is 0x70; keep A0/A1/A2 at their default low state. Each device has a dedicated channel so the six VL53L0X modules can retain address 0x29 and the two OLEDs can retain address 0x3C:
 
-- Left OLED
-- Right OLED
-- Left ToF
-- Center ToF
-- Right ToF
+| Mux channel | Device |
+|---:|---|
+| 0 | Front-left ToF |
+| 1 | Front-center ToF |
+| 2 | Front-right ToF |
+| 3 | Rear-left ToF |
+| 4 | Rear-center ToF |
+| 5 | Rear-right ToF |
+| 6 | Left OLED |
+| 7 | Right OLED |
 
-The three ToF X lines provide independent startup/address-management control because the sensors initially use the same default I2C address.
+The front ToF XSHUT lines on GPIO4/16/17 are no longer used; unique per-sensor I²C address assignment is unnecessary while each device is isolated on its mux channel. Firmware switches channels sequentially on the shared bus.
 
 ## TA6586 board interface and motor GPIO mapping — 2026-10-22
 

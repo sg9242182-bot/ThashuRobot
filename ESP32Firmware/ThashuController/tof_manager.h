@@ -28,9 +28,6 @@ public:
     uint8_t getRangeStatus(SensorId sensor) const;
 
 private:
-    static constexpr uint8_t SDA_PIN = 21;
-    static constexpr uint8_t SCL_PIN = 22;
-    static constexpr uint8_t MUX_ADDRESS = 0x70;
     static constexpr uint8_t OUT_OF_RANGE_STATUS = 4;
     static constexpr uint8_t OBSTACLE_DISTANCE_CM = 30;
     static constexpr unsigned long STARTUP_DELAY_MS = 10;
@@ -46,9 +43,6 @@ private:
     bool obstacleDetected[SENSOR_COUNT] = {false, false, false, false, false, false};
     unsigned long lastReadingTime[SENSOR_COUNT] = {0, 0, 0, 0, 0, 0};
 
-    bool selectMuxChannel(uint8_t channel);
-    bool deselectMux();
-    bool initializeFrontSensor(SensorId sensor, uint8_t xshutPin, uint8_t address);
-    bool initializeRearSensor(SensorId sensor, uint8_t muxChannel);
+    bool initializeSensor(SensorId sensor, uint8_t muxChannel);
     void updateSensor(SensorId sensor);
 };

@@ -1,4 +1,5 @@
 #include "eye_manager.h"
+#include "i2c_mux.h"
 #include <math.h>
 
 EyeManager::EyeManager()
@@ -18,14 +19,16 @@ EyeManager::EyeManager()
 }
 
 bool EyeManager::begin() {
-  Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
+  Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
   Wire.setClock(400000);
 
+  if (!selectI2cMuxChannels(OLED_MUX_CHANNEL_MASK)) return _ready = false;
   _ready = _display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR);
+  deselectI2cMux();
   if (!_ready) return false;
   _nextAutoBlinkMs = millis() + 2500;
   _display.clearDisplay();
-  _display.display();
+  if (!showOnBothDisplays()) return false;
 
   renderFrame(_currentParams, 0.0f);
   _renderDirty = false;
@@ -33,6 +36,13 @@ bool EyeManager::begin() {
 }
 
 bool EyeManager::isReady() const { return _ready; }
+
+bool EyeManager::showOnBothDisplays() {
+  const bool displaysSelected = selectI2cMuxChannels(OLED_MUX_CHANNEL_MASK);
+  if (displaysSelected) _display.display();
+  const bool muxReady = deselectI2cMux();
+  return displaysSelected && muxReady;
+}
 
 void EyeManager::update() {
   static unsigned long lastFrameMs = 0;
@@ -44,8 +54,13 @@ void EyeManager::update() {
   }
   if (now - _lastHealthCheckMs >= 500) {
     _lastHealthCheckMs = now;
-    Wire.beginTransmission(OLED_ADDR);
-    _ready = (Wire.endTransmission() == 0);
+    bool displaysSelected = selectI2cMuxChannels(OLED_MUX_CHANNEL_MASK);
+    if (displaysSelected) {
+      Wire.beginTransmission(OLED_ADDR);
+      displaysSelected = Wire.endTransmission() == 0;
+    }
+    const bool muxReady = deselectI2cMux();
+    _ready = displaysSelected && muxReady;
   }
 
   const bool transitionActive = (now - _transitionStartMs) < _transitionDurationMs;
@@ -257,7 +272,7 @@ void EyeManager::renderFrame(const EyeParams &p, float blinkAmt) {
   if (p.heartScale > 0.05f) {
     float currentScale = p.heartScale * (1.0f - blinkAmt * 0.9f);
     drawHeart(cx, cy, currentScale);
-    _display.display();
+    _ready = showOnBothDisplays();
     return;
   }
 
@@ -289,7 +304,7 @@ void EyeManager::renderFrame(const EyeParams &p, float blinkAmt) {
     _display.fillRoundRect(cx - 45, round(smileY), 90, 50, 24, SSD1306_BLACK);
   }
 
-  _display.display();
+  _ready = showOnBothDisplays();
 }
 
 void EyeManager::drawHeart(int16_t cx, int16_t cy, float scale) {

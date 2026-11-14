@@ -7,9 +7,10 @@
 #include <Adafruit_SSD1306.h>
 
 // Shared I2C Pins matching THASHU_ESP32_PIN_ALLOCATION.md
-#define OLED_SDA_PIN      21
-#define OLED_SCL_PIN      22
 #define OLED_ADDR         0x3C
+#define OLED_LEFT_MUX_CHANNEL  6
+#define OLED_RIGHT_MUX_CHANNEL 7
+#define OLED_MUX_CHANNEL_MASK ((1U << OLED_LEFT_MUX_CHANNEL) | (1U << OLED_RIGHT_MUX_CHANNEL))
 
 #define OLED_WIDTH        128
 #define OLED_HEIGHT       64
@@ -54,7 +55,7 @@ class EyeManager {
     void printHelp();
 
   private:
-    // Both physical OLEDs intentionally share 0x3C and display the same symmetric eye.
+    // The displays share address 0x3C and are isolated on mux channels 6/7.
     Adafruit_SSD1306 _display;
 
     EyeParams _currentParams;
@@ -76,6 +77,7 @@ class EyeManager {
     EyeParams computeExpressionParams(Expression expr);
     EyeParams getInterpolatedParams(unsigned long now);
     float     getBlinkAmount(unsigned long now);
+    bool      showOnBothDisplays();
     void      renderFrame(const EyeParams &p, float blinkAmt);
     void      drawHeart(int16_t cx, int16_t cy, float scale);
 

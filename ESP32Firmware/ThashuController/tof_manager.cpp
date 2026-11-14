@@ -2,28 +2,14 @@
 
 #include <Arduino.h>
 #include <Wire.h>
+#include "i2c_mux.h"
 
 namespace {
-constexpr uint8_t REAR_MUX_CHANNELS[3] = {0, 1, 2};
-constexpr uint8_t FRONT_XSHUT_PINS[3] = {4, 16, 17};
-constexpr uint8_t FRONT_I2C_ADDRESSES[3] = {0x30, 0x31, 0x32};
-}
-
-bool ToFManager::selectMuxChannel(uint8_t channel) {
-    if (channel > 7) return false;
-    Wire.beginTransmission(MUX_ADDRESS);
-    Wire.write(static_cast<uint8_t>(1U << channel));
-    return Wire.endTransmission() == 0;
-}
-
-bool ToFManager::deselectMux() {
-    Wire.beginTransmission(MUX_ADDRESS);
-    Wire.write(static_cast<uint8_t>(0));
-    return Wire.endTransmission() == 0;
+constexpr uint8_t TOF_MUX_CHANNELS[ToFManager::SENSOR_COUNT] = {0, 1, 2, 3, 4, 5};
 }
 
 bool ToFManager::begin() {
-    Wire.begin(SDA_PIN, SCL_PIN);
+    Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
 
     for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
         hasData[i] = false;
@@ -35,62 +21,33 @@ bool ToFManager::begin() {
         lastReadingTime[i] = 0;
     }
 
-    // Keep the parent I2C bus isolated from all mux channels while the three
-    // front sensors are brought up and assigned their existing addresses.
-    if (!deselectMux()) return false;
-
-    for (uint8_t i = 0; i < 3; ++i) {
-        pinMode(FRONT_XSHUT_PINS[i], OUTPUT);
-        digitalWrite(FRONT_XSHUT_PINS[i], LOW);
-    }
-    delay(STARTUP_DELAY_MS);
-
-    for (uint8_t i = 0; i < 3; ++i) {
-        if (!initializeFrontSensor(static_cast<SensorId>(i),
-                                   FRONT_XSHUT_PINS[i],
-                                   FRONT_I2C_ADDRESSES[i])) {
-            deselectMux();
+    // Every ToF is isolated on its own mux channel, so all six can retain the
+    // VL53L0X default address (0x29); XSHUT address sequencing is unnecessary.
+    if (!deselectI2cMux()) return false;
+    for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
+        if (!initializeSensor(static_cast<SensorId>(i), TOF_MUX_CHANNELS[i])) {
+            deselectI2cMux();
             return false;
         }
     }
 
-    // Each rear sensor stays at its default 0x29 address on a dedicated mux
-    // channel, so no rear XSHUT wiring or address reassignment is required.
-    for (uint8_t i = 0; i < 3; ++i) {
-        if (!initializeRearSensor(static_cast<SensorId>(REAR_LEFT + i),
-                                  REAR_MUX_CHANNELS[i])) {
-            deselectMux();
+    for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
+        if (!selectI2cMuxChannel(TOF_MUX_CHANNELS[i])) {
+            deselectI2cMux();
             return false;
         }
-    }
-
-    if (!deselectMux()) return false;
-    for (uint8_t i = 0; i < 3; ++i) {
         sensors[i].startRangeContinuous(CONTINUOUS_PERIOD_MS);
     }
-    for (uint8_t i = 0; i < 3; ++i) {
-        if (!selectMuxChannel(REAR_MUX_CHANNELS[i])) return false;
-        sensors[REAR_LEFT + i].startRangeContinuous(CONTINUOUS_PERIOD_MS);
-    }
-    return deselectMux();
+    return deselectI2cMux();
 }
 
-bool ToFManager::initializeFrontSensor(SensorId sensor, uint8_t xshutPin,
-                                       uint8_t address) {
+bool ToFManager::initializeSensor(SensorId sensor, uint8_t muxChannel) {
     const uint8_t index = static_cast<uint8_t>(sensor);
-    digitalWrite(xshutPin, HIGH);
+    if (!selectI2cMuxChannel(muxChannel)) return false;
     delay(STARTUP_DELAY_MS);
-
-    if (!sensors[index].begin(0x29, false, &Wire)) return false;
-    if (!sensors[index].setAddress(address)) return false;
-    delay(STARTUP_DELAY_MS);
-    return true;
-}
-
-bool ToFManager::initializeRearSensor(SensorId sensor, uint8_t muxChannel) {
-    if (!selectMuxChannel(muxChannel)) return false;
-    delay(STARTUP_DELAY_MS);
-    return sensors[static_cast<uint8_t>(sensor)].begin(0x29, false, &Wire);
+    const bool ready = sensors[index].begin(0x29, false, &Wire);
+    deselectI2cMux();
+    return ready;
 }
 
 void ToFManager::updateSensor(SensorId sensor) {
@@ -134,20 +91,12 @@ void ToFManager::updateSensor(SensorId sensor) {
 }
 
 void ToFManager::update() {
-    // Front sensors are directly on the parent bus; disconnect all mux
-    // channels before accessing them.
-    if (!deselectMux()) return;
-    for (uint8_t i = 0; i < 3; ++i) {
+    // Only one same-address ToF is exposed to the controller at a time.
+    for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
+        if (!selectI2cMuxChannel(TOF_MUX_CHANNELS[i])) continue;
         updateSensor(static_cast<SensorId>(i));
     }
-
-    // Select one rear sensor at a time. The three modules can all retain their
-    // default 0x29 I2C address because only one downstream channel is visible.
-    for (uint8_t i = 0; i < 3; ++i) {
-        if (!selectMuxChannel(REAR_MUX_CHANNELS[i])) continue;
-        updateSensor(static_cast<SensorId>(REAR_LEFT + i));
-    }
-    deselectMux();
+    deselectI2cMux();
 }
 
 uint16_t ToFManager::getDistanceMm(SensorId sensor) const {
