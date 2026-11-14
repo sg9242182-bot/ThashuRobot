@@ -8,6 +8,7 @@ class RobotCommandResult {
     required this.errorCode,
     required this.timestamp,
     this.requestId,
+    this.leaseId,
   });
 
   final String commandId;
@@ -17,16 +18,24 @@ class RobotCommandResult {
   final String controlMode;
   final String? errorCode;
   final String? timestamp;
+  final String? leaseId;
 
   factory RobotCommandResult.fromJson(Map<String, dynamic> json) {
+    final commandId = _requiredString(json, 'command_id');
+    final command = _requiredString(json, 'command');
+    final rawLeaseId = json['lease_id'];
+    if (rawLeaseId != null && rawLeaseId is! String) {
+      throw const FormatException('Expected "lease_id" to be a string or null.');
+    }
     return RobotCommandResult(
-      commandId: _requiredString(json, 'command_id'),
+      commandId: commandId,
       requestId: _optionalString(json, 'request_id'),
-      command: _requiredString(json, 'command'),
+      command: command,
       status: _requiredString(json, 'status'),
       controlMode: _requiredString(json, 'control_mode'),
       errorCode: _optionalString(json, 'error_code'),
       timestamp: _optionalString(json, 'timestamp'),
+      leaseId: rawLeaseId as String? ?? (command == 'stop' ? null : commandId),
     );
   }
 

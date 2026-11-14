@@ -1,0 +1,38 @@
+name: Flutter mobile checks
+
+on:
+  pull_request:
+    paths:
+      - "mobile/flutter/**"
+      - ".github/workflows/flutter-mobile-checks.yml"
+  push:
+    branches:
+      - "phase-12-pi-api-https"
+      - "niteshvar/phase9-ble-handoff"
+    paths:
+      - "mobile/flutter/**"
+      - ".github/workflows/flutter-mobile-checks.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile/flutter
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Resolve Flutter dependencies
+        run: flutter pub get
+      - name: Analyze Flutter code
+        run: flutter analyze
+      - name: Run Flutter tests
+        run: flutter test

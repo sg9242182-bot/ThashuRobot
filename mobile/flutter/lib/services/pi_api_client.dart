@@ -4,11 +4,13 @@ import 'dart:io';
 
 import '../core/pi_api_exception.dart';
 import '../models/pi_health.dart';
+import '../models/pi_diagnostics.dart';
 import '../models/pi_status.dart';
 import '../models/robot_command.dart';
 import '../models/robot_mode.dart';
 import '../models/robot_move_request.dart';
 import '../models/robot_move_validator.dart';
+import 'pinned_pi_tls.dart';
 
 class PiApiHttpResponse {
   const PiApiHttpResponse({
@@ -39,8 +41,15 @@ abstract interface class PiApiTransport {
 }
 
 class IoPiApiTransport implements PiApiTransport {
-  IoPiApiTransport({HttpClient? httpClient})
-    : _httpClient = httpClient ?? HttpClient();
+  IoPiApiTransport({
+    required Uri origin,
+    String? certificateSha256Fingerprint,
+    HttpClient? httpClient,
+  }) : _httpClient = httpClient ??
+           createPiTlsClient(
+             origin: origin,
+             certificateSha256Fingerprint: certificateSha256Fingerprint,
+           );
 
   final HttpClient _httpClient;
 
@@ -96,12 +105,17 @@ class PiApiClient {
     required Uri baseUri,
     // Keep the parameter public and the stored token private.
     String? bearerToken,
+    String? certificateSha256Fingerprint,
     PiApiTransport? transport,
     this.requestTimeout = const Duration(seconds: 5),
   }) : _baseUri = _validateBaseUri(baseUri),
        // ignore: prefer_initializing_formals
        _bearerToken = bearerToken,
-       _transport = transport ?? IoPiApiTransport();
+       _transport = _createTransport(
+         baseUri,
+         certificateSha256Fingerprint,
+         transport,
+       );
 
   final Uri _baseUri;
   final String? _bearerToken;
@@ -112,6 +126,23 @@ class PiApiClient {
   String? _moveInFlightMode;
   Future<RobotCommandResult>? _stopInFlight;
   String? _stopInFlightRequestId;
+
+  static PiApiTransport _createTransport(
+    Uri origin,
+    String? certificateSha256Fingerprint,
+    PiApiTransport? transport,
+  ) {
+    final validatedOrigin = _validateBaseUri(origin);
+    final validatedPin = _validateCertificatePin(
+      validatedOrigin,
+      certificateSha256Fingerprint,
+    );
+    return transport ??
+        IoPiApiTransport(
+          origin: validatedOrigin,
+          certificateSha256Fingerprint: validatedPin,
+        );
+  }
 
   static Uri _validateBaseUri(Uri uri) {
     if (!uri.hasAuthority ||
@@ -124,6 +155,22 @@ class PiApiClient {
       );
     }
     return uri;
+  }
+
+  static String? _validateCertificatePin(Uri uri, String? value) {
+    final pin = value?.trim();
+    if (uri.port == 8443 && (pin == null || pin.isEmpty)) {
+      throw ArgumentError.value(
+        value,
+        'certificateSha256Fingerprint',
+        'The Pi local HTTPS listener requires its certificate fingerprint.',
+      );
+    }
+    if (pin == null || pin.isEmpty) return null;
+    if (uri.scheme != 'https') {
+      throw ArgumentError.value(value, 'certificateSha256Fingerprint', 'A certificate pin requires HTTPS.');
+    }
+    return PiCertificatePin.normalize(pin);
   }
 
   Uri _endpoint(String path) => _baseUri.resolve(path);
@@ -152,6 +199,40 @@ class PiApiClient {
   /// Checks API liveness only; this does not confirm robot or ESP32 readiness.
   Future<PiHealth> getHealth() =>
       _getJson('/health', authenticated: false, parser: PiHealth.fromJson);
+
+  /// Reads the authenticated, read-only diagnostics snapshot.
+  Future<PiDiagnosticsSnapshot> getDiagnostics() => _getJson(
+    '/api/v1/diagnostics',
+    authenticated: true,
+    parser: PiDiagnosticsSnapshot.fromJson,
+  );
+
+  /// Renews only an already-dispatched movement lease; this does not resend motion.
+  Future<void> renewMovementLease({
+    required String leaseId,
+    required String requestId,
+  }) async {
+    _validateRequestId(requestId);
+    final id = leaseId.trim();
+    if (id.isEmpty) {
+      throw ArgumentError.value(leaseId, 'leaseId', 'Must not be empty.');
+    }
+    await _postJson<bool>(
+      '/api/v1/robot/commands/${Uri.encodeComponent(id)}/renew',
+      {'request_id': requestId},
+      authenticated: true,
+      parser: (json) {
+        if (json['lease_id'] != id || json['status'] != 'active') {
+          throw const FormatException('The movement lease is no longer active.');
+        }
+        final expiresAt = json['expires_at'];
+        if (expiresAt is! String || DateTime.tryParse(expiresAt) == null) {
+          throw const FormatException('Expected an active lease expiry timestamp.');
+        }
+        return true;
+      },
+    );
+  }
 
   Future<RobotModeResponse> setMode(RobotMode mode) => _postJson(
     '/api/v1/robot/mode',
