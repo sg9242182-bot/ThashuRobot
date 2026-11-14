@@ -3,46 +3,48 @@
 #include <math.h>
 
 EyeManager::EyeManager()
-: _display(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RESET_PIN),
+: _leftDisplay(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RESET_PIN),
+  _rightDisplay(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RESET_PIN),
   _transitionStartMs(0),
   _transitionDurationMs(1),
   _currentTarget(EXPR_IDLE),
-  _blinkActive(false),
-  _blinkStartMs(0),
   _blinkDurationMs(360),
   _renderDirty(true),
   _ready(false) {
 
-  _currentParams = computeExpressionParams(EXPR_IDLE);
-  _fromParams    = _currentParams;
-  _toParams      = _currentParams;
+  _blinkActive[0] = false;
+  _blinkActive[1] = false;
+  _blinkStartMs[0] = 0;
+  _blinkStartMs[1] = 0;
+  for (uint8_t eye = 0; eye < 2; ++eye) {
+    _currentParams[eye] = computeExpressionParams(EXPR_IDLE, eye);
+    _fromParams[eye] = _currentParams[eye];
+    _toParams[eye] = _currentParams[eye];
+  }
 }
 
 bool EyeManager::begin() {
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
   Wire.setClock(400000);
 
-  if (!selectI2cMuxChannels(OLED_MUX_CHANNEL_MASK)) return _ready = false;
-  _ready = _display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR);
-  deselectI2cMux();
+  bool leftReady = selectI2cMuxChannel(OLED_LEFT_MUX_CHANNEL);
+  if (leftReady) leftReady = _leftDisplay.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR);
+  const bool leftMuxReady = deselectI2cMux();
+
+  bool rightReady = selectI2cMuxChannel(OLED_RIGHT_MUX_CHANNEL);
+  if (rightReady) rightReady = _rightDisplay.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR);
+  const bool rightMuxReady = deselectI2cMux();
+  _ready = leftReady && rightReady && leftMuxReady && rightMuxReady;
   if (!_ready) return false;
   _nextAutoBlinkMs = millis() + 2500;
-  _display.clearDisplay();
-  if (!showOnBothDisplays()) return false;
-
-  renderFrame(_currentParams, 0.0f);
+  _leftDisplay.clearDisplay();
+  _rightDisplay.clearDisplay();
+  if (!renderFrame(_currentParams[0], 0.0f, _currentParams[1], 0.0f)) return false;
   _renderDirty = false;
   return true;
 }
 
 bool EyeManager::isReady() const { return _ready; }
-
-bool EyeManager::showOnBothDisplays() {
-  const bool displaysSelected = selectI2cMuxChannels(OLED_MUX_CHANNEL_MASK);
-  if (displaysSelected) _display.display();
-  const bool muxReady = deselectI2cMux();
-  return displaysSelected && muxReady;
-}
 
 void EyeManager::update() {
   static unsigned long lastFrameMs = 0;
@@ -54,45 +56,57 @@ void EyeManager::update() {
   }
   if (now - _lastHealthCheckMs >= 500) {
     _lastHealthCheckMs = now;
-    bool displaysSelected = selectI2cMuxChannels(OLED_MUX_CHANNEL_MASK);
-    if (displaysSelected) {
+    bool leftReady = selectI2cMuxChannel(OLED_LEFT_MUX_CHANNEL);
+    if (leftReady) {
       Wire.beginTransmission(OLED_ADDR);
-      displaysSelected = Wire.endTransmission() == 0;
+      leftReady = Wire.endTransmission() == 0;
     }
-    const bool muxReady = deselectI2cMux();
-    _ready = displaysSelected && muxReady;
+    const bool leftMuxReady = deselectI2cMux();
+
+    bool rightReady = selectI2cMuxChannel(OLED_RIGHT_MUX_CHANNEL);
+    if (rightReady) {
+      Wire.beginTransmission(OLED_ADDR);
+      rightReady = Wire.endTransmission() == 0;
+    }
+    const bool rightMuxReady = deselectI2cMux();
+    _ready = leftReady && rightReady && leftMuxReady && rightMuxReady;
   }
 
   const bool transitionActive = (now - _transitionStartMs) < _transitionDurationMs;
-  const bool blinkWasActive = _blinkActive;
+  const bool blinkWasActive = _blinkActive[0] || _blinkActive[1];
 
   // If nothing is animating and the last requested frame is already on the OLED,
   // do not retransmit the framebuffer. This keeps the shared I2C bus available.
   if (!transitionActive && !blinkWasActive && !_renderDirty) return;
 
-  // ~35 FPS cap during active animation. A dirty settled frame is allowed through
-  // so the exact target pose is always committed after a transition completes.
-  if ((now - lastFrameMs < 28) && (transitionActive || blinkWasActive)) return;
+  // Each eye needs its own I2C transfer, so cap animated frames at 20 FPS.
+  // A dirty settled frame still commits after a transition completes.
+  if ((now - lastFrameMs < 50) && (transitionActive || blinkWasActive)) return;
   lastFrameMs = now;
 
-  EyeParams p = getInterpolatedParams(now);
-  const float blinkAmt = getBlinkAmount(now);
+  _currentParams[0] = getInterpolatedParams(now, 0);
+  _currentParams[1] = getInterpolatedParams(now, 1);
+  const float leftBlink = getBlinkAmount(now, 0);
+  const float rightBlink = getBlinkAmount(now, 1);
 
-  renderFrame(p, blinkAmt);
+  _ready = renderFrame(_currentParams[0], leftBlink,
+                       _currentParams[1], rightBlink);
 
   // If getBlinkAmount() completed the blink during this frame, this render is the
   // final open frame. If the expression transition also finished, the target pose
   // is now committed and the module can remain idle until the next command.
   const bool transitionStillActive = (now - _transitionStartMs) < _transitionDurationMs;
-  if (!transitionStillActive && !_blinkActive) {
+  if (!transitionStillActive && !_blinkActive[0] && !_blinkActive[1]) {
     _renderDirty = false;
   }
 }
 
 void EyeManager::setExpression(Expression expr) {
   const unsigned long now = millis();
-  _fromParams = getInterpolatedParams(now);
-  _toParams   = computeExpressionParams(expr);
+  for (uint8_t eye = 0; eye < 2; ++eye) {
+    _fromParams[eye] = getInterpolatedParams(now, eye);
+    _toParams[eye] = computeExpressionParams(expr, eye);
+  }
   _transitionStartMs = now;
   _transitionDurationMs = 250;
   _currentTarget = expr;
@@ -100,9 +114,12 @@ void EyeManager::setExpression(Expression expr) {
 }
 
 void EyeManager::triggerBlink() {
-  if (_blinkActive) return;
-  _blinkActive = true;
-  _blinkStartMs = millis();
+  if (_blinkActive[0] || _blinkActive[1]) return;
+  const unsigned long now = millis();
+  _blinkActive[0] = true;
+  _blinkActive[1] = true;
+  _blinkStartMs[0] = now;
+  _blinkStartMs[1] = now + 55;
   _renderDirty = true;
 }
 
@@ -144,15 +161,15 @@ void EyeManager::printHelp() {
 }
 
 // ---------------------------------------------------------
-// SYMMETRICAL EXPRESSION DEFINITIONS
+// Expression poses are intentionally different for each physical eye.
 // ---------------------------------------------------------
-EyeParams EyeManager::computeExpressionParams(Expression expr) {
+EyeParams EyeManager::computeExpressionParams(Expression expr, uint8_t eyeIndex) {
   EyeParams p;
 
-  p.w          = 60.0f;
-  p.h          = 46.0f;
-  p.cy         = 32.0f;
-  p.corner     = 16.0f;
+  p.w          = (eyeIndex == 0) ? 60.0f : 56.0f;
+  p.h          = (eyeIndex == 0) ? 46.0f : 43.0f;
+  p.cy         = (eyeIndex == 0) ? 31.0f : 33.0f;
+  p.corner     = (eyeIndex == 0) ? 16.0f : 15.0f;
   p.topCut     = 0.0f;
   p.botCut     = 0.0f;
   p.smileCurve = 0.0f;
@@ -163,54 +180,56 @@ EyeParams EyeManager::computeExpressionParams(Expression expr) {
       break;
 
     case EXPR_HAPPY:
-      p.w = 64.0f;
-      p.h = 44.0f;
-      p.cy = 30.0f;
-      p.smileCurve = 1.0f;
+      p.w = (eyeIndex == 0) ? 66.0f : 62.0f;
+      p.h = (eyeIndex == 0) ? 41.0f : 45.0f;
+      p.cy = (eyeIndex == 0) ? 29.0f : 31.0f;
+      p.corner = (eyeIndex == 0) ? 17.0f : 15.0f;
+      p.smileCurve = (eyeIndex == 0) ? 0.78f : 1.0f;
       break;
 
     case EXPR_SAD:
-      p.w = 52.0f;
-      p.h = 32.0f;
-      p.cy = 38.0f;
-      p.corner = 10.0f;
-      p.topCut = 6.0f;
+      p.w = (eyeIndex == 0) ? 54.0f : 50.0f;
+      p.h = (eyeIndex == 0) ? 34.0f : 30.0f;
+      p.cy = (eyeIndex == 0) ? 37.0f : 39.0f;
+      p.corner = (eyeIndex == 0) ? 11.0f : 9.0f;
+      p.topCut = (eyeIndex == 0) ? 4.0f : 7.0f;
       break;
 
     case EXPR_ANGRY:
-      p.w = 64.0f;
-      p.h = 24.0f;
-      p.cy = 34.0f;
-      p.corner = 4.0f;
-      p.topCut = 4.0f;
-      p.botCut = 2.0f;
+      p.w = (eyeIndex == 0) ? 65.0f : 61.0f;
+      p.h = (eyeIndex == 0) ? 23.0f : 27.0f;
+      p.cy = (eyeIndex == 0) ? 34.0f : 35.0f;
+      p.corner = (eyeIndex == 0) ? 4.0f : 6.0f;
+      p.topCut = (eyeIndex == 0) ? 7.0f : 3.0f;
+      p.botCut = (eyeIndex == 0) ? 1.0f : 3.0f;
       break;
 
     case EXPR_CURIOUS:
-      p.w = 52.0f;
-      p.h = 54.0f;
-      p.cy = 27.0f;
-      p.corner = 20.0f;
+      // The left eye opens taller while the right eye stays closer to neutral.
+      p.w = (eyeIndex == 0) ? 48.0f : 58.0f;
+      p.h = (eyeIndex == 0) ? 58.0f : 48.0f;
+      p.cy = (eyeIndex == 0) ? 27.0f : 31.0f;
+      p.corner = (eyeIndex == 0) ? 23.0f : 17.0f;
       break;
 
     case EXPR_SLEEPY:
-      p.w = 58.0f;
-      p.h = 16.0f;
-      p.cy = 38.0f;
-      p.corner = 6.0f;
-      p.topCut = 4.0f;
+      p.w = (eyeIndex == 0) ? 59.0f : 54.0f;
+      p.h = (eyeIndex == 0) ? 17.0f : 14.0f;
+      p.cy = (eyeIndex == 0) ? 38.0f : 36.0f;
+      p.corner = (eyeIndex == 0) ? 7.0f : 5.0f;
+      p.topCut = (eyeIndex == 0) ? 3.0f : 5.0f;
       break;
 
     case EXPR_SURPRISED:
-      p.w = 46.0f;
-      p.h = 58.0f;
-      p.cy = 32.0f;
-      p.corner = 23.0f;
+      p.w = (eyeIndex == 0) ? 44.0f : 50.0f;
+      p.h = (eyeIndex == 0) ? 59.0f : 54.0f;
+      p.cy = (eyeIndex == 0) ? 32.0f : 30.0f;
+      p.corner = (eyeIndex == 0) ? 22.0f : 25.0f;
       break;
 
     case EXPR_LOVE:
-      p.heartScale = 1.0f;
-      p.cy = 30.0f;
+      p.heartScale = (eyeIndex == 0) ? 0.88f : 1.0f;
+      p.cy = (eyeIndex == 0) ? 31.0f : 29.0f;
       break;
 
     case EXPR_COUNT:
@@ -225,28 +244,31 @@ float EyeManager::easeInOutCubic(float t) {
   return (t < 0.5f) ? (4.0f * t * t * t) : (1.0f - powf(-2.0f * t + 2.0f, 3.0f) / 2.0f);
 }
 
-EyeParams EyeManager::getInterpolatedParams(unsigned long now) {
+EyeParams EyeManager::getInterpolatedParams(unsigned long now, uint8_t eyeIndex) {
   unsigned long elapsed = now - _transitionStartMs;
   float t = (_transitionDurationMs > 0) ? (float)elapsed / (float)_transitionDurationMs : 1.0f;
   float e = easeInOutCubic(t);
 
   EyeParams r;
-  r.w          = _fromParams.w          + (_toParams.w          - _fromParams.w)          * e;
-  r.h          = _fromParams.h          + (_toParams.h          - _fromParams.h)          * e;
-  r.cy         = _fromParams.cy         + (_toParams.cy         - _fromParams.cy)         * e;
-  r.corner     = _fromParams.corner     + (_toParams.corner     - _fromParams.corner)     * e;
-  r.topCut     = _fromParams.topCut     + (_toParams.topCut     - _fromParams.topCut)     * e;
-  r.botCut     = _fromParams.botCut     + (_toParams.botCut     - _fromParams.botCut)     * e;
-  r.smileCurve = _fromParams.smileCurve + (_toParams.smileCurve - _fromParams.smileCurve) * e;
-  r.heartScale = _fromParams.heartScale + (_toParams.heartScale - _fromParams.heartScale) * e;
+  const EyeParams &from = _fromParams[eyeIndex];
+  const EyeParams &to = _toParams[eyeIndex];
+  r.w          = from.w          + (to.w          - from.w)          * e;
+  r.h          = from.h          + (to.h          - from.h)          * e;
+  r.cy         = from.cy         + (to.cy         - from.cy)         * e;
+  r.corner     = from.corner     + (to.corner     - from.corner)     * e;
+  r.topCut     = from.topCut     + (to.topCut     - from.topCut)     * e;
+  r.botCut     = from.botCut     + (to.botCut     - from.botCut)     * e;
+  r.smileCurve = from.smileCurve + (to.smileCurve - from.smileCurve) * e;
+  r.heartScale = from.heartScale + (to.heartScale - from.heartScale) * e;
   return r;
 }
 
-float EyeManager::getBlinkAmount(unsigned long now) {
-  if (!_blinkActive) return 0.0f;
-  unsigned long elapsed = now - _blinkStartMs;
+float EyeManager::getBlinkAmount(unsigned long now, uint8_t eyeIndex) {
+  if (!_blinkActive[eyeIndex]) return 0.0f;
+  if ((long)(now - _blinkStartMs[eyeIndex]) < 0) return 0.0f;
+  const unsigned long elapsed = now - _blinkStartMs[eyeIndex];
   if (elapsed >= _blinkDurationMs) {
-    _blinkActive = false;
+    _blinkActive[eyeIndex] = false;
     return 0.0f;
   }
   // Close over 80 ms, hold fully closed for 150 ms, then reopen over 130 ms.
@@ -263,16 +285,30 @@ float EyeManager::getBlinkAmount(unsigned long now) {
 // ---------------------------------------------------------
 // RENDERING
 // ---------------------------------------------------------
-void EyeManager::renderFrame(const EyeParams &p, float blinkAmt) {
-  _display.clearDisplay();
+bool EyeManager::renderFrame(const EyeParams &left, float leftBlink,
+                             const EyeParams &right, float rightBlink) {
+  renderEye(_leftDisplay, left, leftBlink, true);
+  bool leftReady = selectI2cMuxChannel(OLED_LEFT_MUX_CHANNEL);
+  if (leftReady) _leftDisplay.display();
+  const bool leftMuxReady = deselectI2cMux();
 
-  const int16_t cx = 64;
+  renderEye(_rightDisplay, right, rightBlink, false);
+  bool rightReady = selectI2cMuxChannel(OLED_RIGHT_MUX_CHANNEL);
+  if (rightReady) _rightDisplay.display();
+  const bool rightMuxReady = deselectI2cMux();
+  return leftReady && rightReady && leftMuxReady && rightMuxReady;
+}
+
+void EyeManager::renderEye(Adafruit_SSD1306 &display, const EyeParams &p,
+                           float blinkAmt, bool leftEye) {
+  display.clearDisplay();
+
+  const int16_t cx = leftEye ? 62 : 66;
   int16_t cy = round(p.cy);
 
   if (p.heartScale > 0.05f) {
     float currentScale = p.heartScale * (1.0f - blinkAmt * 0.9f);
-    drawHeart(cx, cy, currentScale);
-    _ready = showOnBothDisplays();
+    drawHeart(display, cx, cy, currentScale);
     return;
   }
 
@@ -286,38 +322,52 @@ void EyeManager::renderFrame(const EyeParams &p, float blinkAmt) {
   int16_t rc = round(p.corner);
   if (rc > rh / 2) rc = rh / 2;
 
-  _display.fillRoundRect(rx, ry, rw, rh, rc, SSD1306_WHITE);
+  display.fillRoundRect(rx, ry, rw, rh, rc, SSD1306_WHITE);
 
   if (p.topCut > 0.5f && blinkAmt < 0.5f) {
     int16_t cutH = round(p.topCut);
-    _display.fillRect(0, ry - 5, 128, cutH + 5, SSD1306_BLACK);
+    if (leftEye) {
+      display.fillTriangle(0, ry - 5, 128, ry - 5 + cutH / 2,
+                           128, ry + cutH, SSD1306_BLACK);
+    } else {
+      display.fillTriangle(0, ry - 5 + cutH / 2, 128, ry - 5,
+                           0, ry + cutH, SSD1306_BLACK);
+    }
   }
 
   if (p.botCut > 0.5f && blinkAmt < 0.5f) {
     int16_t cutH = round(p.botCut);
-    _display.fillRect(0, ry + rh - cutH, 128, cutH + 5, SSD1306_BLACK);
+    if (leftEye) {
+      display.fillTriangle(0, ry + rh - cutH, 128, ry + rh - cutH / 2,
+                           0, ry + rh + 5, SSD1306_BLACK);
+    } else {
+      display.fillTriangle(0, ry + rh - cutH / 2, 128, ry + rh - cutH,
+                           128, ry + rh + 5, SSD1306_BLACK);
+    }
   }
 
   if (p.smileCurve > 0.05f) {
     float smileY = (cy + renderH / 2.0f) - (20.0f * p.smileCurve);
     smileY += (cy - smileY) * blinkAmt;
-    _display.fillRoundRect(cx - 45, round(smileY), 90, 50, 24, SSD1306_BLACK);
+    const int16_t smileOffset = leftEye ? -3 : 3;
+    display.fillRoundRect(cx - 45, round(smileY) + smileOffset,
+                          90, 50, 24, SSD1306_BLACK);
   }
-
-  _ready = showOnBothDisplays();
 }
 
-void EyeManager::drawHeart(int16_t cx, int16_t cy, float scale) {
+void EyeManager::drawHeart(Adafruit_SSD1306 &display, int16_t cx,
+                           int16_t cy, float scale) {
   int16_t r      = round(14.0f * scale);
   int16_t leftX  = cx - round(12.0f * scale);
   int16_t rightX = cx + round(12.0f * scale);
   int16_t topY   = cy - round(6.0f * scale);
   int16_t botY   = cy + round(22.0f * scale);
 
-  _display.fillCircle(leftX, topY, r, SSD1306_WHITE);
-  _display.fillCircle(rightX, topY, r, SSD1306_WHITE);
-  _display.fillTriangle(cx - round(25.0f * scale), topY + round(2.0f * scale),
+  display.fillCircle(leftX, topY, r, SSD1306_WHITE);
+  display.fillCircle(rightX, topY, r, SSD1306_WHITE);
+  display.fillTriangle(cx - round(25.0f * scale), topY + round(2.0f * scale),
                         cx + round(25.0f * scale), topY + round(2.0f * scale),
                         cx, botY, SSD1306_WHITE);
-  _display.fillRect(leftX, topY - round(2.0f * scale), rightX - leftX + 1, round(12.0f * scale), SSD1306_WHITE);
+  display.fillRect(leftX, topY - round(2.0f * scale), rightX - leftX + 1,
+                   round(12.0f * scale), SSD1306_WHITE);
 }

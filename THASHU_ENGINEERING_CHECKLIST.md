@@ -1200,19 +1200,21 @@ I²C multiplexer expansion (2026-11-14; firmware updated, hardware validation pe
 
 \[x] Place all six VL53L0X ToF sensors on dedicated TCA9548A channels 0–5. Each sensor stays at its default address 0x29; front XSHUT/address reassignment is removed.
 
-\[x] Place the two same-address (0x3C) OLED displays on mux channels 6 and 7. The ESP32 enables both channels together and sends one shared frame to both displays, preserving animation bus time.
+\[x] Place the two same-address (0x3C) OLED displays on mux channels 6 and 7, each with its own framebuffer and animation pose. Existing expression commands now render intentionally different left/right eye shapes; blink timing is staggered by 55 ms.
 
 \[x] Use all three rear sensors in ESP32 reverse and turn safety checks. A close obstacle or stale/unavailable rear channel blocks reverse; the existing 30 cm threshold remains.
 
 \[x] Preserve the existing Pi serial frame shape and `US_REAR` field. Firmware reports the nearest rear ToF distance in millimetres, or FAR when all three are out of range. The Pi parser continues to populate `rear_mm`, so no Pi code change is needed for current aggregate rear-clear/reverse-blocking behavior. Per-sensor rear-left/center/right values are not exposed to the Pi or app.
 
-\[ ] Wire the 7Semi TCA9548A at address 0x70: channels 0–5 are front-left/center/right and rear-left/center/right ToFs; channels 6–7 are the left/right OLEDs. The user identified the rear modules as GY-VL53L0X; confirm each board's supply/logic voltage and common ground before power-up. The two OLED channels are selected together so one frame is broadcast to both.
+\[ ] Wire the 7Semi TCA9548A at address 0x70: channels 0–5 are front-left/center/right and rear-left/center/right ToFs; channels 6–7 are the left/right OLEDs. The user identified the rear modules as GY-VL53L0X; confirm each board's supply/logic voltage and common ground before power-up. Each OLED channel is selected separately for its own frame.
 
-\[ ] Compile and upload the firmware; verify boot/READY, both OLEDs, and all six front/rear sensor readings.
+\[ ] Compile and upload the firmware; verify boot/READY, each OLED's independent expression/animation, and all six front/rear sensor readings.
 
 \[ ] With wheels raised, verify each of the six sensors independently, FAR reporting in open space, reverse rejection at or inside 300 mm, and fail-closed rejection for missing/stale rear readings. Confirm the Pi receives the aggregate `rear_mm` value.
 
 This update is isolated on `codex/all-i2c-devices-mux`; it has not been merged to `phase-12-pi-api-https` or `main`. The ESP32 sketch has not yet been compiled or physically tested.
+
+Independent OLED animation update (2026-11-14): Each OLED now has a separate SSD1306 framebuffer, per-eye transition state, and per-eye blink state. Existing mood commands remain unchanged; poses are intentionally asymmetric (including one-eye emphasis for curious, different eyelid slopes for sad/angry, and different heart sizes for love). Automatic/manual blinks start 55 ms apart. The pair is rendered at up to 20 FPS because each screen needs its own I²C transfer. Compile, upload, and visual hardware verification remain pending.
 
 HTTPS deployment plan (2026-11-08; approved by Vishal): use Tailscale MagicDNS
 and Caddy with the generic Pi name `thashu-robot`. Caddy obtains its
@@ -1448,7 +1450,7 @@ ESP32 manager ownership correction (2026-10-05): At the user's direction, the in
 Legacy runtime cleanup (2026-10-05): The former `ESP32Firmware/motors/motor_manager.ino` duplicated serial command parsing and safety policy outside the new dedicated managers. Its protocol handling now lives in `ESP32Firmware/communicationmanager/communication_manager.cpp`; safety policy lives in `ESP32Firmware/safetymanager/safety_manager.cpp`. The old entry sketch will be removed after this documented replacement; use `ESP32Firmware/ThashuController/ThashuController.ino` as the single integrated entry point.
 
 
-Required-hardware health update (2026-10-05): `EyeManager.begin()` now reports OLED initialization failure, and `EyeManager.update()` polls the shared OLED I2C address every 500 ms. `ServoManager` and `MotorManager` expose readiness; `SafetyManager` now checks those managers and stops motors on reported loss, while startup refuses `READY` if required initialization fails. These are software health signals only: identical OLEDs sharing address 0x3C cannot be individually distinguished by an I2C probe, and servo attachment status cannot detect a physically disconnected servo. No ESP32 compile or hardware validation has been performed.
+Required-hardware health update (2026-10-05; OLED probing improved by mux on 2026-11-14): `EyeManager.begin()` reports OLED initialization failure, and `EyeManager.update()` checks each OLED independently through mux channels 6 and 7 every 500 ms. `ServoManager` and `MotorManager` expose readiness; `SafetyManager` checks those managers and stops motors on reported loss, while startup refuses `READY` if required initialization fails. Servo attachment status still cannot detect a physically disconnected servo. The new per-display probe and independent rendering have not been compiled or hardware-validated.
 
 
 Serial capture follow-up (2026-10-11): With the OLED and rear ultrasonic disconnected, the sketch emitted `EVENT|0|READY` while telemetry stayed `NA`. `READY` is emitted by `CommunicationManager.begin()` and is not a live proof that every peripheral is present. The initial serial capture also exposed that `SafetyManager.update()` returned before refreshing ToF/ultrasonic data after OLED/servo health loss. Both integrated and source-folder SafetyManager copies now keep sensor updates running while forcing/staying in a stopped, not-ready state when required hardware is unhealthy. This correction has not yet been built or re-tested on the ESP32; the three ToF telemetry channels and OLED health behavior remain open acceptance checks. Phase 1 remains in progress.

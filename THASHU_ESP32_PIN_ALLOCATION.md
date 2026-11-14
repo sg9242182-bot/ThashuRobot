@@ -58,10 +58,10 @@ GPIO21/22 connect only to the TCA9548A upstream SDA/SCL bus. The mux address is 
 | 3 | Rear-left ToF |
 | 4 | Rear-center ToF |
 | 5 | Rear-right ToF |
-| 6 | Left OLED |
-| 7 | Right OLED |
+| 6 | Left OLED (own framebuffer and animation pose) |
+| 7 | Right OLED (own framebuffer and animation pose) |
 
-The front ToF XSHUT lines on GPIO4/16/17 are no longer used; unique per-sensor I²C address assignment is unnecessary while each device is isolated on its mux channel. Firmware switches channels sequentially on the shared bus.
+The front ToF XSHUT lines on GPIO4/16/17 are no longer used; unique per-sensor I²C address assignment is unnecessary while each device is isolated on its mux channel. Firmware switches channels sequentially on the shared bus. The OLEDs share address 0x3C but are selected separately so their frames can differ.
 
 ## TA6586 board interface and motor GPIO mapping — 2026-10-22
 
