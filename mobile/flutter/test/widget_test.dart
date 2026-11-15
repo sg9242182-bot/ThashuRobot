@@ -564,6 +564,14 @@ void main() {
           body:
               '{"request_id":"b1234567-89ab-4cde-8f01-23456789abcd",'
               '"command_id":"cmd-1","command":"forward",'
+              '"status":"dispatched","control_mode":"MANUAL",'
+              '"error_code":null,"timestamp":"2026-11-06T12:00:00Z"}',
+        ),
+        const PiApiHttpResponse(
+          statusCode: 200,
+          body:
+              '{"request_id":"b1234567-89ab-4cde-8f01-23456789abcd",'
+              '"command_id":"cmd-1","command":"forward",'
               '"status":"acknowledged","control_mode":"MANUAL",'
               '"error_code":null,"timestamp":"2026-11-06T12:00:01Z"}',
         ),
@@ -683,6 +691,13 @@ void main() {
               '{"api":"ok","esp32_transport":"connected",'
               '"control_mode":"AUTO","controller_readiness":"unknown"}',
         ),
+        const PiApiHttpResponse(
+          statusCode: 200,
+          body:
+              '{"command_id":"cmd-stop","command":"stop",'
+              '"status":"acknowledged","control_mode":"AUTO",'
+              '"error_code":null,"timestamp":"2026-11-06T12:00:01Z"}',
+        ),
       ]);
       final client = PiApiClient(
         baseUri: Uri.parse('http://pi.test:8000'),
@@ -741,6 +756,15 @@ void main() {
               '"error_code":"${outcome.key == 'safety_error' ? 'obstacle' : 'esp32_ack_timeout'}",'
               '"timestamp":"2026-11-06T12:00:01Z"}',
         ),
+        PiApiHttpResponse(
+          statusCode: 200,
+          body:
+              '{"request_id":"b1234567-89ab-4cde-8f01-23456789abcd",'
+              '"command_id":"cmd-1","command":"forward",'
+              '"status":"${outcome.key}","control_mode":"MANUAL",'
+              '"error_code":"${outcome.key == 'safety_error' ? 'obstacle' : 'esp32_ack_timeout'}",'
+              '"timestamp":"2026-11-06T12:00:01Z"}',
+        ),
       ]);
       final client = PiApiClient(
         baseUri: Uri.parse('http://pi.test:8000'),
@@ -778,7 +802,7 @@ void main() {
   });
 
   testWidgets(
-    'network loss marks command outcome unknown and leaves STOP available',
+    'network loss refreshes Pi status, keeps outcome unknown, and leaves STOP available',
     (tester) async {
       _useTallManualViewport(tester);
       final transport = _FakePiTransport([
@@ -789,19 +813,14 @@ void main() {
               '"control_mode":"MANUAL","controller_readiness":"unknown"}',
         ),
         const PiApiHttpResponse(
-          statusCode: 202,
-          body:
-              '{"command_id":"cmd-stop","command":"stop",'
-              '"status":"dispatched","control_mode":"MANUAL",'
-              '"error_code":null,"timestamp":"2026-11-06T12:00:00Z"}',
-        ),
-        const PiApiHttpResponse(
           statusCode: 200,
           body:
               '{"api":"ok","esp32_transport":"connected",'
               '"control_mode":"MANUAL","controller_readiness":"unknown"}',
         ),
-      ])..postFailure = const SocketException('connection closed');
+      ])
+        ..postFailure = const SocketException('connection closed')
+        ..postFailureCount = 2;
       final client = PiApiClient(
         baseUri: Uri.parse('http://pi.test:8000'),
         bearerToken: 'test-token',
@@ -823,7 +842,7 @@ void main() {
       expect(find.textContaining('outcome may be unknown'), findsOneWidget);
       await tester.drag(find.byType(ListView), const Offset(0, 1200));
       await tester.pumpAndSettle();
-      expect(find.textContaining('MANUAL · stale'), findsOneWidget);
+      expect(find.text('MANUAL'), findsOneWidget);
       await _scrollTo(
         tester,
         find.byKey(const ValueKey('move-forward-button')),
@@ -1011,6 +1030,7 @@ class _FakePiTransport implements PiApiTransport {
   int postCount = 0;
   Completer<PiApiHttpResponse>? postCompleter;
   Object? postFailure;
+  int postFailureCount = 1;
 
   @override
   Future<PiApiHttpResponse> get(
@@ -1035,8 +1055,11 @@ class _FakePiTransport implements PiApiTransport {
     postCompleter = null;
     if (pending != null) return pending.future;
     final failure = postFailure;
-    postFailure = null;
-    if (failure != null) throw failure;
+    if (failure != null && postFailureCount > 0) {
+      postFailureCount--;
+      if (postFailureCount == 0) postFailure = null;
+      throw failure;
+    }
     return responses.removeAt(0);
   }
 
