@@ -1200,7 +1200,7 @@ I²C multiplexer expansion (2026-11-14; firmware updated, hardware validation pe
 
 \[x] Place all six VL53L0X ToF sensors on dedicated TCA9548A channels 0–5. Each sensor stays at its default address 0x29; front XSHUT/address reassignment is removed.
 
-\[x] Place the two same-address (0x3C) OLED displays on mux channels 6 and 7, each with its own framebuffer and animation pose. Existing expression commands render intentionally different left/right eye shapes; both blinks use the same start time.
+\[x] Place the two same-address (0x3C) OLED displays on mux channels 6 and 7, each with its own framebuffer and animation pose. Both eyes now use matching width, height, corner radius, and heart scale per expression while retaining small per-eye pose/animation differences; both blinks use the same start time.
 
 \[x] Use all three rear sensors in ESP32 reverse and turn safety checks. A close obstacle or stale/unavailable rear channel blocks reverse; the existing 30 cm threshold remains.
 
@@ -1208,13 +1208,15 @@ I²C multiplexer expansion (2026-11-14; firmware updated, hardware validation pe
 
 \[ ] Wire the 7Semi TCA9548A at address 0x70: channels 0–5 are front-left/center/right and rear-left/center/right ToFs; channels 6–7 are the left/right OLEDs. The user identified the rear modules as GY-VL53L0X; confirm each board's supply/logic voltage and common ground before power-up. Each OLED channel is selected separately for its own frame.
 
-\[ ] Compile and upload the firmware; verify boot/READY, each OLED's independent expression/animation, and all six front/rear sensor readings.
+\[ ] Compile and upload the firmware; verify boot/READY, matching eye sizes with independent OLED expression/animation, and all six front/rear sensor readings.
 
 \[ ] With wheels raised, verify each of the six sensors independently, FAR reporting in open space, reverse rejection at or inside 300 mm, and fail-closed rejection for missing/stale rear readings. Confirm the Pi receives the aggregate `rear_mm` value.
 
 This update is isolated on `codex/all-i2c-devices-mux`; it has not been merged to `phase-12-pi-api-https` or `main`. The ESP32 sketch has not yet been compiled or physically tested.
 
-Independent OLED animation update (2026-11-14): Each OLED has a separate SSD1306 framebuffer and per-eye transition/blink state. Existing mood commands remain unchanged; poses are intentionally asymmetric (including one-eye emphasis for curious, different eyelid slopes for sad/angry, and different heart sizes for love). Both blinks now use the same start time. The displays are still refreshed sequentially over I²C, so a small transfer-time difference remains. The pair is rendered at up to 20 FPS. Compile, upload, and visual verification of this synchronized-blink revision remain pending.
+Independent OLED animation update (2026-11-14): Each OLED has a separate SSD1306 framebuffer and per-eye transition/blink state. Existing mood commands remain unchanged. Both blinks use the same start time; the displays are still refreshed sequentially over I²C, so a small transfer-time difference remains. The pair is rendered at up to 20 FPS.
+
+OLED size matching follow-up (2026-11-15): `eye_manager.cpp` now assigns identical width, height, corner radius, and heart scale to both displays for each expression. Vertical positioning and expression details can remain slightly asymmetric while the eye sizes match. This firmware edit is not yet compiled, uploaded, or visually confirmed on the robot.
 
 HTTPS deployment plan (2026-11-08; approved by Vishal): use Tailscale MagicDNS
 and Caddy with the generic Pi name `thashu-robot`. Caddy obtains its

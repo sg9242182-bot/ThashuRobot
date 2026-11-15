@@ -161,15 +161,15 @@ void EyeManager::printHelp() {
 }
 
 // ---------------------------------------------------------
-// Expression poses are intentionally different for each physical eye.
+// Eye dimensions match per expression; small pose differences preserve character.
 // ---------------------------------------------------------
 EyeParams EyeManager::computeExpressionParams(Expression expr, uint8_t eyeIndex) {
   EyeParams p;
 
-  p.w          = (eyeIndex == 0) ? 60.0f : 56.0f;
-  p.h          = (eyeIndex == 0) ? 46.0f : 43.0f;
+  p.w          = 58.0f;
+  p.h          = 44.0f;
   p.cy         = (eyeIndex == 0) ? 31.0f : 33.0f;
-  p.corner     = (eyeIndex == 0) ? 16.0f : 15.0f;
+  p.corner     = 15.5f;
   p.topCut     = 0.0f;
   p.botCut     = 0.0f;
   p.smileCurve = 0.0f;
@@ -180,55 +180,54 @@ EyeParams EyeManager::computeExpressionParams(Expression expr, uint8_t eyeIndex)
       break;
 
     case EXPR_HAPPY:
-      p.w = (eyeIndex == 0) ? 66.0f : 62.0f;
-      p.h = (eyeIndex == 0) ? 41.0f : 45.0f;
+      p.w = 64.0f;
+      p.h = 43.0f;
       p.cy = (eyeIndex == 0) ? 29.0f : 31.0f;
-      p.corner = (eyeIndex == 0) ? 17.0f : 15.0f;
+      p.corner = 16.0f;
       p.smileCurve = (eyeIndex == 0) ? 0.78f : 1.0f;
       break;
 
     case EXPR_SAD:
-      p.w = (eyeIndex == 0) ? 54.0f : 50.0f;
-      p.h = (eyeIndex == 0) ? 34.0f : 30.0f;
+      p.w = 52.0f;
+      p.h = 32.0f;
       p.cy = (eyeIndex == 0) ? 37.0f : 39.0f;
-      p.corner = (eyeIndex == 0) ? 11.0f : 9.0f;
+      p.corner = 10.0f;
       p.topCut = (eyeIndex == 0) ? 4.0f : 7.0f;
       break;
 
     case EXPR_ANGRY:
-      p.w = (eyeIndex == 0) ? 65.0f : 61.0f;
-      p.h = (eyeIndex == 0) ? 23.0f : 27.0f;
+      p.w = 63.0f;
+      p.h = 25.0f;
       p.cy = (eyeIndex == 0) ? 34.0f : 35.0f;
-      p.corner = (eyeIndex == 0) ? 4.0f : 6.0f;
+      p.corner = 5.0f;
       p.topCut = (eyeIndex == 0) ? 7.0f : 3.0f;
       p.botCut = (eyeIndex == 0) ? 1.0f : 3.0f;
       break;
 
     case EXPR_CURIOUS:
-      // The left eye opens taller while the right eye stays closer to neutral.
-      p.w = (eyeIndex == 0) ? 48.0f : 58.0f;
-      p.h = (eyeIndex == 0) ? 58.0f : 48.0f;
+      p.w = 53.0f;
+      p.h = 53.0f;
       p.cy = (eyeIndex == 0) ? 27.0f : 31.0f;
-      p.corner = (eyeIndex == 0) ? 23.0f : 17.0f;
+      p.corner = 20.0f;
       break;
 
     case EXPR_SLEEPY:
-      p.w = (eyeIndex == 0) ? 59.0f : 54.0f;
-      p.h = (eyeIndex == 0) ? 17.0f : 14.0f;
+      p.w = 56.5f;
+      p.h = 15.5f;
       p.cy = (eyeIndex == 0) ? 38.0f : 36.0f;
-      p.corner = (eyeIndex == 0) ? 7.0f : 5.0f;
+      p.corner = 6.0f;
       p.topCut = (eyeIndex == 0) ? 3.0f : 5.0f;
       break;
 
     case EXPR_SURPRISED:
-      p.w = (eyeIndex == 0) ? 44.0f : 50.0f;
-      p.h = (eyeIndex == 0) ? 59.0f : 54.0f;
+      p.w = 47.0f;
+      p.h = 56.5f;
       p.cy = (eyeIndex == 0) ? 32.0f : 30.0f;
-      p.corner = (eyeIndex == 0) ? 22.0f : 25.0f;
+      p.corner = 23.5f;
       break;
 
     case EXPR_LOVE:
-      p.heartScale = (eyeIndex == 0) ? 0.88f : 1.0f;
+      p.heartScale = 0.94f;
       p.cy = (eyeIndex == 0) ? 31.0f : 29.0f;
       break;
 
