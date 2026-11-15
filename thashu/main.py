@@ -23,7 +23,7 @@ from vision.follow_logic   import FollowLogic
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
 from hardware.servo_tracking import ServoTracker
-from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, get_enrollment_spelling, is_recognition_query, get_person_memory_request, get_event_memory_request, get_person_event_query, get_place_event_query, get_person_memory_save_confirmation, is_person_memory_query, get_person_memory_delete_command
+from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, get_enrollment_spelling, is_recognition_query, get_person_memory_request, get_event_memory_request, get_person_event_query, get_place_event_query, get_person_memory_save_confirmation, is_person_memory_query, get_person_memory_delete_command, should_announce_recognized_person
 from core.model_paths import model_path, project_path
 from memory.people import PeopleMemory
 
@@ -98,6 +98,9 @@ _memory_delete_pending = None
 _memory_pending = None
 _last_idle_recognized_person = None
 _last_idle_recognized_at = 0.0
+_last_announced_recognized_person = None
+_recognized_person_absent_since = None
+RECOGNITION_ANNOUNCEMENT_REARM_SECONDS = 10.0
 _motion_timer = None
 _motion_generation = 0
 _motion_lock = threading.RLock()
@@ -940,6 +943,7 @@ def main():
     global _identity_enrollment_state, _identity_pending_name
     global _memory_delete_pending, _memory_pending
     global _last_idle_recognized_person, _last_idle_recognized_at
+    global _last_announced_recognized_person, _recognized_person_absent_since
     print("[SYSTEM] Jarvis started")
     _start_api_server()
 
@@ -1781,7 +1785,31 @@ def main():
                     ),
                     None,
                 )
-                if recognized_name is not None:
+                now = time.monotonic()
+                last_name_present = any(
+                    str(face.get("name") or "").strip().casefold()
+                    == (_last_announced_recognized_person or "").strip().casefold()
+                    for face in known_faces
+                )
+                if _last_announced_recognized_person and runtime.current == RuntimeState.IDLE:
+                    if not frame_fresh or last_name_present:
+                        _recognized_person_absent_since = None
+                    elif _recognized_person_absent_since is None:
+                        _recognized_person_absent_since = now
+
+                absent_seconds = (
+                    now - _recognized_person_absent_since
+                    if _recognized_person_absent_since is not None
+                    else 0.0
+                )
+                if recognized_name is not None and should_announce_recognized_person(
+                    recognized_name,
+                    _last_announced_recognized_person,
+                    absent_seconds=absent_seconds,
+                    rearm_after=RECOGNITION_ANNOUNCEMENT_REARM_SECONDS,
+                ):
+                    _last_announced_recognized_person = recognized_name
+                    _recognized_person_absent_since = None
                     print(f"[VISION] Announcing recognized person: {recognized_name}")
                     _announce_recognized_person(recognized_name)
 
