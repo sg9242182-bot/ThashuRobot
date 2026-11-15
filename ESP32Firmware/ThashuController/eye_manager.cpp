@@ -119,7 +119,7 @@ void EyeManager::triggerBlink() {
   _blinkActive[0] = true;
   _blinkActive[1] = true;
   _blinkStartMs[0] = now;
-  _blinkStartMs[1] = now + 55;
+  _blinkStartMs[1] = now;
   _renderDirty = true;
 }
 

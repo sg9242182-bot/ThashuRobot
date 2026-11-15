@@ -1200,7 +1200,7 @@ I²C multiplexer expansion (2026-11-14; firmware updated, hardware validation pe
 
 \[x] Place all six VL53L0X ToF sensors on dedicated TCA9548A channels 0–5. Each sensor stays at its default address 0x29; front XSHUT/address reassignment is removed.
 
-\[x] Place the two same-address (0x3C) OLED displays on mux channels 6 and 7, each with its own framebuffer and animation pose. Existing expression commands now render intentionally different left/right eye shapes; blink timing is staggered by 55 ms.
+\[x] Place the two same-address (0x3C) OLED displays on mux channels 6 and 7, each with its own framebuffer and animation pose. Existing expression commands render intentionally different left/right eye shapes; both blinks use the same start time.
 
 \[x] Use all three rear sensors in ESP32 reverse and turn safety checks. A close obstacle or stale/unavailable rear channel blocks reverse; the existing 30 cm threshold remains.
 
@@ -1214,7 +1214,7 @@ I²C multiplexer expansion (2026-11-14; firmware updated, hardware validation pe
 
 This update is isolated on `codex/all-i2c-devices-mux`; it has not been merged to `phase-12-pi-api-https` or `main`. The ESP32 sketch has not yet been compiled or physically tested.
 
-Independent OLED animation update (2026-11-14): Each OLED now has a separate SSD1306 framebuffer, per-eye transition state, and per-eye blink state. Existing mood commands remain unchanged; poses are intentionally asymmetric (including one-eye emphasis for curious, different eyelid slopes for sad/angry, and different heart sizes for love). Automatic/manual blinks start 55 ms apart. The pair is rendered at up to 20 FPS because each screen needs its own I²C transfer. Compile, upload, and visual hardware verification remain pending.
+Independent OLED animation update (2026-11-14): Each OLED has a separate SSD1306 framebuffer and per-eye transition/blink state. Existing mood commands remain unchanged; poses are intentionally asymmetric (including one-eye emphasis for curious, different eyelid slopes for sad/angry, and different heart sizes for love). Both blinks now use the same start time. The displays are still refreshed sequentially over I²C, so a small transfer-time difference remains. The pair is rendered at up to 20 FPS. Compile, upload, and visual verification of this synchronized-blink revision remain pending.
 
 HTTPS deployment plan (2026-11-08; approved by Vishal): use Tailscale MagicDNS
 and Caddy with the generic Pi name `thashu-robot`. Caddy obtains its
