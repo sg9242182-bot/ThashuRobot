@@ -409,8 +409,9 @@ class _ManualControlPageState extends State<ManualControlPage>
         commandId == null ||
         _moveBusy ||
         _stopBusy ||
-        _checkingCommand)
+        _checkingCommand) {
       return;
+    }
     _checkingCommand = true;
     try {
       final result = await client.getCommand(commandId);
