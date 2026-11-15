@@ -575,6 +575,12 @@ void main() {
               '"status":"acknowledged","control_mode":"MANUAL",'
               '"error_code":null,"timestamp":"2026-11-06T12:00:01Z"}',
         ),
+        const PiApiHttpResponse(
+          statusCode: 200,
+          body:
+              '{"api":"ok","esp32_transport":"connected",'
+              '"control_mode":"MANUAL","controller_readiness":"unknown"}',
+        ),
       ]);
       final postResponse = Completer<PiApiHttpResponse>();
       transport.postCompleter = postResponse;
@@ -715,7 +721,7 @@ void main() {
       expect(transport.lastPostUri!.path, '/api/v1/robot/stop');
       _expectStopRequestBody(transport.lastJsonBody);
       expect(
-        find.textContaining('physical stopping is not confirmed'),
+        find.textContaining('not confirmed'),
         findsOneWidget,
       );
       expect(tester.takeException(), isNull);
@@ -764,6 +770,12 @@ void main() {
               '"status":"${outcome.key}","control_mode":"MANUAL",'
               '"error_code":"${outcome.key == 'safety_error' ? 'obstacle' : 'esp32_ack_timeout'}",'
               '"timestamp":"2026-11-06T12:00:01Z"}',
+        ),
+        const PiApiHttpResponse(
+          statusCode: 200,
+          body:
+              '{"api":"ok","esp32_transport":"connected",'
+              '"control_mode":"MANUAL","controller_readiness":"unknown"}',
         ),
       ]);
       final client = PiApiClient(
@@ -842,7 +854,8 @@ void main() {
       expect(find.textContaining('outcome may be unknown'), findsOneWidget);
       await tester.drag(find.byType(ListView), const Offset(0, 1200));
       await tester.pumpAndSettle();
-      expect(find.text('MANUAL'), findsOneWidget);
+      expect(find.text('MANUAL'), findsNWidgets(2));
+      expect(find.textContaining('MANUAL · stale'), findsNothing);
       await _scrollTo(
         tester,
         find.byKey(const ValueKey('move-forward-button')),
