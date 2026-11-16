@@ -191,9 +191,10 @@ class WifiProvisioningClient implements WifiProvisioningService {
       }
       onStatus?.call('credentials_sent');
 
-      // The Pi's physical-button window lasts 60 seconds. Do not retry the
-      // one-time connection-info read: a successful read consumes the handoff.
-      final deadline = DateTime.now().add(const Duration(seconds: 60));
+      // The Pi's 60-second physical window gates pairing and credential
+      // submission. After the Pi accepts them, allow NetworkManager and local
+      // TLS setup time to finish joining and preparing the handoff.
+      final deadline = DateTime.now().add(const Duration(seconds: 120));
       while (DateTime.now().isBefore(deadline)) {
         await Future<void>.delayed(const Duration(seconds: 2));
         try {
@@ -207,7 +208,8 @@ class WifiProvisioningClient implements WifiProvisioningService {
         onStatus?.call(currentStatus);
         switch (currentStatus) {
           case 'connected':
-            final handoffBytes = await connectionInfo.read();
+            onStatus?.call('reading_connection');
+            final handoffBytes = await _readConnectionInfo(connectionInfo);
             try {
               return PiConnectionHandoff.fromBytes(handoffBytes);
             } finally {
@@ -235,7 +237,7 @@ class WifiProvisioningClient implements WifiProvisioningService {
         }
       }
       throw StateError(
-        'The Pi did not finish joining the hotspot within the setup window.',
+        'The Pi did not finish joining the hotspot within the connection wait period. Short-click its setup button and retry.',
       );
     } finally {
       await FlutterBluePlus.stopScan();
@@ -271,6 +273,28 @@ class WifiProvisioningClient implements WifiProvisioningService {
       throw StateError('The Pi returned an unrecognized setup status.');
     }
     return value;
+  }
+
+  Future<List<int>> _readConnectionInfo(
+    BluetoothCharacteristic characteristic,
+  ) async {
+    const retryDelays = [
+      Duration(milliseconds: 350),
+      Duration(milliseconds: 800),
+    ];
+    Object? lastError;
+    for (var attempt = 0; attempt <= retryDelays.length; attempt++) {
+      try {
+        return await characteristic.read();
+      } on Object catch (error) {
+        lastError = error;
+        if (attempt == retryDelays.length) break;
+        await Future<void>.delayed(retryDelays[attempt]);
+      }
+    }
+    throw StateError(
+      'The Pi joined the hotspot, but Android could not read its secure connection details over Bluetooth. Keep Bluetooth on and stay near the Pi, then short-click its setup button and retry. ($lastError)',
+    );
   }
 
   T? _firstOrNull<T>(Iterable<T> values) {

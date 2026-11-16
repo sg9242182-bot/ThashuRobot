@@ -740,9 +740,10 @@ def _camera_ready_for_wake():
 
 
 def _wake_from_touch():
-    """Restore audio/camera first, then animate and play the cached greeting."""
+    """Wait for camera/audio, play a soft greeting eyes-closed, then open gradually."""
     print("[POWER] Touch detected; restoring Thashu")
     wake.lock()
+    eyes.sleep()
     if not _camera_ready_for_wake():
         vision.stop()
         eyes.sleep()
@@ -755,22 +756,25 @@ def _wake_from_touch():
         print("[POWER] Wake deferred: microphone stream could not be restored")
         return False
 
-    # The camera has produced a fresh frame and the mic stream has reopened;
-    # only now begin the gradual eye and voice wake sequence.
+    # Confirm the microphone can reopen, then pause it during the greeting so
+    # playback cannot feed back into wake detection. Keep the eyes asleep until
+    # the greeting has finished and the microphone is ready for normal use.
     audio.pause()
-    eyes.thinking()
-    time.sleep(0.35)
     if not play_cached_response(WAKE_GREETING):
         speak(WAKE_GREETING)
-    eyes.happy()
-    time.sleep(0.35)
-    eyes.idle()
-
     if not audio.resume():
         vision.stop()
         eyes.sleep()
         print("[POWER] Wake deferred: microphone failed after greeting")
         return False
+
+    # The ESP32 interpolates each expression change. Staging SLEEPY before
+    # opening fully avoids the abrupt closed-to-open jump.
+    eyes.sleepy()
+    time.sleep(0.65)
+    eyes.happy()
+    time.sleep(0.45)
+    eyes.idle()
 
     _rearm_wake_after_audio()
     if _api_command_manager is not None:
@@ -1510,7 +1514,7 @@ def main():
     start_piper()
     preload_model()
     warmup_model()
-    prepare_command_voice_cache({"wake_greeting"})
+    prepare_command_voice_cache({"wake_greeting_v2"})
 
     play(SOUND_STARTUP, blocking=True)
 
