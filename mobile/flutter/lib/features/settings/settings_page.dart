@@ -94,11 +94,12 @@ class _SettingsPageState extends State<SettingsPage> {
     'received' => 'The Pi reports that it received the credentials. Waiting for its Wi-Fi connection…',
     'connecting' => 'The Pi is connecting to the hotspot…',
     'connected' =>
-      'The Pi reports connected. Reading its one-time secure handoff…',
+      'The Pi joined the hotspot. Reading its secure connection details…',
+    'reading_connection' =>
+      'The Pi joined the hotspot. Reading its secure connection details…',
     'failed' => 'The Pi reports that Wi-Fi setup failed.',
     'invalid' => 'The Pi rejected the Wi-Fi credentials.',
-    'expired' =>
-      'The Pi setup window expired. Short-click the button and retry.',
+    'expired' => 'The Pi setup window expired before it accepted the Wi-Fi details. Short-click the button and retry.',
     'idle' =>
       'The Pi setup window is not active. Short-click the button and retry.',
     _ => 'Waiting for the Pi setup status…',

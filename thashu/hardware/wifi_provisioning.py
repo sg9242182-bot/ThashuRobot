@@ -32,6 +32,7 @@ from hardware.shutdown_button import (
 
 
 WINDOW_SECONDS = 60.0
+HANDOFF_GRACE_SECONDS = 180.0
 SERVICE_UUID = "8c6d0001-7a4b-4f61-b7a5-927f4e2a1000"
 CREDENTIALS_UUID = "8c6d0002-7a4b-4f61-b7a5-927f4e2a1000"
 STATUS_UUID = "8c6d0003-7a4b-4f61-b7a5-927f4e2a1000"
@@ -45,6 +46,9 @@ class ProvisionState:
         self.armed_until = 0.0
         self.status = "idle"
         self.credentials_accepted = False
+        self.credential_device: str | None = None
+        self.connection_info_payload: bytes | None = None
+        self.handoff_until = 0.0
         self.pairing_event: asyncio.Event | None = None
         self.pairing_passkey: int | None = None
         self.pairing_approved = False
@@ -58,6 +62,9 @@ class ProvisionState:
             self.armed_until = time.monotonic() + WINDOW_SECONDS
             self.status = "waiting"
             self.credentials_accepted = False
+            self.credential_device = None
+            self.connection_info_payload = None
+            self.handoff_until = 0.0
 
     def disarm(self) -> None:
         with self.lock:
@@ -69,41 +76,41 @@ class ProvisionState:
         if event is not None:
             event.set()
 
-    def mark_credentials_accepted(self) -> bool:
+    def mark_credentials_accepted(self, device: str | None) -> bool:
         with self.lock:
-            if time.monotonic() >= self.armed_until or self.credentials_accepted:
+            if (
+                time.monotonic() >= self.armed_until
+                or self.credentials_accepted
+                or not device
+            ):
                 return False
             self.credentials_accepted = True
+            self.credential_device = device
             return True
 
-    def may_read_connection_info(self) -> bool:
+    def publish_connection_info(self, payload: bytes) -> None:
         with self.lock:
-            return (
-                time.monotonic() < self.armed_until
-                and self.credentials_accepted
-                and self.status == "connected"
-            )
+            self.connection_info_payload = bytes(payload)
+            self.handoff_until = time.monotonic() + HANDOFF_GRACE_SECONDS
 
-    def complete_pairing(self) -> None:
+    def info(self, device: str | None) -> bytes:
         with self.lock:
-            self.armed_until = 0.0
-
-    def info(self) -> bytes:
-        if not self.may_read_connection_info():
-            raise DBusError(
-                "org.bluez.Error.NotPermitted",
-                "Connection information is available only after hotspot setup in the active button window.",
-            )
-        try:
-            from core.local_api_access import connection_info
-            payload = connection_info()
-        except Exception as exc:
-            raise DBusError(
-                "org.bluez.Error.NotReady",
-                "Local API connection information is not ready.",
-            ) from exc
-        self.complete_pairing()
-        return payload
+            if (
+                time.monotonic() >= self.handoff_until
+                or self.connection_info_payload is None
+                or not self.credentials_accepted
+                or not device
+                or device != self.credential_device
+                or self.status != "connected"
+            ):
+                raise DBusError(
+                    "org.bluez.Error.NotPermitted",
+                    "Connection information is not available for this setup session.",
+                )
+            # Android can report a transient GATT error after the Pi has
+            # handled a read. Keep the same authenticated handoff briefly
+            # available so Flutter can retry without resending the password.
+            return self.connection_info_payload
 
     def set_status(self, value: str) -> None:
         with self.lock:
@@ -158,6 +165,11 @@ class ProvisionState:
 
 
 STATE = ProvisionState()
+
+
+def _bluetooth_device_path(options) -> str | None:
+    device = options.get("device") if isinstance(options, dict) else None
+    return device if isinstance(device, str) and device.startswith("/") else None
 
 
 def _keyfile_escape(value: str) -> str:
@@ -273,7 +285,16 @@ def _apply_network(ssid: str, password: str) -> None:
             timeout=30,
             check=False,
         )
-        STATE.set_status("connected" if result.returncode == 0 else "failed")
+        if result.returncode != 0:
+            STATE.set_status("failed")
+            return
+        # Generate the token/certificate payload outside the BlueZ read
+        # callback. Certificate creation can take seconds on the Pi and may
+        # otherwise surface to Android as GATT_UNLIKELY (status 14).
+        from core.local_api_access import connection_info
+        payload = connection_info()
+        STATE.publish_connection_info(payload)
+        STATE.set_status("connected")
     except Exception:
         STATE.set_status("failed")
 
@@ -291,11 +312,11 @@ class WifiProvisioningService(Service):
         pass
 
     @characteristic(CONNECTION_INFO_UUID, CharFlags.READ | CharFlags.ENCRYPT_AUTHENTICATED_READ)
-    def connection_info(self, _options) -> bytes:
-        return STATE.info()
+    def connection_info(self, options) -> bytes:
+        return STATE.info(_bluetooth_device_path(options))
 
     @credentials.setter
-    def credentials(self, value: bytes, _options) -> None:
+    def credentials(self, value: bytes, options) -> None:
         if not STATE.armed():
             raise DBusError("org.bluez.Error.NotPermitted", "Provisioning window is closed.")
         try:
@@ -303,8 +324,11 @@ class WifiProvisioningService(Service):
         except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
             STATE.set_status("invalid")
             raise DBusError("org.bluez.Error.InvalidArgs", "Invalid Wi-Fi credentials.")
-        if not STATE.mark_credentials_accepted():
-            raise DBusError("org.bluez.Error.NotPermitted", "Only one credential write is allowed per pairing window.")
+        if not STATE.mark_credentials_accepted(_bluetooth_device_path(options)):
+            raise DBusError(
+                "org.bluez.Error.NotPermitted",
+                "Only one credential write from the authenticated BLE peer is allowed per setup window.",
+            )
         STATE.set_status("received")
         threading.Thread(
             target=_apply_network,
@@ -391,7 +415,13 @@ async def run() -> None:
             if advertised_until and now >= advertised_until:
                 advertised_until = 0.0
                 status = STATE.get_status()
-                timed_out = status not in {"connected", "failed", "invalid"}
+                # The 60-second button window gates pairing and credential
+                # writes. Once credentials were accepted, let NetworkManager
+                # finish its bounded join attempt and retain the status/handoff
+                # for the phone without keeping BLE pairing open.
+                timed_out = status not in {
+                    "received", "connecting", "connected", "failed", "invalid"
+                }
                 if timed_out:
                     STATE.set_status("expired")
                 STATE.disarm()
