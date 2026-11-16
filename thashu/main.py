@@ -34,7 +34,9 @@ SOUND_NOT_HEARD = project_path("sounds", "not_heard.wav")
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 MAX_RECORD_SECONDS = 10
-SILENCE_TIMEOUT    = 0.8
+# End command capture promptly after speech while retaining the VAD's own
+# multi-chunk hangover for natural pauses inside a phrase.
+SILENCE_TIMEOUT    = 0.6
 GRACE_PERIOD       = 4.0
 SAMPLE_RATE        = 48000
 BLOCK_SIZE         = 5460

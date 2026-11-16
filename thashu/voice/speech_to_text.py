@@ -36,6 +36,13 @@ MIN_SAMPLES_48K = INPUT_RATE // 2   # 24 000 samples = 0.5 s
 MODEL_SIZE    = "tiny.en"
 COMPUTE_TYPE  = "int8"
 
+# A smaller beam reduces command decode time on the Pi CPU. Keep it adjustable
+# so noisy-room accuracy can be compared without editing the module.
+try:
+    BEAM_SIZE = max(1, min(5, int(os.environ.get("THASHU_STT_BEAM_SIZE", "3"))))
+except ValueError:
+    BEAM_SIZE = 3
+
 
 # ── Lazy model singleton ──────────────────────────────────────────────────────
 
@@ -119,7 +126,7 @@ def transcribe(audio_48k: np.ndarray, expected_phrases=None) -> str:
         segments, info = model.transcribe(
             audio_16k,
             language="en",
-            beam_size=5,
+            beam_size=BEAM_SIZE,
             best_of=1,
             temperature=0.0,  # Disable stochastic fallback sampling for repeatable decoding.
             condition_on_previous_text=False,
@@ -131,7 +138,7 @@ def transcribe(audio_48k: np.ndarray, expected_phrases=None) -> str:
         )
         text = " ".join(s.text.strip() for s in segments).strip()
         duration_s = len(audio_48k) / INPUT_RATE
-        print(f"[STT] ({duration_s:.1f}s audio) Heard: {text!r}")
+        print(f"[STT] beam={BEAM_SIZE} ({duration_s:.1f}s audio) Heard: {text!r}")
         return text
 
     except Exception as e:
