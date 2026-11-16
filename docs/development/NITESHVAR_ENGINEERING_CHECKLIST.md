@@ -237,6 +237,7 @@ Provision Wi-Fi through the app and consume the Pi's one-time local HTTPS connec
 - [ ] Obtain Vishal's review of the revised BLE pairing and hotspot listener restrictions.
 - [ ] Verify the Android phone can reach the Pi's local HTTPS listener over the phone hotspot with internet disabled.
 - [x] Tharun reports that provisioning through the Thashu app connected the Pi to the phone hotspot (2026-11-11). The app build revision and whether internet was disabled were not captured.
+- [x] Pi-side BLE provisioning and hotspot joining were also hardware-tested with nRF Connect; this verifies the Pi service only, not Flutter end-to-end behavior.
 - [ ] Confirm the app received/saved the API URL, certificate pin, and token; then test pinned HTTPS status/WSS telemetry, stale recovery, app reconnect, hotspot-address change, and Pi restart. Do not send movement commands during onboarding.
 - [x] Preserve the existing manual/Tailscale connection path until offline onboarding passes end to end.
 
