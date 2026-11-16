@@ -148,6 +148,11 @@ class VisionCore:
             if self._thread is not None and self._thread.is_alive():
                 raise RuntimeError("Previous vision worker is still stopping")
 
+            # stop() also pauses inference. Re-enable it before restarting the
+            # worker so idle power-save and touch-wake cycles can resume frames.
+            with self._lock:
+                self._tracker_reset_pending = True
+            self._processing_enabled.set()
             self.camera.start()
             self._running = True
             self._thread = threading.Thread(

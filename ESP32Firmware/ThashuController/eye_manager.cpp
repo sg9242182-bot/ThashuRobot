@@ -49,7 +49,7 @@ bool EyeManager::isReady() const { return _ready; }
 void EyeManager::update() {
   static unsigned long lastFrameMs = 0;
   const unsigned long now = millis();
-  if ((long)(now - _nextAutoBlinkMs) >= 0) {
+  if (_currentTarget != EXPR_ASLEEP && (long)(now - _nextAutoBlinkMs) >= 0) {
     triggerBlink();
     Serial.println(F("DBG|EYES|AUTO_BLINK"));
     _nextAutoBlinkMs = now + 3500;
@@ -110,6 +110,7 @@ void EyeManager::setExpression(Expression expr) {
   _transitionStartMs = now;
   _transitionDurationMs = 250;
   _currentTarget = expr;
+  _nextAutoBlinkMs = now + 2500;
   _renderDirty = true;
 }
 
@@ -150,6 +151,7 @@ void EyeManager::handleCommand(const char *cmdIn) {
   else if (strcmp(cmd, "angry") == 0)     setExpression(EXPR_ANGRY);
   else if (strcmp(cmd, "curious") == 0)   setExpression(EXPR_CURIOUS);
   else if (strcmp(cmd, "sleepy") == 0)    setExpression(EXPR_SLEEPY);
+  else if (strcmp(cmd, "sleep") == 0)     setExpression(EXPR_ASLEEP);
   else if (strcmp(cmd, "surprised") == 0) setExpression(EXPR_SURPRISED);
   else if (strcmp(cmd, "love") == 0)      setExpression(EXPR_LOVE);
   else if (strcmp(cmd, "blink") == 0)     triggerBlink();
@@ -157,7 +159,7 @@ void EyeManager::handleCommand(const char *cmdIn) {
 }
 
 void EyeManager::printHelp() {
-  Serial.println(F("Commands: idle, happy, sad, angry, curious, sleepy, surprised, love, blink"));
+  Serial.println(F("Commands: idle, happy, sad, angry, curious, sleepy, sleep, surprised, love, blink"));
 }
 
 // ---------------------------------------------------------
@@ -217,6 +219,13 @@ EyeParams EyeManager::computeExpressionParams(Expression expr, uint8_t eyeIndex)
       p.cy = (eyeIndex == 0) ? 38.0f : 36.0f;
       p.corner = 6.0f;
       p.topCut = (eyeIndex == 0) ? 3.0f : 5.0f;
+      break;
+
+    case EXPR_ASLEEP:
+      p.w = 56.5f;
+      p.h = 2.0f;
+      p.cy = 42.0f;
+      p.corner = 1.0f;
       break;
 
     case EXPR_SURPRISED:

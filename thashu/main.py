@@ -11,7 +11,7 @@ from voice.audio_manager  import AudioManager
 from voice.wake_word      import WakeWordEngine
 from voice.vad            import VoiceActivityDetector
 from voice.speech_to_text import transcribe, preload_model
-from voice.text_to_speech import speak, play_cached_response, play_recognized_person, start_piper
+from voice.text_to_speech import speak, play_cached_response, play_recognized_person, prepare_command_voice_cache, start_piper
 from voice.sound_player   import play
 from core.brain           import Brain
 from core.ai_engine      import warmup_model
@@ -62,7 +62,11 @@ FACE_ENROLLMENT_SAMPLE_COUNT = 15
 FACE_ENROLLMENT_TIMEOUT_SECONDS = 180.0
 
 # ── Shutdown Button ───────────────────────────────────────────────────────────
-BUTTON_PIN = 17
+TOUCH_WAKE_PIN = 22  # BCM GPIO22, physical pin 15; active-high TTP223 output.
+IDLE_REDUCE_AFTER_SECONDS = 5 * 60
+IDLE_SLEEP_AFTER_SECONDS = 10 * 60
+WAKE_CAMERA_READY_TIMEOUT_SECONDS = 12.0
+WAKE_GREETING = "Mmm... I'm awake! Give me a moment to open my eyes."
 
 
 # ── Boot ──────────────────────────────────────────────────────────────────────
@@ -109,28 +113,37 @@ _motion_lock = threading.RLock()
 _shutdown_event = threading.Event()
 _shutdown_lock = threading.Lock()
 _shutdown_complete = False
+_api_command_manager = None
+_activity_lock = threading.Lock()
+_last_user_activity_at = time.monotonic()
 event_bus.subscribe(
     "RUNTIME_STATE_CHANGED",
     vision.on_runtime_state_changed,
 )
 
 
-# ── Shutdown Button Monitor ───────────────────────────────────────────────────
-def monitor_shutdown_button():
+def _mark_user_activity():
+    global _last_user_activity_at
+    with _activity_lock:
+        _last_user_activity_at = time.monotonic()
+
+
+def _idle_duration():
+    with _activity_lock:
+        last_activity = _last_user_activity_at
+    return max(0.0, time.monotonic() - last_activity)
+
+
+# ── Touch Wake Input ──────────────────────────────────────────────────────────
+def setup_touch_wake_input():
+    """Claim the touch input; GPIO17 belongs to the separate BLE service."""
     GPIO.setmode(GPIO.BCM)
-
-    # Internal pull-up resistor
-    GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-
-    print("[SYSTEM] Shutdown button monitoring started")
-
-    while not _shutdown_event.wait(0.1):
-        # Button pressed = LOW
-        if GPIO.input(BUTTON_PIN) == GPIO.LOW:
-            print("[SYSTEM] Shutdown button pressed")
-            _shutdown_runtime("physical shutdown button")
-            os.system("sudo shutdown now")
-            break
+    # TTP223 touch modules powered from 3.3 V output HIGH on touch.
+    GPIO.setup(TOUCH_WAKE_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+    print(
+        f"[SYSTEM] Touch wake input ready on BCM GPIO{TOUCH_WAKE_PIN}; "
+        "GPIO17 is managed by the BLE setup service"
+    )
 
 
 # ── Collect spoken command ─────────────────────────────────────────────────────
@@ -220,6 +233,7 @@ def _rearm_wake_after_audio():
 
 def _announce_recognized_person(person_name):
     """Announce the confirmed person's saved name while vision and wake input are paused."""
+    _mark_user_activity()
     display_name = " ".join(str(person_name or "").split())
     message = f"I recognize {display_name}."
     transition_runtime(RuntimeState.SPEAKING)
@@ -440,7 +454,7 @@ def _cancel_motion_sources():
 
 def _start_api_server():
     """Start the mobile API on this process's existing motor/serial transport."""
-    global _api_server, _api_thread
+    global _api_server, _api_thread, _api_command_manager
 
     try:
         import sys
@@ -471,7 +485,9 @@ def _start_api_server():
             command_lock=_motion_lock,
             before_mode_switch=_cancel_motion_sources,
             before_external_stop=_cancel_motion_sources,
+            activity_callback=_mark_user_activity,
         )
+        _api_command_manager = manager
         services.attach_robot_manager(manager)
         config = uvicorn.Config(
             app,
@@ -494,6 +510,82 @@ def _start_api_server():
         print(f"[API] Started at {scheme}://{host}:{port}; shares ESP32 transport")
     except Exception as exc:
         print(f"[API] Startup failed ({type(exc).__name__}); robot voice/runtime remains available")
+
+
+def _enter_software_sleep():
+    """Stop motion, inhibit API moves, and park camera/audio until touch wake."""
+    manager = _api_command_manager
+    try:
+        if manager is not None:
+            manager.enter_sleep()
+        else:
+            _cancel_motion_sources()
+            sequence = stop_motion()
+            if sequence is None or motors.gpio.wait_for_ack(sequence, timeout=0.75) != "OK":
+                print("[POWER] Sleep deferred: ESP32 STOP was not acknowledged")
+                return False
+    except Exception as exc:
+        print(f"[POWER] Sleep deferred: could not confirm motor STOP: {exc}")
+        return False
+
+    wake.lock()
+    audio.pause()
+    vision.stop()
+    eyes.sleep()
+    print("[POWER] Software sleep: audio and camera paused; touch GPIO wakes Thashu")
+    return True
+
+
+def _camera_ready_for_wake():
+    vision.start()
+    deadline = time.monotonic() + WAKE_CAMERA_READY_TIMEOUT_SECONDS
+    while time.monotonic() < deadline and not _shutdown_event.is_set():
+        observed_at = vision.get_state().get("observed_at")
+        if isinstance(observed_at, (int, float)) and time.monotonic() - observed_at <= 0.75:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def _wake_from_touch():
+    """Restore audio/camera first, then animate and play the cached greeting."""
+    print("[POWER] Touch detected; restoring Thashu")
+    wake.lock()
+    if not _camera_ready_for_wake():
+        vision.stop()
+        eyes.sleep()
+        print("[POWER] Wake deferred: camera did not provide a fresh frame")
+        return False
+
+    if not audio.resume():
+        vision.stop()
+        eyes.sleep()
+        print("[POWER] Wake deferred: microphone stream could not be restored")
+        return False
+
+    # The camera has produced a fresh frame and the mic stream has reopened;
+    # only now begin the gradual eye and voice wake sequence.
+    audio.pause()
+    eyes.thinking()
+    time.sleep(0.35)
+    if not play_cached_response(WAKE_GREETING):
+        speak(WAKE_GREETING)
+    eyes.happy()
+    time.sleep(0.35)
+    eyes.idle()
+
+    if not audio.resume():
+        vision.stop()
+        eyes.sleep()
+        print("[POWER] Wake deferred: microphone failed after greeting")
+        return False
+
+    _rearm_wake_after_audio()
+    if _api_command_manager is not None:
+        _api_command_manager.exit_sleep()
+    _mark_user_activity()
+    print("[POWER] Awake. Say 'Hey Thashu'")
+    return True
 
 
 def _stop_api_server():
@@ -556,13 +648,6 @@ def _shutdown_runtime(reason="process exit"):
         motors.gpio.close()
     except Exception as exc:
         print(f"[SYSTEM] ESP32 transport shutdown warning: {exc}")
-
-    current = threading.current_thread()
-    for thread in threading.enumerate():
-        if thread.name == "thashu-shutdown-button" and thread is not current:
-            thread.join(timeout=0.5)
-            if thread.is_alive():
-                print("[SYSTEM] Shutdown-button monitor is still stopping")
 
     try:
         GPIO.cleanup()
@@ -946,20 +1031,17 @@ def main():
     global _memory_delete_pending, _memory_pending
     global _last_idle_recognized_person, _last_idle_recognized_at
     global _last_announced_recognized_person, _recognized_person_absent_since
+    idle_reduced = False
+    software_sleeping = False
     print("[SYSTEM] Jarvis started")
     _start_api_server()
 
     # Start systems
     audio.start()
 
-    # ── Start shutdown button monitor ───────────────────────────────────────
-    shutdown_thread = threading.Thread(
-        target=monitor_shutdown_button,
-        name="thashu-shutdown-button",
-        daemon=True,
-    )
-
-    shutdown_thread.start()
+    # GPIO17 is exclusively owned by the BLE provisioning service, which maps
+    # short-click to setup and long-hold to Pi shutdown.
+    setup_touch_wake_input()
 
     # ── Startup sound ───────────────────────────────────────────────────────
 
@@ -969,6 +1051,7 @@ def main():
     start_piper()
     preload_model()
     warmup_model()
+    prepare_command_voice_cache({"wake_greeting"})
 
     play(SOUND_STARTUP, blocking=True)
 
@@ -985,11 +1068,52 @@ def main():
     eyes.idle()
     # Start autonomous following only after the startup audio has finished.
     vision.start()
+    _mark_user_activity()
 
 
 
     while not _shutdown_event.is_set():
         process_safety_events()
+
+        if software_sleeping:
+            touch = GPIO.wait_for_edge(
+                TOUCH_WAKE_PIN,
+                GPIO.RISING,
+                timeout=1000,
+            )
+            if touch is not None and _wake_from_touch():
+                software_sleeping = False
+                idle_reduced = False
+            continue
+
+        manager_auto_active = False
+        if _api_command_manager is not None:
+            try:
+                manager_auto_active = _api_command_manager.auto_active
+            except Exception:
+                manager_auto_active = True
+        with _motion_lock:
+            timed_motion_active = _motion_timer is not None or _follow_motion_active
+        can_idle = (
+            runtime.current == RuntimeState.IDLE
+            and _identity_enrollment_state == "idle"
+            and not _follow_search_active
+            and not timed_motion_active
+            and not manager_auto_active
+        )
+        if can_idle:
+            idle_seconds = _idle_duration()
+            if idle_seconds >= IDLE_SLEEP_AFTER_SECONDS:
+                if _enter_software_sleep():
+                    software_sleeping = True
+                    idle_reduced = True
+                    continue
+                time.sleep(0.25)
+            elif idle_seconds >= IDLE_REDUCE_AFTER_SECONDS and not idle_reduced:
+                vision.stop()
+                eyes.sleepy()
+                idle_reduced = True
+                print("[POWER] Idle for 5 minutes; camera paused and eyes drowsy")
 
         if runtime.current == RuntimeState.IDLE and _identity_enrollment_state == "capturing":
             capture = vision.enrollment_status()
@@ -1082,6 +1206,11 @@ def main():
             # continue to listen for the wake word.
             wake_triggered = not _follow_search_active and wake.process(chunk)
             if wake_triggered:
+                _mark_user_activity()
+                if idle_reduced:
+                    vision.start()
+                    eyes.idle()
+                    idle_reduced = False
                 # Snapshot identity before the interaction pauses vision and STT delays dispatch.
                 recognized_person_at_wake = _recently_recognized_person()
                 transition_runtime(RuntimeState.WAKE_DETECTED)

@@ -95,7 +95,8 @@ void CommunicationManager::handle(char* line) {
         else if (!strcmp(field[3],"THINKING") || !strcmp(field[3],"LISTENING")) eyes->setExpression(EXPR_CURIOUS);
         else if (!strcmp(field[3],"SPEAKING")) eyes->setExpression(EXPR_HAPPY);
         else if (!strcmp(field[3],"ALERT")) eyes->setExpression(EXPR_ANGRY);
-        else if (!strcmp(field[3],"SLEEP")) eyes->setExpression(EXPR_SLEEPY);
+        else if (!strcmp(field[3],"SLEEPY")) eyes->setExpression(EXPR_SLEEPY);
+        else if (!strcmp(field[3],"SLEEP")) eyes->setExpression(EXPR_ASLEEP);
         else { acknowledge(sequence, "ERROR|INVALID_ARGUMENT"); return; }
         safety->notePiFrame();
         acknowledge(sequence, "OK"); return;
