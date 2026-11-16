@@ -220,11 +220,11 @@ Support predictable startup, shutdown, configuration, and recovery.
 - [x] Separate secrets from ordinary configuration and avoid logging them; the API token is environment-backed, auth tests verify fail-closed behavior, and structured API logs exclude the token.
 - [x] Define service startup order and readiness checks for API, robot manager, and ESP32 communication. The manager/serial transport is initialized before the embedded API; API startup waits up to five seconds for Uvicorn readiness, while ESP32 controller readiness remains explicitly `unknown` without a READY tracker.
 - [x] Handle service shutdown without leaving commands or sockets in an undefined state. API shutdown is requested gracefully, waits up to five seconds, and logs a timeout; telemetry, command tasks, and owned transport have lifespan cleanup.
-- [ ] Coordinate restart/reset/recovery actions with Tharun; ensure privileged actions are authenticated and auditable.
+- [x] Coordinate recovery behavior with Tharun: no remote reset is in scope; normal STOP stays authenticated and audited. Tharun agreed to a 250 ms manual-lease renewal cadence with a provisional 500 ms expiry; Nitesh's Flutter implementation confirmation and hardware stopping-distance test remain pending.
 - [x] Never use a generic API endpoint to execute arbitrary shell commands; the API route-surface test guards this boundary.
 - [x] Add bounded serial reconnect backoff (1, 2, 4, 8, 16, then 30 seconds capped) and avoid rapid endless reconnect attempts. This is reconnect backoff, not an automatic whole-process restart loop.
 - [x] Document recovery behavior for Pi reboot, ESP32 disconnect, API startup/shutdown failure, and configuration error in `api/PI_SETUP.md`.
-- [ ] Verify safety behavior remains owned by the Pi/ESP32 layers even if the mobile app disappears.
+- [ ] Verify safety behavior remains owned by the Pi/ESP32 layers even if the mobile app disappears. Backend code gates move/renew on an authenticated telemetry connection, expires the manual lease, and dispatches normal STOP. Fake coverage and GitHub Actions run #33 passed on commit `bf702e9`. Tharun confirmed the firmware's 300 mm obstacle-stop threshold; the restrained stopping-distance test for the provisional 500 ms movement lease (Tharun) and Flutter app disconnect/restart integration checks (Niteshvar) remain pending.
 
 ### Exit criteria
 - [x] Startup and shutdown are repeatable in component lifecycle tests; target-Pi behavior remains for Phase 9.
@@ -260,8 +260,10 @@ Validate the end-to-end path with the owners of the connected components.
 
 ### Checklist
 - [x] Publish the current API and WebSocket contracts for Niteshvar in `api/README.md`; his merged PR #9 records implementation against this documented contract. Live deployment details remain pending.
-- [ ] Confirm the app's client behavior against real backend responses. Pi-local `curl` requests verified basic REST responses. The HTTPS-only Flutter connection form and secure runtime client wiring are now present on `phase-12-pi-api-https`; Flutter build and phone-to-Pi verification remain pending.
-- [x] Agree on Tailscale MagicDNS + Caddy with generic Pi name `thashu-robot`; keep FastAPI on loopback and proxy from Caddy bound to the Pi's Tailscale IP. Do not expose port 8000 or use Funnel. Pi configuration and Android checks remain pending; see `api/PI_SETUP.md`.
+- [x] Integrate the offline phone-hotspot path with the Flutter client: BLE delivers URL, certificate fingerprint, and token; Flutter pins HTTPS and WSS and stores credentials securely. Tharun reports the integrated debug APK installed on his phone; analysis passed and all 62 Flutter tests passed.
+- [x] Keep the main API on loopback and bind the optional local TLS listener only to the current Wi-Fi address. The listener is additionally gated on the exact NetworkManager profile created by provisioning and the hotspot gateway as client source; other profiles/clients are denied.
+- [ ] Verify the Android/Pi authenticated BLE numeric-comparison pairing on hardware, including mismatch and timeout rejection. The Pi speaks the six-digit value; the user compares it to Android's system prompt and confirms on the Pi button.
+- [ ] Verify the phone's source IP matches the active hotspot gateway, then test pinned HTTPS/WSS status and telemetry, reconnect, IP/certificate change, and Pi restart with internet disabled. Do not send movement commands during onboarding.
 - [ ] Confirm command acknowledgements and telemetry match ESP32 behavior with Tharun.
 - [ ] Test mode changes, movement, stop, emergency stop, diagnostics, and reconnection in the agreed safe test environment.
 - [ ] Verify logs allow a request/command to be traced across API, robot manager, and ESP32 transport where supported.
@@ -282,7 +284,7 @@ Make the backend maintainable by the team.
 ### Checklist
 - [x] Document installation, configuration, run, test, service, and recovery procedures in `api/PI_SETUP.md` and `api/README.md`.
 - [x] Keep architecture, API, protocol, and troubleshooting docs aligned with implementation; remaining unapproved diagnostic/E-stop behavior is explicitly listed as pending.
-- [ ] Add CI checks for formatting and static analysis where feasible. The current local workflow now also includes API lifecycle tests; hosted run 42465518411 passed Python 3.11 syntax and the earlier API, Pi protocol, and robot-manager suites on commit `7a02bba`. The new lifecycle/backoff/logging changes require a fresh CI run after they are committed/pushed.
+- [x] Add CI checks for formatting, static analysis, and automated tests. GitHub Actions now runs Ruff formatting checks for the backend configuration modules, Ruff correctness/static checks for the API and Pi backend modules, and the API, robot-manager, hardware-protocol, and runtime-cleanup unit suites (workflow commit `9dc6567`). The first hosted runs exposed formatting differences, test module names that are absent on this branch, and a stale STOP expectation. Those fixes are now committed; rerun result is pending, so do not claim the checks passed until GitHub reports success.
 - [x] Remove debug shortcuts and temporary bypasses. No authentication or robot-safety bypass is enabled; face-match debug logging is a documented opt-in configuration flag.
 - [x] Record unresolved issues and their owners in the phase summary and contract-gap document.
 - [x] Summarize completed component work and open dependencies in the phase summary, with commit/PR and test evidence below.
@@ -301,7 +303,7 @@ For each phase, record:
 - **Contract/version:** the API/protocol revision used
 - **Dependency owner:** Tharun, Niteshvar, or another named owner as applicable
 
-### Current phase summary (2026-11-08)
+### Current phase summary (updated 2026-11-09)
 
 | Phase | Status | Remaining item(s) |
 |---|---|---|
@@ -312,12 +314,12 @@ For each phase, record:
 | 4 — REST API | Complete for component implementation | Live Pi/client verification is in Phase 9. |
 | 5 — WebSocket/telemetry | In progress | Backend/client contract and component logic are implemented; private-network/server-restart integration is pending. |
 | 6 — Diagnostics | Complete | Approved contract and read-only diagnostics endpoint implemented; GitHub Actions run 42512821791 passed 73 API/protocol tests. Flutter client work is tracked in Phase 9. |
-| 7 — Configuration/recovery | In progress | Coordinate restart/reset procedure and confirm the layered safety behavior with Tharun. |
+| 7 — Configuration/recovery | In progress | Backend movement lease and startup STOP are implemented on `phase-12-pi-api-https`; fake coverage and GitHub Actions run #33 passed on commit `bf702e9`. Tharun confirmed the 300 mm obstacle-stop threshold, but this does not verify the provisional 500 ms movement-lease timeout. Flutter renewal/disconnect/restart integration and the restrained lease stopping-distance test remain open; flashed firmware revision is unknown. |
 | 8 — Security/failure tests | In progress | Automated fake-based checks are covered; STOP ACK passed on Pi. Physical watchdog and movement-timeout evidence remains. |
-| 9 — Mobile/hardware integration | In progress | Pi-local REST health/status/auth/mode/STOP checks passed; phone-to-Pi HTTPS/WebSocket, API movement, telemetry recovery, and app diagnostics remain. |
-| 10 — Handoff | In progress | Run tests/CI for this integration revision, add formatting/static analysis where practical, and verify a second-person setup. |
+| 9 — Mobile/hardware integration | In progress | App build/tests passed and app installed. Authenticated BLE pairing, hotspot-only listener reachability, pinned HTTPS/WSS, reconnect, and restart still need supervised Pi/phone evidence. |
+| 10 — Handoff | In progress | Formatting/static-analysis and backend test checks are configured in GitHub Actions; latest result pending. A second person still needs to reproduce setup and verify the main behaviors on the target Pi. |
 
-**Latest repository evidence (updated 2026-11-09):** The API integration is being carried on `phase-12-pi-api-https`, based on current `main`. The Pi-local run verified `/health`, `/api/v1/status`, an unauthenticated 401, MANUAL/AUTO mode switches, and STOP dispatch followed by an acknowledged command result. The HTTPS-only Flutter settings form now stores the Pi origin/token securely and wires REST/WebSocket clients at startup. Flutter dependency resolution/build and phone-to-Pi verification remain pending. Vishal approved Tailscale MagicDNS + Caddy with generic hostname `thashu-robot`; keep FastAPI on loopback and expose only Caddy on the Pi's Tailscale IP. Pi configuration and Android HTTPS/WebSocket telemetry checks are still pending. Tharun reports the robot movement test passed, but the posted output does not establish that Flutter or the API `/move` route was used. Niteshvar's [Flutter PR #9](https://github.com/sg9242182-bot/ThashuRobot/pull/9) is merged and reports Flutter analysis/tests passing. Phone-to-Pi HTTPS/WebSocket verification, authenticated API movement evidence, Flutter diagnostics client integration, and privileged recovery controls remain open. The Phase 6 diagnostics contract and backend endpoint are implemented and covered by passing CI. The current Phase 12 branch still needs fresh automated test/CI evidence after its integration changes.
+**Latest repository evidence (updated 2026-11-11):** Pi-local REST health/status/auth/mode/STOP checks were previously reported passing. The Flutter integration from `0d699b2` passed analysis, 62 tests, and Android debug build, but the APK initially shown in a screenshot still had the old pairing warning. Tharun reports nRF Connect pairing succeeded after matching the spoken/displayed code and confirming with the Pi button; the status characteristic then read successfully. He later reported provisioning through the Thashu app connected the Pi to the phone hotspot; the app revision and whether internet was disabled were not captured. HTTPS/WSS reachability, API handoff verification, deliberate mismatch/no-button rejection, and hotspot-only listener restrictions still need evidence. Keep Phase 9 in progress until those supervised checks and reconnect/restart cases pass.
 
 ## Working rules
 

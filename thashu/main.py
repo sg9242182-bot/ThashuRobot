@@ -1,3 +1,5 @@
+import asyncio
+import socket
 import time
 import threading
 import os
@@ -61,14 +63,12 @@ PENDING_MEMORY_CONFIRM_SECONDS = 120.0
 FACE_ENROLLMENT_SAMPLE_COUNT = 15
 FACE_ENROLLMENT_TIMEOUT_SECONDS = 180.0
 
-# ── Shutdown Button ───────────────────────────────────────────────────────────
+# ── Idle Power Save / Touch Wake ──────────────────────────────────────────────
 TOUCH_WAKE_PIN = 22  # BCM GPIO22, physical pin 15; active-high TTP223 output.
 IDLE_REDUCE_AFTER_SECONDS = 5 * 60
 IDLE_SLEEP_AFTER_SECONDS = 10 * 60
 WAKE_CAMERA_READY_TIMEOUT_SECONDS = 12.0
 WAKE_GREETING = "Mmm... I'm awake! Give me a moment to open my eyes."
-
-
 # ── Boot ──────────────────────────────────────────────────────────────────────
 runtime   = RuntimeStateMachine()
 event_bus = EventBus()
@@ -430,6 +430,12 @@ def stop_motion():
 
 _api_server = None
 _api_thread = None
+_local_api_server = None
+_local_api_thread = None
+_local_api_monitor_thread = None
+_local_api_monitor_stop = threading.Event()
+_local_api_lock = threading.Lock()
+_local_api_bound_ip = None
 
 
 def _cancel_motion_sources():
@@ -452,8 +458,133 @@ def _cancel_motion_sources():
         _follow_motion_active = False
 
 
+def _bind_api_socket(host, port):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((host, port))
+        sock.listen(128)
+        sock.setblocking(False)
+        return sock
+    except Exception:
+        sock.close()
+        raise
+
+
+def _run_api_servers(primary_server, app, validate_api_tls_bind, pinning_confirmed, local_enabled):
+    """Run loopback and local HTTPS listeners on one asyncio loop.
+
+    Both listeners share the same ApiServices instance/event loop. The local
+    listener is rebound only to the configured Wi-Fi interface's current IP.
+    """
+    from core.local_api_access import (
+        ensure_local_api_material,
+        local_api_port,
+        provisioned_hotspot_network,
+    )
+
+    async def run():
+        global _local_api_server, _local_api_bound_ip
+        primary_socket = _bind_api_socket(
+            primary_server.config.host,
+            primary_server.config.port,
+        )
+        primary_server.install_signal_handlers = lambda: None
+        primary_task = asyncio.create_task(primary_server.serve(sockets=[primary_socket]))
+        local_server = None
+        local_task = None
+        local_ip = None
+        try:
+            for _ in range(200):
+                if primary_server.started:
+                    break
+                if primary_task.done():
+                    await primary_task
+                    return
+                await asyncio.sleep(0.05)
+            if not primary_server.started:
+                raise RuntimeError("Loopback API did not finish startup")
+
+            while not primary_server.should_exit:
+                if local_enabled:
+                    try:
+                        network = await asyncio.to_thread(provisioned_hotspot_network)
+                        address = network["address"] if network is not None else None
+                        if address != local_ip:
+                            if local_server is not None:
+                                local_server.should_exit = True
+                                await local_task
+                                local_server = None
+                                local_task = None
+                                _local_api_server = None
+                                _local_api_bound_ip = None
+                                # Closing the old WebSocket stops renewals; wait
+                                # past the 500 ms lease so its normal STOP fires.
+                                await asyncio.sleep(0.65)
+                            if address is not None:
+                                material = await asyncio.to_thread(
+                                    ensure_local_api_material, address
+                                )
+                                validate_api_tls_bind(
+                                    address,
+                                    material["certfile"],
+                                    material["keyfile"],
+                                    android_trust_confirmed=pinning_confirmed,
+                                )
+                                local_config = uvicorn.Config(
+                                    app,
+                                    host=address,
+                                    port=local_api_port(),
+                                    log_level="warning",
+                                    access_log=False,
+                                    ws_ping_interval=20.0,
+                                    ws_ping_timeout=10.0,
+                                    ssl_certfile=material["certfile"],
+                                    ssl_keyfile=material["keyfile"],
+                                    lifespan="off",
+                                    timeout_graceful_shutdown=1,
+                                )
+                                local_server = uvicorn.Server(local_config)
+                                local_server.install_signal_handlers = lambda: None
+                                local_socket = _bind_api_socket(address, local_api_port())
+                                local_task = asyncio.create_task(
+                                    local_server.serve(sockets=[local_socket])
+                                )
+                                local_ip = address
+                                _local_api_server = local_server
+                                _local_api_bound_ip = address
+                                print(
+                                    f"[API] Local HTTPS listener started on "
+                                    f"{address}:{local_api_port()}"
+                                )
+                            else:
+                                local_ip = None
+                                print("[API] Wi-Fi address unavailable; local HTTPS listener stopped")
+                    except Exception as exc:
+                        print(f"[API] Local HTTPS rebind failed ({type(exc).__name__})")
+                        if local_server is not None:
+                            local_server.should_exit = True
+                            await local_task
+                            local_server = None
+                            local_task = None
+                            local_ip = None
+                            _local_api_server = None
+                            _local_api_bound_ip = None
+                await asyncio.sleep(1.0)
+        finally:
+            if local_server is not None:
+                local_server.should_exit = True
+                await local_task
+            _local_api_server = None
+            _local_api_bound_ip = None
+            primary_server.should_exit = True
+            await primary_task
+
+    asyncio.run(run())
+
+
 def _start_api_server():
-    """Start the mobile API on this process's existing motor/serial transport."""
+    """Start loopback API and optional local HTTPS on the shared event loop."""
     global _api_server, _api_thread, _api_command_manager
 
     try:
@@ -467,7 +598,16 @@ def _start_api_server():
         import uvicorn
         from api.config import get_api_tls_files, validate_api_tls_bind
         from api.main import app, services
-        from core.config import api_host, api_port, api_tls_android_trust_confirmed
+        from core.config import (
+            api_host,
+            api_local_tls_pinning_confirmed,
+            api_port,
+            api_tls_android_trust_confirmed,
+        )
+        from core.local_api_access import (
+            enabled as local_api_enabled,
+            ensure_api_token,
+        )
         from core.robot_manager import RobotCommandManager
 
         host = api_host()
@@ -479,6 +619,19 @@ def _start_api_server():
             keyfile,
             android_trust_confirmed=api_tls_android_trust_confirmed(),
         )
+
+        local_enabled = local_api_enabled()
+        pinning_confirmed = api_local_tls_pinning_confirmed()
+        if local_enabled and not pinning_confirmed:
+            print(
+                "[API] Local HTTPS disabled: app certificate pinning is not "
+                "confirmed; loopback API remains available"
+            )
+            local_enabled = False
+        if local_enabled:
+            # Persist the robot process's configured token before root-owned
+            # BLE provisioning can return the app connection bundle.
+            ensure_api_token()
 
         manager = RobotCommandManager(
             motor=motors,
@@ -501,13 +654,16 @@ def _start_api_server():
         )
         _api_server = uvicorn.Server(config)
         _api_thread = threading.Thread(
-            target=_api_server.run,
+            target=_run_api_servers,
+            args=(_api_server, app, validate_api_tls_bind, pinning_confirmed, local_enabled),
             name="thashu-api",
             daemon=True,
         )
         _api_thread.start()
         scheme = "https" if certfile and keyfile else "http"
         print(f"[API] Started at {scheme}://{host}:{port}; shares ESP32 transport")
+        if local_enabled:
+            print("[API] Local hotspot HTTPS monitoring enabled")
     except Exception as exc:
         print(f"[API] Startup failed ({type(exc).__name__}); robot voice/runtime remains available")
 
@@ -589,14 +745,14 @@ def _wake_from_touch():
 
 
 def _stop_api_server():
-    """Stop Uvicorn cleanly before closing the shared ESP32 transport."""
+    """Stop both API listeners before closing the shared ESP32 transport."""
     global _api_server, _api_thread
     if _api_server is not None:
         _api_server.should_exit = True
     if _api_thread is not None and _api_thread is not threading.current_thread():
-        _api_thread.join(timeout=5.0)
+        _api_thread.join(timeout=7.0)
         if _api_thread.is_alive():
-            print("[API] Server thread did not stop within 5 seconds")
+            print("[API] Server thread did not stop within 7 seconds")
     _api_thread = None
     _api_server = None
 
@@ -653,8 +809,6 @@ def _shutdown_runtime(reason="process exit"):
         GPIO.cleanup()
     except Exception as exc:
         print(f"[SYSTEM] GPIO cleanup warning: {exc}")
-
-
 atexit.register(_shutdown_runtime)
 
 
@@ -1042,7 +1196,6 @@ def main():
     # GPIO17 is exclusively owned by the BLE provisioning service, which maps
     # short-click to setup and long-hold to Pi shutdown.
     setup_touch_wake_input()
-
     # ── Startup sound ───────────────────────────────────────────────────────
 
     wake.lock()

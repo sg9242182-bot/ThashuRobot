@@ -218,6 +218,40 @@ Physical robot movement tests remain deferred to final project-wide verification
 - [x] No unresolved contract mismatch is hidden; STOP sends the documented `request_id`, and remaining integration limits are recorded in `mobile/flutter/SETUP.md` against the reviewed API snapshot `5f196387`.
 - [x] A teammate can reproduce the local setup and understand the current changes from `mobile/flutter/SETUP.md`.
 
+## Phase 9 — App-only offline hotspot onboarding
+
+### Objective
+Provision Wi-Fi through the app and consume the Pi's one-time local HTTPS connection handoff without helper apps or internet. The implementation is present; owner security review and supervised hardware verification remain.
+
+### Checklist
+- [x] Add Flutter support for BLE service characteristics `...0001` through `...0004`; scan only for Thashu and strictly validate the UTF-8 JSON handoff fields.
+- [x] Request mobile Bluetooth permissions, write hotspot credentials only while Pi status is `waiting`, and show scan/setup states. The app labels the write as sent, not accepted; handoff is read only after Pi reports `connected`.
+- [x] Clear credential inputs and mutable byte buffers after use; do not persist or log hotspot passwords. Immutable Dart strings cannot be guaranteed to be zeroed immediately.
+- [x] Consume the handoff, require explicit save, store URL/token/pin securely, and pin the exact leaf certificate for HTTPS REST and WSS. Manual connection settings remain available.
+- [x] Require authenticated BLE numeric comparison for credential writes and connection-info reads; speak the phone's comparison value, require the user to compare/accept on Android, and require a second Pi button click to authorize.
+- [x] Enable the HTTPS/WSS listener only for the active NetworkManager profile created by provisioning; reject HTTP and WebSocket clients except the active hotspot gateway address.
+- [x] Update app instructions for numeric comparison and the button mapping: first short click opens the BLE window, a matching comparison needs a second short click, and a 3-second hold shuts down Thashu.
+- [x] Tharun reports a matching numeric comparison accepted after the Pi button confirmation using nRF Connect; the status characteristic was readable afterward (2026-11-11). This verifies the BLE bond/status read, not the app handoff.
+- [ ] Verify a mismatched comparison and missing Pi-button approval fail closed. An earlier rejection was observed, but it was not confirmed as a controlled test.
+- [ ] Verify the Android hotspot source address matches NetworkManager's gateway address; confirm other clients and non-provisioned profiles are denied.
+- [ ] Obtain Vishal's review of the revised BLE pairing and hotspot listener restrictions.
+- [ ] Verify the Android phone can reach the Pi's local HTTPS listener over the phone hotspot with internet disabled.
+- [x] Tharun reports that provisioning through the Thashu app connected the Pi to the phone hotspot (2026-11-11). The app build revision and whether internet was disabled were not captured.
+- [ ] Confirm the app received/saved the API URL, certificate pin, and token; then test pinned HTTPS status/WSS telemetry, stale recovery, app reconnect, hotspot-address change, and Pi restart. Do not send movement commands during onboarding.
+- [x] Preserve the existing manual/Tailscale connection path until offline onboarding passes end to end.
+
+### Exit criteria
+- [ ] A fresh phone completes pairing and local API setup entirely in Thashu with no helper app or internet.
+- [ ] HTTPS and WSS validate the Pi certificate pin; no global cleartext exception or public port forwarding is used.
+- [ ] Status and telemetry survive app reconnect, hotspot-address change, and Pi restart, with no movement sent during onboarding.
+- [ ] Flutter formatting, analysis, tests, Android build, security review, and supervised phone/Pi verification pass; evidence and remaining limits are recorded.
+
+### Phase completion record
+- **Status:** In progress — Pi backend PR #18 and Flutter PR #19 are drafts; app/Pi integration is not yet accepted.
+- **Evidence:** Backend requires BlueZ authenticated-encryption GATT flags and numeric comparison with an audible code plus physical confirmation. The local HTTPS/WebSocket gate checks the provisioned NetworkManager profile and gateway source. Tharun reports nRF Connect pairing succeeded after matching the spoken/displayed code and short-clicking the Pi button; the status characteristic then read successfully. He later reported that provisioning through the Thashu app connected the Pi to the phone hotspot (2026-11-11). The exact app revision and offline status were not captured. HTTPS/WSS reachability and API handoff validation have not yet been reported.
+- **Open issues:** Verify PR #19's latest head with formatter/analyzer/tests/Android build; obtain Vishal's security-contract review; complete supervised HTTPS/WSS and restart/address-change checks on the phone and Pi.
+- **Dependency owner:** Vishal — review BLE/TLS/token security. Tharun — verify local HTTPS and arrange supervised phone/Pi checks. Niteshvar — validate current Flutter head/build and support integration.
+
 ## Phase completion record
 
 For each phase, record:

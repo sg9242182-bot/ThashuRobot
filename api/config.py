@@ -6,7 +6,6 @@ from pathlib import Path
 from thashu.core.config import (
     api_state_db_path,
     api_token,
-    api_tls_android_trust_confirmed,
     api_tls_certfile,
     api_tls_keyfile,
 )

@@ -19,6 +19,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from starlette.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from api.hotspot_access import HotspotListenerAccessMiddleware
 
 from pydantic import BaseModel, ConfigDict, Field
 from uuid import UUID, uuid4
@@ -29,9 +30,9 @@ THASHU_ROOT = REPO_ROOT / "thashu"
 if str(THASHU_ROOT) not in sys.path:
     sys.path.insert(0, str(THASHU_ROOT))
 
-from api.config import get_api_state_db_path, get_api_token
-from core.robot_manager import (
-    ControlMode,
+from api.config import get_api_state_db_path, get_api_token  # noqa: E402
+from core.robot_manager import (  # noqa: E402
+    ControlMode as ControlMode,  # Re-exported for API test/client compatibility.
     ControlModeError,
     ModeSwitchError,
     RobotSafetyError,
@@ -1483,6 +1484,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.add_middleware(CommandBodySizeLimitMiddleware)
+app.add_middleware(HotspotListenerAccessMiddleware)
 
 
 _HTTP_STATUS_ERROR_CODES = {
@@ -1735,7 +1737,10 @@ async def move(request: MoveRequest):
             if not services.mobile_client_connected():
                 raise HTTPException(
                     status_code=503,
-                    detail={"error": "app_disconnected"},
+                    detail={
+                        "error": "app_disconnected",
+                        "error_code": "APP_DISCONNECTED",
+                    },
                 )
             raise HTTPException(
                 status_code=503,
@@ -1810,7 +1815,7 @@ async def move(request: MoveRequest):
                 error_code="invalid_command",
                 state="rejected",
             )
-        except Exception as exc:
+        except Exception:
             fail(
                 503,
                 {"error": "robot_unavailable", "command_id": command_id},
@@ -1882,7 +1887,10 @@ async def renew_movement_lease(lease_id: str, request: LeaseRenewalRequest):
     if not services.mobile_client_connected():
         raise HTTPException(
             status_code=409,
-            detail={"error": "app_disconnected"},
+            detail={
+                "error": "app_disconnected",
+                "error_code": "APP_DISCONNECTED",
+            },
         )
     try:
         return await services.renew_movement_lease(

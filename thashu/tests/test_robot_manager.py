@@ -8,7 +8,7 @@ THASHU_ROOT = Path(__file__).resolve().parents[1]
 if str(THASHU_ROOT) not in sys.path:
     sys.path.insert(0, str(THASHU_ROOT))
 
-from core.robot_manager import (
+from core.robot_manager import (  # noqa: E402
     ControlMode,
     ControlModeError,
     ModeSwitchError,
@@ -281,10 +281,10 @@ class RobotCommandManagerTests(unittest.TestCase):
         manager = RobotCommandManager(motor)
         self.assertEqual(manager.dispatch("forward", 100), 17)
 
-    def test_stop_returns_manager_to_auto_mode(self):
+    def test_stop_preserves_manual_mode(self):
         self.manager.dispatch("forward", 100)
         self.manager.dispatch("stop")
-        self.assertEqual(self.manager.mode, ControlMode.AUTO)
+        self.assertEqual(self.manager.mode, ControlMode.MANUAL)
 
     def test_safety_stop_does_not_change_selected_mode(self):
         self.manager.dispatch("forward", 100)
