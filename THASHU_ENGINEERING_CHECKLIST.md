@@ -1172,7 +1172,7 @@ Phase 12 — Mobile Control and Secure Pi API
 
 Status: IN PROGRESS
 
-Current branch: `phase-12-rear-tof-mux`, based on `phase-12-pi-api-https` and current `main`.
+Current merged implementation: `codex/idle-sleep-touch-wake` (includes the mux work, offline BLE/hotspot API path, and subsequent Pi changes).
 
 Scope retained from the original Phase 12 target:
 
@@ -1196,7 +1196,7 @@ Implementation present on this branch:
 
 \[x] Document private-LAN HTTPS setup and certificate trust requirements. No certificate or private key is committed.
 
-I²C multiplexer expansion (2026-11-14; firmware updated, hardware validation pending):
+I²C multiplexer expansion (2026-11-14 to 2026-11-16; user-reported hardware check):
 
 \[x] Place all six VL53L0X ToF sensors on dedicated TCA9548A channels 0–5. Each sensor stays at its default address 0x29; front XSHUT/address reassignment is removed.
 
@@ -1206,29 +1206,25 @@ I²C multiplexer expansion (2026-11-14; firmware updated, hardware validation pe
 
 \[x] Preserve the existing Pi serial frame shape and `US_REAR` field. Firmware reports the nearest rear ToF distance in millimetres, or FAR when all three are out of range. The Pi parser continues to populate `rear_mm`, so no Pi code change is needed for current aggregate rear-clear/reverse-blocking behavior. Per-sensor rear-left/center/right values are not exposed to the Pi or app.
 
-\[ ] Wire the 7Semi TCA9548A at address 0x70: channels 0–5 are front-left/center/right and rear-left/center/right ToFs; channels 6–7 are the left/right OLEDs. The user identified the rear modules as GY-VL53L0X; confirm each board's supply/logic voltage and common ground before power-up. Each OLED channel is selected separately for its own frame.
+\[x] Wire the 7Semi TCA9548A at address 0x70: channels 0–5 are front-left/center/right and rear-left/center/right ToFs; channels 6–7 are the left/right OLEDs. Tharun confirmed the pin/channel mapping and later reported the mux-connected hardware working. Confirmed the rear modules are GY-VL53L0X. (User-reported hardware setup; electrical measurements were not recorded.)
 
-\[ ] Compile and upload the firmware; verify boot/READY, matching eye sizes with independent OLED expression/animation, and all six front/rear sensor readings.
+\[x] Compile/upload the firmware and verify boot/READY plus both OLEDs working with matched eye size and synchronized blink timing. Tharun reported these working after flashing the mux/eye updates. Individual verification of all six ToF readings remains open below.
 
 \[ ] With wheels raised, verify each of the six sensors independently, FAR reporting in open space, reverse rejection at or inside 300 mm, and fail-closed rejection for missing/stale rear readings. Confirm the Pi receives the aggregate `rear_mm` value.
 
-This update is isolated on `codex/all-i2c-devices-mux`; it has not been merged to `phase-12-pi-api-https` or `main`. The ESP32 sketch has not yet been compiled or physically tested.
+Hardware evidence is user-reported; no captured firmware build log or per-channel sensor measurements are attached. The separate six-sensor and reverse fail-safe checks below remain open.
 
 Independent OLED animation update (2026-11-14): Each OLED has a separate SSD1306 framebuffer and per-eye transition/blink state. Existing mood commands remain unchanged. Both blinks use the same start time; the displays are still refreshed sequentially over I²C, so a small transfer-time difference remains. The pair is rendered at up to 20 FPS.
 
-OLED size matching follow-up (2026-11-15): `eye_manager.cpp` now assigns identical width, height, corner radius, and heart scale to both displays for each expression. Vertical positioning and expression details can remain slightly asymmetric while the eye sizes match. This firmware edit is not yet compiled, uploaded, or visually confirmed on the robot.
+OLED size matching follow-up (2026-11-15): `eye_manager.cpp` assigns identical width, height, corner radius, and heart scale to both displays for each expression. Tharun later reported the updated eyes working on the robot. Vertical positioning and expression details can remain slightly asymmetric while the eye sizes match.
 
-HTTPS deployment plan (2026-11-08; approved by Vishal): use Tailscale MagicDNS
-and Caddy with the generic Pi name `thashu-robot`. Caddy obtains its
-Android-trusted certificate through the Pi's Tailscale daemon and proxies to
-the API on `127.0.0.1:8000`; bind Caddy to the Pi's Tailscale IP and restrict
-access to approved tailnet phones. Keep the API loopback-only, leave
-`THASHU_API_TLS_ANDROID_TRUST_CONFIRMED=0`, and do not expose port 8000. Pi
-configuration and Android HTTPS/telemetry verification remain pending. The
-setup procedure is in `api/PI_SETUP.md`; Tailscale certificate hostnames are
-published in Certificate Transparency logs, so the robot name must stay generic.
+HTTPS plan update: the project selected app-only BLE provisioning to the
+phone's hotspot for offline use. The earlier Tailscale + Caddy plan below is
+superseded for this workflow; do not treat it as the current connection path.
+The main API remains loopback-bound, with the optional local TLS listener
+gated by the active provisioned NetworkManager profile and hotspot gateway.
 
-Offline app-only hotspot path (draft PR #18; implementation not yet verified):
+Offline app-only hotspot path (implementation present; end-to-end reliability remains in progress):
 
 [x] Add Pi-side local API material management: persistent token, IP-SAN TLS certificate, and SHA-256 fingerprint stored outside the repository.
 
@@ -1236,11 +1232,11 @@ Offline app-only hotspot path (draft PR #18; implementation not yet verified):
 
 [x] Add an opt-in second HTTPS listener on the current Wi-Fi IPv4 address while preserving the loopback API and shared ESP32/API runtime. Automatic address rebind closes the old listener, lets the current movement lease expire with normal STOP, preserves mode, and does not resume motion.
 
-[ ] Do not enable the local listener until Flutter reads the BLE handoff and pins the certificate for both REST and WebSocket.
+[x] Integrate the Flutter BLE handoff and pin the supplied certificate for REST and WebSocket. The app is present on the phone and Tharun reports it reached the Pi and displayed status/telemetry; reliable post-movement recovery is still open below.
 
 [ ] Verify service startup, BLE provisioning, HTTPS/authenticated telemetry, hotspot address changes, app reconnect, and Pi restart on the target devices with internet disabled. No movement commands are part of provisioning verification.
 
-Evidence/status: Draft implementation is tracked in [PR #18](https://github.com/sg9242182-bot/ThashuRobot/pull/18). No tests or Pi hardware checks are claimed. The user reports the existing BLE-to-hotspot flow worked through nRF Connect; that does not verify this branch's new handoff or app-only flow. Keep Phase 12 in progress until Flutter pinning and supervised phone/Pi verification pass.
+Evidence/status (updated 2026-11-16): Tharun reports the Thashu app completed BLE provisioning to the phone hotspot and displayed the Pi as reachable with fresh sensor telemetry. Subsequent movement commands were followed by diagnostics REST connection closure and stale telemetry; waiting or changing app pages sometimes restored service. Therefore the initial handoff/reachability path has been exercised, but repeat-command reliability, hotspot isolation, internet-disabled behavior, and reconnect/restart/address-change checks are not accepted. Exact app/backend/firmware revisions were not captured. Keep Phase 12 in progress.
 
 
 \[x] Add Flutter runtime Pi address/token settings using HTTPS-only validation and platform secure storage; initialize REST and WebSocket clients from saved settings, add Android internet permission, and expose settings in the app. Integrated from Niteshvar's Phase 12 connection setup branch; Flutter dependency resolution/build and device verification remain pending.

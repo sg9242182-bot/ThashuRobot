@@ -285,8 +285,8 @@ For each phase, record:
 
 - **Status:** Complete for Flutter frontend scope (100%). Live Pi/robot verification is tracked in Phase 8; unapproved Emergency Stop remains unavailable by design.
 - **Evidence:** Dart analysis reported no issues; all 53 Flutter tests passed. Tests cover API/client validation, manual mode gating, pending/repeated movement, normal STOP, safety rejection, ACK timeout, unknown outcomes after connection loss, and pause/resume state handling. The UI does not claim that an ACK confirms physical stopping and clearly states that no approved latched Emergency Stop is available.
-- **Open issues:** Live Pi reconnect/control verification and any future Emergency Stop approval remain external integration/safety work tracked for final project verification; no unapproved behavior is exposed in the Flutter UI.
-- **Dependency owner:** Vishal — provide the Pi test connection. Tharun and Vishal — approve any future Emergency Stop semantics. Niteshvar — Flutter UI/client only.
+- **Open issues:** Live Pi reconnect/control verification remains external integration/safety work tracked for final project verification; Emergency Stop is out of scope by team decision, and no active Emergency Stop behavior is exposed in the Flutter UI.
+- **Dependency owner:** Vishal — provide/review the Pi test contract. Tharun — verify control/safety behavior. Niteshvar — Flutter UI/client only. Emergency Stop is out of scope.
 
 ### Phase 6 — WebSocket telemetry and reconnection
 
@@ -305,8 +305,8 @@ For each phase, record:
 ### Phase 8 — Integration testing and handoff
 
 - **Status:** In progress. Flutter local checks/build and basic phone/hotspot integration have been reported successful; post-movement recovery and final review remain open.
-- **Evidence:** Earlier Flutter formatting/analyze/test and Android debug build passed. Niteshvar reported PR #20 commit `8b4ccc0` passed GitHub analysis and all 68 tests; the APK built/installed earlier in this thread was from `0d699b2`, so it is not evidence for `8b4ccc0`. Tharun later reported successful app BLE pairing/provisioning, hotspot join, and app display of status/telemetry. Phone screenshots then showed diagnostics connection closure and stale telemetry after movement; waiting or switching app pages could recover it. A later report says movement works again, but reliable back-to-back movement and fresh telemetry after a command remain unverified.
-- **Open issues:** Build/install the APK from the current PR commit and record its exact revision; verify phone-to-Pi status, diagnostics, telemetry, modes, STOP, reconnect, API/Pi restart, and repeated movement. Capture app/backend/firmware revisions and sanitized logs. Review the focused PR with Vishal and Tharun. Keep movement testing to the agreed safe setup; Emergency Stop remains unavailable by agreement.
+- **Evidence (updated 2026-11-16):** Earlier Flutter formatting/analyze/test and Android debug build passed. Niteshvar reported PR #20 commit `8b4ccc0` passed GitHub analysis and all 68 tests; later APK build activity is recorded, but the exact installed APK revision is unconfirmed. Tharun reports successful app BLE provisioning, hotspot join, and app display of reachable status and fresh telemetry. Phone screenshots after a movement command showed diagnostics REST connection closure and stale telemetry; waiting or switching app pages could recover it. The robot moved again after an ESP32 reset, but reliable back-to-back movement and API/telemetry recovery remain unverified. Deployed app/backend/firmware revisions were not captured.
+- **Open issues:** Record the exact APK/repository revisions used; verify phone-to-Pi diagnostics, telemetry, modes, normal STOP, reconnect, API/Pi restart, and repeated movement after a command. Capture sanitized logs and complete Vishal/Tharun review. Keep movement testing within the agreed safe setup. Emergency Stop is out of scope and must not be tested or claimed.
 - **Dependency owner:** Vishal — confirm backend contract and review API compatibility. Tharun — verify control/safety behavior and exact deployed Pi/ESP32 revisions. Niteshvar — provide current PR commit and APK/build evidence, then address integration findings.
 
 ### Phase 2 — App shell, navigation, and visual system
