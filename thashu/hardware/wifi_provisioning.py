@@ -7,9 +7,12 @@ the Pi. Credential writes require an encrypted BLE link. Secrets are never logge
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import os
 import re
+import secrets
 import threading
 import time
 import uuid
@@ -47,6 +50,8 @@ class ProvisionState:
         self.status = "idle"
         self.credentials_accepted = False
         self.credential_device: str | None = None
+        self.credential_fingerprint_key = secrets.token_bytes(32)
+        self.credential_fingerprint: bytes | None = None
         self.connection_info_payload: bytes | None = None
         self.handoff_until = 0.0
         self.pairing_event: asyncio.Event | None = None
@@ -63,6 +68,8 @@ class ProvisionState:
             self.status = "waiting"
             self.credentials_accepted = False
             self.credential_device = None
+            self.credential_fingerprint_key = secrets.token_bytes(32)
+            self.credential_fingerprint = None
             self.connection_info_payload = None
             self.handoff_until = 0.0
 
@@ -76,17 +83,25 @@ class ProvisionState:
         if event is not None:
             event.set()
 
-    def mark_credentials_accepted(self, device: str | None) -> bool:
+    def mark_credentials_accepted(self, device: str | None, payload: bytes) -> str:
         with self.lock:
-            if (
-                time.monotonic() >= self.armed_until
-                or self.credentials_accepted
-                or not device
-            ):
-                return False
+            if time.monotonic() >= self.armed_until or not device:
+                return "rejected"
+            fingerprint = hmac.new(
+                self.credential_fingerprint_key, payload, hashlib.sha256
+            ).digest()
+            if self.credentials_accepted:
+                if (
+                    device == self.credential_device
+                    and self.credential_fingerprint is not None
+                    and hmac.compare_digest(fingerprint, self.credential_fingerprint)
+                ):
+                    return "duplicate"
+                return "rejected"
             self.credentials_accepted = True
             self.credential_device = device
-            return True
+            self.credential_fingerprint = fingerprint
+            return "accepted"
 
     def publish_connection_info(self, payload: bytes) -> None:
         with self.lock:
@@ -324,10 +339,19 @@ class WifiProvisioningService(Service):
         except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
             STATE.set_status("invalid")
             raise DBusError("org.bluez.Error.InvalidArgs", "Invalid Wi-Fi credentials.")
-        if not STATE.mark_credentials_accepted(_bluetooth_device_path(options)):
+        write_result = STATE.mark_credentials_accepted(
+            _bluetooth_device_path(options), value
+        )
+        if write_result == "duplicate":
+            # Android/BlueZ may repeat a reliable GATT write. A matching
+            # retry from the same bonded peer is already being processed;
+            # acknowledge it without creating another NM profile or join.
+            print("[BLE SETUP] Repeated credential write from paired phone ignored.")
+            return
+        if write_result != "accepted":
             raise DBusError(
                 "org.bluez.Error.NotPermitted",
-                "Only one credential write from the authenticated BLE peer is allowed per setup window.",
+                "Only one credential payload from the authenticated BLE peer is allowed per setup window.",
             )
         STATE.set_status("received")
         threading.Thread(
