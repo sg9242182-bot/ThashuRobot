@@ -267,7 +267,7 @@ Validate the end-to-end path with the owners of the connected components.
 - [x] Confirm command acknowledgements and telemetry match ESP32 behavior with Tharun. Vishal reports the real-time checks passed.
 - [x] Test mode changes, supervised movement, STOP, diagnostics, and reconnection in the agreed safe test environment. Vishal reports these real-time checks passed. Latched Emergency Stop was removed from Phase 3 scope and is not implemented; do not test or claim it in Phase 9.
 - [ ] Verify logs allow a request/command to be traced across API, robot manager, and ESP32 transport where supported.
-- [ ] Fix contract mismatches at the agreed source of truth rather than adding one-off client workarounds.
+- [x] Review for contract mismatches at the agreed source of truth rather than adding one-off client workarounds. Static review of Flutter PR #19 against `api/README.md` found no mismatch; Vishal reports the live API checks passed.
 - [ ] Record the exact tested firmware/backend/app versions and attach or identify the captured test results. Vishal reports all agreed real-time checks passed; exact revisions and evidence links have not yet been added here.
 - [ ] Open focused PRs and request review from the affected owners.
 
@@ -278,7 +278,7 @@ Validate the end-to-end path with the owners of the connected components.
 ### Exit criteria
 - [ ] API, backend, and firmware agree on contract versions.
 - [x] End-to-end behavior is reported tested and passed in real time by Vishal; exact firmware/backend/app revisions and evidence links remain to be recorded.
-- [ ] No known critical interface mismatch is hidden by mock data.
+- [x] No known critical interface mismatch is hidden by mock data. Vishal reports the agreed real-time phone/Pi checks passed.
 
 ## Phase 10 — Handoff and maintenance
 
