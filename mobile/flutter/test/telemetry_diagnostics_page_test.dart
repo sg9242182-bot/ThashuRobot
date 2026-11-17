@@ -2,10 +2,45 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:thashu_app/services/pi_api_client.dart';
 import 'package:thashu_app/features/diagnostics/telemetry_diagnostics_page.dart';
 import 'package:thashu_app/services/pi_telemetry_client.dart';
 
 void main() {
+  testWidgets('loads authenticated diagnostics and renders check details', (
+    tester,
+  ) async {
+    final apiTransport = _FakeDiagnosticsApiTransport();
+    final apiClient = PiApiClient(
+      baseUri: Uri.parse('http://pi.test:8000'),
+      bearerToken: 'test-token',
+      transport: apiTransport,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: TelemetryDiagnosticsPage(apiClient: apiClient),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(apiTransport.lastUri!.path, '/api/v1/diagnostics');
+    expect(
+      apiTransport.lastHeaders!['Authorization'],
+      'Bearer test-token',
+    );
+    expect(find.text('Robot diagnostics'), findsOneWidget);
+    expect(find.text('API liveness · PASS'), findsOneWidget);
+    expect(find.text('Sensor telemetry · WARNING'), findsOneWidget);
+    expect(find.text('Reason: TELEMETRY_STALE'), findsOneWidget);
+    expect(find.text('Telemetry age: 1200 ms'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    apiClient.close();
+  });
+
   testWidgets('shows stream updates and stale state after disconnect', (
     tester,
   ) async {
@@ -120,6 +155,41 @@ String _sensorEvent(String left, String center, String right, String rear) =>
     '"line":"TEL|0|SENSORS|TOF_L|$left|TOF_C|$center|'
     'TOF_R|$right|US_REAR|$rear",'
     '"received_at":"2026-11-07T12:00:00.123Z"}';
+
+class _FakeDiagnosticsApiTransport implements PiApiTransport {
+  Uri? lastUri;
+  Map<String, String>? lastHeaders;
+
+  @override
+  Future<PiApiHttpResponse> get(
+    Uri uri, {
+    required Map<String, String> headers,
+  }) async {
+    lastUri = uri;
+    lastHeaders = headers;
+    return const PiApiHttpResponse(
+      statusCode: 200,
+      body: '{"observed_at":"2026-11-10T12:00:00Z","checks":['
+          '{"name":"api_liveness","status":"PASS",'
+          '"observed_at":"2026-11-10T12:00:00Z",'
+          '"source":"diagnostics_request","reason_code":"API_RESPONDING"},'
+          '{"name":"sensor_telemetry","status":"WARNING",'
+          '"observed_at":"2026-11-10T12:00:00Z",'
+          '"source":"complete_sensor_tel_received_at",'
+          '"reason_code":"TELEMETRY_STALE","age_ms":1200}]}',
+    );
+  }
+
+  @override
+  Future<PiApiHttpResponse> post(
+    Uri uri, {
+    required Map<String, String> headers,
+    Object? jsonBody,
+  }) async => throw UnimplementedError();
+
+  @override
+  void close() {}
+}
 
 class _FakeTelemetryTransport implements PiTelemetryTransport {
   final sockets = <_FakeTelemetrySocket>[];

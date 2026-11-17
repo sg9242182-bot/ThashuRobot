@@ -3,6 +3,7 @@ import 'dart:io';
 
 import '../core/pi_api_exception.dart';
 import '../models/telemetry_event.dart';
+import 'pinned_pi_tls.dart';
 
 enum TelemetryConnectionState {
   disconnected,
@@ -26,27 +27,53 @@ abstract interface class PiTelemetryTransport {
 }
 
 class IoPiTelemetryTransport implements PiTelemetryTransport {
+  IoPiTelemetryTransport({
+    required this.origin,
+    this.certificateSha256Fingerprint,
+  });
+
+  final Uri origin;
+  final String? certificateSha256Fingerprint;
+
   @override
   Future<PiTelemetrySocket> connect(
     Uri uri, {
     required Map<String, String> headers,
   }) async {
-    final socket = await WebSocket.connect(uri.toString(), headers: headers);
-    return _IoPiTelemetrySocket(socket);
+    final client = createPiTlsClient(
+      origin: origin,
+      certificateSha256Fingerprint: certificateSha256Fingerprint,
+    );
+    try {
+      final socket = await WebSocket.connect(
+        uri.toString(),
+        headers: headers,
+        customClient: client,
+      );
+      return _IoPiTelemetrySocket(socket, client);
+    } catch (_) {
+      client.close(force: true);
+      rethrow;
+    }
   }
 }
 
 class _IoPiTelemetrySocket implements PiTelemetrySocket {
-  const _IoPiTelemetrySocket(this._socket);
+  const _IoPiTelemetrySocket(this._socket, this._client);
 
   final WebSocket _socket;
+  final HttpClient _client;
 
   @override
   Stream<Object?> get messages => _socket;
 
   @override
   Future<void> close() async {
-    await _socket.close();
+    try {
+      await _socket.close();
+    } finally {
+      _client.close(force: true);
+    }
   }
 }
 
@@ -58,12 +85,17 @@ class PiTelemetryClient {
   PiTelemetryClient({
     required Uri baseUri,
     required String? bearerToken,
+    String? certificateSha256Fingerprint,
     PiTelemetryTransport? transport,
   }) : _baseUri = _validateBaseUri(baseUri),
        // Keep the token parameter public without exposing the stored token.
        // ignore: prefer_initializing_formals
        _bearerToken = bearerToken,
-       _transport = transport ?? IoPiTelemetryTransport();
+       _transport = _createTransport(
+         baseUri,
+         certificateSha256Fingerprint,
+         transport,
+       );
 
   final Uri _baseUri;
   final String? _bearerToken;
@@ -195,6 +227,33 @@ class PiTelemetryClient {
     if (_state == next) return;
     _state = next;
     if (!_states.isClosed) _states.add(next);
+  }
+
+  static String? _validateCertificatePin(Uri uri, String? value) {
+    final pin = value?.trim();
+    if (uri.port == 8443 && (pin == null || pin.isEmpty)) {
+      throw ArgumentError.value(value, 'certificateSha256Fingerprint', 'The Pi local HTTPS listener requires its certificate fingerprint.');
+    }
+    if (pin == null || pin.isEmpty) return null;
+    if (uri.scheme != 'https') throw ArgumentError.value(value, 'certificateSha256Fingerprint', 'A certificate pin requires HTTPS.');
+    return PiCertificatePin.normalize(pin);
+  }
+
+  static PiTelemetryTransport _createTransport(
+    Uri origin,
+    String? certificateSha256Fingerprint,
+    PiTelemetryTransport? transport,
+  ) {
+    final validatedOrigin = _validateBaseUri(origin);
+    final validatedPin = _validateCertificatePin(
+      validatedOrigin,
+      certificateSha256Fingerprint,
+    );
+    return transport ??
+        IoPiTelemetryTransport(
+          origin: validatedOrigin,
+          certificateSha256Fingerprint: validatedPin,
+        );
   }
 
   static Uri _validateBaseUri(Uri uri) {
