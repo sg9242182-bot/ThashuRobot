@@ -4,20 +4,20 @@ namespace {
 constexpr ToFManager::SensorId FRONT_IDS[3] = {
     ToFManager::FRONT_LEFT, ToFManager::FRONT_CENTER, ToFManager::FRONT_RIGHT
 };
+constexpr ToFManager::SensorId REAR_IDS[3] = {
+    ToFManager::REAR_LEFT, ToFManager::REAR_CENTER, ToFManager::REAR_RIGHT
+};
 }
 
-bool SafetyManager::begin(MotorManager& motorManager, ToFManager& frontTof,
-                          UltrasonicManager& rearUltrasonic, EyeManager& eyeManager,
-                          ServoManager& servoManager) {
+bool SafetyManager::begin(MotorManager& motorManager, ToFManager& tofManager,
+                          EyeManager& eyeManager, ServoManager& servoManager) {
     motors = &motorManager;
-    tof = &frontTof;
-    rear = &rearUltrasonic;
+    tof = &tofManager;
     eyes = &eyeManager;
     servos = &servoManager;
     motors->stop();
     if (!requiredHardwareReady()) return false;
     if (!tof->begin()) return false;
-    if (!rear->begin()) return false;
     lastPiFrameMs = millis();
     watchdogExpired = true;
     initialized = true;
@@ -41,9 +41,14 @@ bool SafetyManager::frontClear() const {
 }
 
 bool SafetyManager::rearClear() const {
-    return rear && rear->isFresh() &&
-           (rear->isValid() || rear->isOutOfRange()) &&
-           !rear->isObstacleDetected();
+    if (!tof) return false;
+    for (uint8_t i = 0; i < 3; ++i) {
+        const ToFManager::SensorId sensor = REAR_IDS[i];
+        if (!tof->isFresh(sensor) ||
+            (!tof->isValid(sensor) && !tof->isOutOfRange(sensor)) ||
+            tof->isObstacleDetected(sensor)) return false;
+    }
+    return true;
 }
 
 bool SafetyManager::allowMotion(Motion motion, uint8_t speed) const {
@@ -55,12 +60,10 @@ bool SafetyManager::allowMotion(Motion motion, uint8_t speed) const {
 }
 
 void SafetyManager::update() {
-    if (!motors || !tof || !rear) return;
+    if (!motors || !tof) return;
 
-    // Keep sensor sampling alive for telemetry and diagnostics even if another
-    // required device (such as the OLED or servos) is not healthy.
+    // Keep all six sensor readings current for telemetry and diagnostics.
     tof->update();
-    rear->update();
 
     if (!initialized) {
         motors->stop();
@@ -87,7 +90,7 @@ void SafetyManager::update() {
 }
 
 bool SafetyManager::obstacleDetectedFor(Motion motion) const {
-    if (!tof || !rear) return false;
+    if (!tof) return false;
 
     if (motion == FORWARD || motion == TURNING) {
         for (uint8_t i = 0; i < 3; ++i) {
@@ -95,9 +98,11 @@ bool SafetyManager::obstacleDetectedFor(Motion motion) const {
             if (tof->isFresh(sensor) && tof->isObstacleDetected(sensor)) return true;
         }
     }
-    if ((motion == REVERSE || motion == TURNING) &&
-        rear->isFresh() && rear->isValid() && rear->isObstacleDetected()) {
-        return true;
+    if (motion == REVERSE || motion == TURNING) {
+        for (uint8_t i = 0; i < 3; ++i) {
+            const ToFManager::SensorId sensor = REAR_IDS[i];
+            if (tof->isFresh(sensor) && tof->isObstacleDetected(sensor)) return true;
+        }
     }
     return false;
 }
@@ -113,9 +118,10 @@ bool SafetyManager::requiredHardwareReady() const {
            servos && servos->isReady();
 }
 
-
 void SafetyManager::setActiveMotion(Motion motion, uint8_t speed) {
     activeMotion = speed == 0 ? STOPPED : motion;
 }
 
-bool SafetyManager::ready() const { return initialized && requiredHardwareReady(); }
+bool SafetyManager::ready() const {
+    return initialized && requiredHardwareReady();
+}

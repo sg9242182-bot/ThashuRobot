@@ -219,3 +219,98 @@ supports WebSocket reverse proxying: [MagicDNS](https://tailscale.com/docs/featu
 [Caddy certificates on Tailscale](https://tailscale.com/docs/integrations/web-servers/caddy/caddy-certificates),
 [Caddy reverse proxy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy),
 [Android network security](https://developer.android.com/privacy-and-security/security-config).
+
+
+## App-only offline hotspot API (draft implementation)
+
+The app-only path does not need Tailscale or internet access. The loopback API on
+`127.0.0.1:8000` remains available for the existing local/Caddy path. When
+explicitly enabled, the robot also serves the same API over HTTPS on the Pi's
+current `wlan0` IPv4 address at port `8443`. It binds to that one address;
+it does not bind to `0.0.0.0`. The two Uvicorn listeners share one asyncio
+event loop and the existing ESP32 manager.
+
+The BLE provisioning service uses authenticated BLE numeric comparison. During
+pairing, Thashu speaks the six-digit value shown by Android. The user accepts
+the phone prompt only when the numbers match, then short-clicks GPIO 17 to
+approve on the Pi. The setup is rejected if the values differ, the prompt is
+not authenticated, or the Pi confirmation times out. Credential writes and
+connection-info reads require authenticated encryption. The service adds
+read-only characteristic
+`8c6d0004-7a4b-4f61-b7a5-927f4e2a1000`. After the credentials write succeeds
+and the Pi reports `connected`, the app must read it before the existing
+60-second button window closes. It returns JSON fields `api_base_url`,
+`server_cert_sha256`, and `api_token`. The app must save the URL, pin, and
+token in secure storage. It must validate the exact TLS certificate pin for
+REST and WebSocket; Android's global cleartext setting is not changed.
+
+At service startup, Piper generates and caches three short WAV cues in the
+Thashu voice cache: Bluetooth setup opened, setup timed out, and shutdown
+starting. The service plays those cached WAVs for the corresponding events; if
+generation is unavailable, it falls back to live Piper speech.
+
+The Pi stores the persistent token, TLS key, certificate, and current IP under
+`~/.local/share/thashu/local_api/`. Files are owner-only except the public
+certificate. The TLS certificate is regenerated when the Wi-Fi IPv4 address
+changes, and its IP subject alternative name matches the new URL. The token is
+kept stable across address changes and restarts. The certificate pin is
+delivered only over the authenticated encrypted GATT connection during the Pi-button-gated
+window; credentials, token, and private key are not logged.
+
+The local listener is gated to the connection profile created by provisioning.
+It starts only if NetworkManager reports that exact profile UUID active on
+`wlan0`. HTTP and WebSocket requests must also originate at the active
+hotspot's gateway address (the phone hosting the hotspot). Other clients and
+other Wi-Fi profiles are denied. This is an application access restriction in
+addition to binding to the `wlan0` address; verify the phone's observed source
+address on hardware before enabling the listener.
+
+### Enable only after Flutter pinning and profile gating are reviewed
+
+Do not set the following flags until the app validates the BLE-delivered
+certificate fingerprint for both HTTPS and WSS:
+
+```bash
+export THASHU_API_LOCAL_ACCESS=1
+export THASHU_API_LOCAL_TLS_PINNING_CONFIRMED=1
+export THASHU_API_WIFI_INTERFACE=wlan0
+export THASHU_API_LOCAL_PORT=8443
+```
+
+Start the robot with those variables in its environment. If pin confirmation is
+missing, the local listener stays disabled while the normal loopback API
+continues to work. The app can then use the current local URL from the BLE
+bundle. If DHCP changes the Pi address while running, the local listener closes,
+the active WebSocket disconnects, and the existing 500 ms movement lease sends
+normal STOP before the new HTTPS listener opens. Mode is preserved and motion
+does not resume automatically. A process restart is not required.
+
+Install the physical-button BLE service from
+`thashu/deploy/systemd/thashu-wifi-provisioning@.service` after installing
+the project's Python requirements. The service runs as root for GPIO/BlueZ,
+but stores its generated token/key material for the configured robot account.
+It does not own the motor controller or ESP32 serial port.
+
+### Verification still required
+
+- Verify Android/Pi authenticated numeric comparison on hardware, including a
+  mismatch and timeout. Tharun reports matching-code pairing and status read
+  passed using nRF Connect on 2026-11-11; the Flutter app flow and rejection
+  cases remain unverified. A short click after comparing the code is required
+  on the Pi; a long hold still shuts down.
+- Verify the phone hotspot is reported as the active provisioned NetworkManager
+  UUID, and that the phone's source address equals the gateway address used by
+  the access gate. A mismatch must deny the request.
+- Flutter's integrated handoff build reads the new characteristic, stores URL,
+  token, and pin securely, and pins HTTPS and WSS; still verify the live
+  certificate-match and certificate-change cases on the target phone.
+- Verify from the target phone that it can reach a Pi client connected to that
+  phone's hotspot, with internet disabled.
+- Verify HTTPS health/status and authenticated telemetry, then repeat after
+  changing the Pi hotspot address and after a Pi restart.
+- Provisioning tests must not send movement commands. Confirm disconnect/rebind
+  expires a movement lease with normal STOP before enabling local access for
+  control.
+
+Do not mark Phase 9 complete from code alone. Record the exact Pi/app revisions,
+the no-internet phone test results, and the changed-IP/restart results first.

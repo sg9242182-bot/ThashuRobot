@@ -7,9 +7,9 @@
 #include <Adafruit_SSD1306.h>
 
 // Shared I2C Pins matching THASHU_ESP32_PIN_ALLOCATION.md
-#define OLED_SDA_PIN      21
-#define OLED_SCL_PIN      22
 #define OLED_ADDR         0x3C
+#define OLED_LEFT_MUX_CHANNEL  6
+#define OLED_RIGHT_MUX_CHANNEL 7
 
 #define OLED_WIDTH        128
 #define OLED_HEIGHT       64
@@ -22,12 +22,13 @@ enum Expression {
   EXPR_ANGRY,
   EXPR_CURIOUS,
   EXPR_SLEEPY,
+  EXPR_ASLEEP,
   EXPR_SURPRISED,
   EXPR_LOVE,
   EXPR_COUNT
 };
 
-// Symmetrical pose parameters
+// Per-display pose parameters; the two eyes intentionally use different poses.
 struct EyeParams {
   float w;          // Eye width
   float h;          // Eye height
@@ -54,30 +55,35 @@ class EyeManager {
     void printHelp();
 
   private:
-    // Both physical OLEDs intentionally share 0x3C and display the same symmetric eye.
-    Adafruit_SSD1306 _display;
+    // Both displays use address 0x3C but have isolated mux channels and buffers.
+    Adafruit_SSD1306 _leftDisplay;
+    Adafruit_SSD1306 _rightDisplay;
 
-    EyeParams _currentParams;
-    EyeParams _fromParams;
-    EyeParams _toParams;
+    EyeParams _currentParams[2];
+    EyeParams _fromParams[2];
+    EyeParams _toParams[2];
 
     unsigned long _transitionStartMs;
     unsigned long _transitionDurationMs;
     Expression    _currentTarget;
 
-    bool          _blinkActive;
-    unsigned long _blinkStartMs;
+    bool          _blinkActive[2];
+    unsigned long _blinkStartMs[2];
     unsigned long _blinkDurationMs;
     bool          _renderDirty;
     bool          _ready = false;
     unsigned long _lastHealthCheckMs = 0;
     unsigned long _nextAutoBlinkMs = 0;
 
-    EyeParams computeExpressionParams(Expression expr);
-    EyeParams getInterpolatedParams(unsigned long now);
-    float     getBlinkAmount(unsigned long now);
-    void      renderFrame(const EyeParams &p, float blinkAmt);
-    void      drawHeart(int16_t cx, int16_t cy, float scale);
+    EyeParams computeExpressionParams(Expression expr, uint8_t eyeIndex);
+    EyeParams getInterpolatedParams(unsigned long now, uint8_t eyeIndex);
+    float     getBlinkAmount(unsigned long now, uint8_t eyeIndex);
+    bool      renderFrame(const EyeParams &left, float leftBlink,
+                          const EyeParams &right, float rightBlink);
+    void      renderEye(Adafruit_SSD1306 &display, const EyeParams &p,
+                        float blinkAmt, bool leftEye);
+    void      drawHeart(Adafruit_SSD1306 &display, int16_t cx, int16_t cy,
+                        float scale);
 
     static float easeInOutCubic(float t);
 };

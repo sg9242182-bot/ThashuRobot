@@ -203,7 +203,7 @@ Prove the mobile client works against the actual Pi API and document how to run 
 - [x] Run formatter and static analysis.
 - [x] Run unit/widget tests and fix regressions.
 - [x] Test against local fake transport and widget fixtures before live hardware.
-- [ ] With the team, test connection loss, Pi restart, WebSocket loss, API errors, mode transitions, and stop behavior. The new Phase 12 runtime connection settings have not yet been built/analyzed/tested or exercised against the Pi; prior Flutter evidence predates that change.
+- [ ] With the team, test connection loss, Pi restart, WebSocket loss, API errors, mode transitions, and stop behavior. Manual movement lease renewal, idempotent move retry, command-result polling, and Manual Control page-state preservation are on `main` at `0421cf0`; run Flutter format/analyze/tests/build and test this exact revision on the phone before accepting it.
 - [x] Confirm the API contract version/commit used for testing.
 - [x] Build the current Android debug APK.
 - [x] Install and launch the current APK on the physical Android phone.
@@ -221,24 +221,37 @@ Physical robot movement tests remain deferred to final project-wide verification
 ## Phase 9 — App-only offline hotspot onboarding
 
 ### Objective
-Let an operator provision Thashu from the Thashu app alone and then connect to the Pi locally without requiring Tailscale, nRF Connect, or internet access.
+Provision Wi-Fi through the app and consume the Pi's one-time local HTTPS connection handoff without helper apps or internet. The implementation is present; owner security review and supervised hardware verification remain.
 
 ### Checklist
-- [ ] Integrate the physical-button-gated BLE Wi-Fi provisioning service into Settings using the Pi service/characteristic UUIDs and status strings from the reviewed provisioning branch; do not fork or change the Pi BLE protocol without agreement.
-- [ ] Keep the existing 3-second Pi-button hold and 60-second provisioning window. The app must explain the timing, scan only for Thashu's service, request the minimum OS Bluetooth permissions, and send credentials through the encrypted GATT characteristic.
-- [ ] Collect hotspot SSID/password only for the provisioning attempt; never persist or log the password and clear it from memory/UI after success or failure.
-- [ ] Show the Pi-reported provisioning status truthfully: found, waiting, credentials sent, connecting, connected, expired, invalid, or failed. A BLE write ACK is not proof that Wi-Fi or the Pi API is reachable.
-- [ ] Agree with Vishal and Tharun on local API discovery, API listening/binding, TLS trust, and API-token enrollment. The current Pi API defaults to loopback and the approved HTTPS path is Tailscale+Caddy; BLE Wi-Fi provisioning alone does not make local API access work.
-- [ ] After the backend contract is approved, let the app discover/select the Pi on the local hotspot and initialize the existing REST and WebSocket clients without a manually typed Tailscale address or nRF Connect.
-- [ ] Verify the actual target Android phone can reach a Pi client on its own hotspot; if Android hotspot routing prevents this, agree on a supported local-network topology before presenting setup as successful.
-- [ ] Test with internet access disabled: app-only BLE provisioning, hotspot join, secure API status, telemetry/WebSocket, stale recovery, app reconnect, and Pi restart. Do not send movement commands in the onboarding test.
-- [ ] Keep the existing Tailscale connection as an optional developer/test path until the offline path is verified; do not remove it prematurely.
+- [x] Add Flutter support for BLE service characteristics `...0001` through `...0004`; scan only for Thashu and strictly validate the UTF-8 JSON handoff fields.
+- [x] Request mobile Bluetooth permissions, write hotspot credentials only while Pi status is `waiting`, and show scan/setup states. The app labels the write as sent, not accepted; handoff is read only after Pi reports `connected`.
+- [x] Clear credential inputs and mutable byte buffers after use; do not persist or log hotspot passwords. Immutable Dart strings cannot be guaranteed to be zeroed immediately.
+- [x] Consume the handoff, require explicit save, store URL/token/pin securely, and pin the exact leaf certificate for HTTPS REST and WSS. Manual connection settings remain available.
+- [x] Require authenticated BLE numeric comparison for credential writes and connection-info reads; speak the phone's comparison value, require the user to compare/accept on Android, and require a second Pi button click to authorize.
+- [x] Enable the HTTPS/WSS listener only for the active NetworkManager profile created by provisioning; reject HTTP and WebSocket clients except the active hotspot gateway address.
+- [x] Update app instructions for numeric comparison and the button mapping: first short click opens the BLE window, a matching comparison needs a second short click, and a 3-second hold shuts down Thashu.
+- [x] Tharun reports a matching numeric comparison accepted after the Pi button confirmation using nRF Connect; the status characteristic was readable afterward (2026-11-11). This verifies the BLE bond/status read, not the app handoff.
+- [ ] Verify a mismatched comparison and missing Pi-button approval fail closed. An earlier rejection was observed, but it was not confirmed as a controlled test.
+- [ ] Verify the Android hotspot source address matches NetworkManager's gateway address; confirm other clients and non-provisioned profiles are denied.
+- [ ] Obtain Vishal's review of the revised BLE pairing and hotspot listener restrictions.
+- [ ] Verify the Android phone can reach the Pi's local HTTPS listener over the phone hotspot with internet disabled.
+- [x] Tharun reports that provisioning through the Thashu app connected the Pi to the phone hotspot (2026-11-11). The app build revision and whether internet was disabled were not captured.
+- [x] Pi-side BLE provisioning and hotspot joining were also hardware-tested with nRF Connect; this verifies the Pi service only, not Flutter end-to-end behavior.
+- [ ] Confirm the app received/saved the API URL, certificate pin, and token; then test pinned HTTPS status/WSS telemetry, stale recovery, app reconnect, hotspot-address change, and Pi restart. Do not send movement commands during onboarding.
+- [x] Preserve manual HTTPS settings as a fallback alongside app-only BLE/hotspot onboarding. Tailscale is not the current offline connection path.
 
 ### Exit criteria
-- [ ] A fresh phone can complete pairing and local API setup entirely in the Thashu app with no helper app or internet.
-- [ ] The phone trusts the Pi's local API securely; no global cleartext exception or public port forwarding is used.
-- [ ] Status and telemetry work across app reconnect and Pi restart, with no movement command sent by provisioning.
-- [ ] Flutter formatting, analysis, tests, Android build, and supervised phone/Pi verification pass; evidence and remaining limits are recorded.
+- [ ] A fresh phone completes pairing and local API setup entirely in Thashu with no helper app or internet.
+- [ ] HTTPS and WSS validate the Pi certificate pin; no global cleartext exception or public port forwarding is used.
+- [ ] Status and telemetry survive app reconnect, hotspot-address change, and Pi restart, with no movement sent during onboarding.
+- [ ] Flutter formatting, analysis, tests, Android build, security review, and supervised phone/Pi verification pass; evidence and remaining limits are recorded.
+
+### Phase completion record
+- **Status:** In progress — BLE/hotspot setup and movement-recovery code are integrated on `main` at `0421cf0`; current Flutter checks and app/Pi movement integration are not yet accepted.
+- **Evidence:** Backend requires BlueZ authenticated-encryption GATT flags and numeric comparison with an audible code plus physical confirmation. The local HTTPS/WebSocket gate checks the provisioned NetworkManager profile and gateway source. Tharun reports nRF Connect pairing succeeded after matching the spoken/displayed code and short-clicking the Pi button; the status characteristic then read successfully. He later reported that provisioning through the Thashu app connected the Pi to the phone hotspot (2026-11-11). The exact app revision and offline status were not captured. HTTPS/WSS reachability and API handoff validation have not yet been reported.
+- **Open issues:** Run formatter/analyzer/tests/Android build against current `main`; complete the app-to-hotspot HTTPS/WSS and movement-recovery test; obtain Vishal's security-contract review; complete supervised reconnect/restart/address-change checks on the phone and Pi.
+- **Dependency owner:** Vishal — review BLE/TLS/token security. Tharun — verify local HTTPS and arrange supervised phone/Pi checks. Niteshvar — validate current Flutter head/build and support integration.
 
 ## Phase completion record
 
@@ -273,8 +286,8 @@ For each phase, record:
 
 - **Status:** Complete for Flutter frontend scope (100%). Live Pi/robot verification is tracked in Phase 8; unapproved Emergency Stop remains unavailable by design.
 - **Evidence:** Dart analysis reported no issues; all 53 Flutter tests passed. Tests cover API/client validation, manual mode gating, pending/repeated movement, normal STOP, safety rejection, ACK timeout, unknown outcomes after connection loss, and pause/resume state handling. The UI does not claim that an ACK confirms physical stopping and clearly states that no approved latched Emergency Stop is available.
-- **Open issues:** Live Pi reconnect/control verification and any future Emergency Stop approval remain external integration/safety work tracked for final project verification; no unapproved behavior is exposed in the Flutter UI.
-- **Dependency owner:** Vishal — provide the Pi test connection. Tharun and Vishal — approve any future Emergency Stop semantics. Niteshvar — Flutter UI/client only.
+- **Open issues:** Live Pi reconnect/control verification remains external integration/safety work tracked for final project verification; Emergency Stop is out of scope by team decision, and no active Emergency Stop behavior is exposed in the Flutter UI.
+- **Dependency owner:** Vishal — provide/review the Pi test contract. Tharun — verify control/safety behavior. Niteshvar — Flutter UI/client only. Emergency Stop is out of scope.
 
 ### Phase 6 — WebSocket telemetry and reconnection
 
@@ -292,10 +305,10 @@ For each phase, record:
 
 ### Phase 8 — Integration testing and handoff
 
-- **Status:** In progress — 7 of 10 checklist items completed (70%). Flutter checks, Android debug build, and physical-phone launch pass; final Pi integration, focused PR, and teammate reviews remain open.
-- **Evidence:** Flutter formatting completed; Dart analysis reported no issues; all 53 Flutter tests passed, including API error handling and telemetry sensor parsing/freshness. Reviewed the integrated Phase 10 `api/README.md` contract and documented the remaining security/integration gaps in `mobile/flutter/SETUP.md`. With Android Studio JBR, `D:\flutter\bin\flutter.bat build apk --debug` succeeded and generated `mobile/flutter/build/app/outputs/flutter-apk/app-debug.apk` on 2026-11-08. ADB installed it successfully on `TCOR49Q8VCF6IBEQ`; Android reports `com.example.thashu_app/.MainActivity` as the resumed activity.
-- **Open issues:** Phone-to-Pi/restart/WebSocket/control verification awaits a private Pi address, token, and test window. Tharun reports local Pi/ESP32 checks passed; this does not replace Flutter phone integration. Pairing/TLS configuration and teammate reviews remain pending. Movement through Flutter waits for the agreed safe procedure.
-- **Dependency owner:** Vishal — confirm backend contract, provide test connection, and review API/client compatibility. Tharun — agree safe hardware/control test procedure and review safety behavior. Niteshvar — Flutter frontend changes and focused PR preparation.
+- **Status:** In progress. Earlier Flutter checks/build and basic phone/hotspot integration passed on prior revisions; movement recovery is now ported onto local `main` but still needs current-toolchain verification and phone testing.
+- **Evidence (updated 2026-11-17):** Prior Flutter analysis and tests passed, including reported PR #20 commit `8b4ccc0` (68 tests), and a debug APK was built, but that does not verify the current `main` recovery patch. Current code preserves Manual Control while navigating tabs, renews the held movement lease, retries uncertain moves with the same request ID, and polls command outcomes. New client tests cover lease renewal and idempotent retry but have not run because the Flutter SDK is unavailable in this session. Tharun reports the app can provision Wi-Fi, but the latest attempt showed no Pi API connection after saving; phone recovery and exact deployed app/backend/firmware revisions remain unverified.
+- **Open issues:** Record the exact APK/repository revisions used; verify phone-to-Pi diagnostics, telemetry, modes, normal STOP, reconnect, API/Pi restart, and repeated movement after a command. Capture sanitized logs and complete Vishal/Tharun review. Keep movement testing within the agreed safe setup. Emergency Stop is out of scope and must not be tested or claimed.
+- **Dependency owner:** Vishal — confirm backend contract and review API compatibility. Tharun — verify control/safety behavior and exact deployed Pi/ESP32 revisions. Niteshvar — provide current PR commit and APK/build evidence, then address integration findings.
 
 ### Phase 2 — App shell, navigation, and visual system
 

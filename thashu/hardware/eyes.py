@@ -47,5 +47,8 @@ class Eyes:
     def alert(self):
         self.set(self.ALERT)
 
+    def sleepy(self):
+        self.set("SLEEPY")
+
     def sleep(self):
         self.set(self.SLEEP)

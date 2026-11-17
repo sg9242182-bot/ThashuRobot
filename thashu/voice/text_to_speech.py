@@ -25,6 +25,7 @@ VOICE_CACHE_DIR = os.path.expanduser(os.environ.get(
 
 # Short, fixed replies are generated once on the Pi and kept outside the repo.
 COMMAND_VOICE_PROMPTS = {
+    "wake_greeting": "Mmm... I'm awake! Give me a moment to open my eyes.",
     "forward_slow": "Forward slowly.",
     "forward_medium": "Moving forward.",
     "forward_fast": "Forward quickly.",
@@ -62,6 +63,9 @@ COMMAND_VOICE_PROMPTS = {
     "identity_spelling_required": "Please spell the name using ordinary letter names, like T H A R U N, or say cancel.",
     "identity_not_recognized": "I don't recognize a confirmed face right now.",
     "person_recognized": "I recognize a known person.",
+    "ble_setup_on": "Bluetooth setup is on. You have sixty seconds to connect.",
+    "ble_setup_timeout": "Bluetooth setup timed out.",
+    "shutdown_starting": "Shutting down now.",
     "identity_registration_cancelled": "I cancelled face registration.",
     "identity_change_cancelled": "I cancelled that identity change.",
     "identity_not_saved": "I did not save the face identity.",

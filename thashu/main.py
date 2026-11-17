@@ -1,8 +1,12 @@
+import asyncio
+import socket
 import time
 import threading
 import os
 import atexit
 import statistics
+import random
+from core.roaming import select_roaming_action
 
 import numpy as np
 import RPi.GPIO as GPIO
@@ -11,7 +15,7 @@ from voice.audio_manager  import AudioManager
 from voice.wake_word      import WakeWordEngine
 from voice.vad            import VoiceActivityDetector
 from voice.speech_to_text import transcribe, preload_model
-from voice.text_to_speech import speak, play_cached_response, play_recognized_person, start_piper
+from voice.text_to_speech import speak, play_cached_response, play_recognized_person, prepare_command_voice_cache, start_piper
 from voice.sound_player   import play
 from core.brain           import Brain
 from core.ai_engine      import warmup_model
@@ -23,7 +27,7 @@ from vision.follow_logic   import FollowLogic
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
 from hardware.servo_tracking import ServoTracker
-from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, get_enrollment_spelling, is_recognition_query, get_person_memory_request, get_event_memory_request, get_person_event_query, get_place_event_query, get_person_memory_save_confirmation, is_person_memory_query, get_person_memory_delete_command
+from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, get_enrollment_spelling, is_recognition_query, get_person_memory_request, get_event_memory_request, get_person_event_query, get_place_event_query, get_person_memory_save_confirmation, is_person_memory_query, get_person_memory_delete_command, should_announce_recognized_person, get_roaming_command
 from core.model_paths import model_path, project_path
 from memory.people import PeopleMemory
 
@@ -34,7 +38,9 @@ SOUND_NOT_HEARD = project_path("sounds", "not_heard.wav")
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 MAX_RECORD_SECONDS = 10
-SILENCE_TIMEOUT    = 0.8
+# End command capture promptly after speech while retaining the VAD's own
+# multi-chunk hangover for natural pauses inside a phrase.
+SILENCE_TIMEOUT    = 0.6
 GRACE_PERIOD       = 4.0
 SAMPLE_RATE        = 48000
 BLOCK_SIZE         = 5460
@@ -59,10 +65,23 @@ PENDING_MEMORY_CONFIRM_SECONDS = 120.0
 FACE_ENROLLMENT_SAMPLE_COUNT = 15
 FACE_ENROLLMENT_TIMEOUT_SECONDS = 180.0
 
+# ── Idle Power Save / Touch Wake ──────────────────────────────────────────────
+TOUCH_WAKE_PIN = 22  # BCM GPIO22, physical pin 15; active-high TTP223 output.
+IDLE_REDUCE_AFTER_SECONDS = 5 * 60
+IDLE_SLEEP_AFTER_SECONDS = 10 * 60
+WAKE_CAMERA_READY_TIMEOUT_SECONDS = 12.0
+WAKE_GREETING = "Mmm... I'm awake! Give me a moment to open my eyes."
+ROAM_PWM = 100
+ROAM_FORWARD_PULSE_SECONDS = 0.25
+ROAM_REVERSE_PULSE_SECONDS = 0.20
+ROAM_TURN_PULSE_SECONDS = 0.30
+ROAM_SENSOR_MAX_AGE_SECONDS = 0.75
+ROAM_GAZE_SECONDS = 3.0
+ROAM_GAZE_INTERVAL_SECONDS = 5.0
+ROAM_RETRY_DELAY_SECONDS = 0.6
+
 # ── Shutdown Button ───────────────────────────────────────────────────────────
 BUTTON_PIN = 17
-
-
 # ── Boot ──────────────────────────────────────────────────────────────────────
 runtime   = RuntimeStateMachine()
 event_bus = EventBus()
@@ -98,34 +117,58 @@ _memory_delete_pending = None
 _memory_pending = None
 _last_idle_recognized_person = None
 _last_idle_recognized_at = 0.0
+_last_announced_recognized_person = None
+_recognized_person_absent_since = None
+RECOGNITION_ANNOUNCEMENT_REARM_SECONDS = 10.0
+_roaming_active = False
+_roaming_start_pending = False
+_roaming_phase = "idle"
+_roaming_next_at = 0.0
+_roaming_motion_active = False
+_roaming_motion_direction = None
+_roaming_obstacle_event = False
+_roaming_reverse_attempts = 0
+_roaming_forward_pulses = 0
+_roaming_gaze_track_id = None
+_roaming_gaze_until = 0.0
+_roaming_next_gaze_at = 0.0
 _motion_timer = None
 _motion_generation = 0
 _motion_lock = threading.RLock()
 _shutdown_event = threading.Event()
 _shutdown_lock = threading.Lock()
 _shutdown_complete = False
+_api_command_manager = None
+_activity_lock = threading.Lock()
+_last_user_activity_at = time.monotonic()
 event_bus.subscribe(
     "RUNTIME_STATE_CHANGED",
     vision.on_runtime_state_changed,
 )
 
 
-# ── Shutdown Button Monitor ───────────────────────────────────────────────────
-def monitor_shutdown_button():
+def _mark_user_activity():
+    global _last_user_activity_at
+    with _activity_lock:
+        _last_user_activity_at = time.monotonic()
+
+
+def _idle_duration():
+    with _activity_lock:
+        last_activity = _last_user_activity_at
+    return max(0.0, time.monotonic() - last_activity)
+
+
+# ── Touch Wake Input ──────────────────────────────────────────────────────────
+def setup_touch_wake_input():
+    """Claim the touch input; GPIO17 belongs to the separate BLE service."""
     GPIO.setmode(GPIO.BCM)
-
-    # Internal pull-up resistor
-    GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-
-    print("[SYSTEM] Shutdown button monitoring started")
-
-    while not _shutdown_event.wait(0.1):
-        # Button pressed = LOW
-        if GPIO.input(BUTTON_PIN) == GPIO.LOW:
-            print("[SYSTEM] Shutdown button pressed")
-            _shutdown_runtime("physical shutdown button")
-            os.system("sudo shutdown now")
-            break
+    # TTP223 touch modules powered from 3.3 V output HIGH on touch.
+    GPIO.setup(TOUCH_WAKE_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+    print(
+        f"[SYSTEM] Touch wake input ready on BCM GPIO{TOUCH_WAKE_PIN}; "
+        "GPIO17 is managed by the BLE setup service"
+    )
 
 
 # ── Collect spoken command ─────────────────────────────────────────────────────
@@ -215,6 +258,7 @@ def _rearm_wake_after_audio():
 
 def _announce_recognized_person(person_name):
     """Announce the confirmed person's saved name while vision and wake input are paused."""
+    _mark_user_activity()
     display_name = " ".join(str(person_name or "").split())
     message = f"I recognize {display_name}."
     transition_runtime(RuntimeState.SPEAKING)
@@ -411,6 +455,12 @@ def stop_motion():
 
 _api_server = None
 _api_thread = None
+_local_api_server = None
+_local_api_thread = None
+_local_api_monitor_thread = None
+_local_api_monitor_stop = threading.Event()
+_local_api_lock = threading.Lock()
+_local_api_bound_ip = None
 
 
 def _cancel_motion_sources():
@@ -418,6 +468,9 @@ def _cancel_motion_sources():
     global _auto_face_track_id, _follow_start_pending, _follow_region_pending
     global _follow_search_active, _follow_motion_active
     global _motion_timer, _motion_generation
+    global _roaming_active, _roaming_start_pending, _roaming_motion_active
+    global _roaming_motion_direction, _roaming_phase, _roaming_next_at
+    global _roaming_gaze_track_id, _roaming_obstacle_event
 
     with _motion_lock:
         _follow_start_pending = False
@@ -431,11 +484,144 @@ def _cancel_motion_sources():
             _motion_timer.cancel()
             _motion_timer = None
         _follow_motion_active = False
+        _roaming_active = False
+        _roaming_start_pending = False
+        _roaming_motion_active = False
+        _roaming_motion_direction = None
+        _roaming_phase = "idle"
+        _roaming_next_at = 0.0
+        _roaming_gaze_track_id = None
+        _roaming_obstacle_event = False
+
+
+def _bind_api_socket(host, port):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((host, port))
+        sock.listen(128)
+        sock.setblocking(False)
+        return sock
+    except Exception:
+        sock.close()
+        raise
+
+
+def _run_api_servers(primary_server, app, validate_api_tls_bind, pinning_confirmed, local_enabled):
+    """Run loopback and local HTTPS listeners on one asyncio loop.
+
+    Both listeners share the same ApiServices instance/event loop. The local
+    listener is rebound only to the configured Wi-Fi interface's current IP.
+    """
+    from core.local_api_access import (
+        ensure_local_api_material,
+        local_api_port,
+        provisioned_hotspot_network,
+    )
+
+    async def run():
+        global _local_api_server, _local_api_bound_ip
+        primary_socket = _bind_api_socket(
+            primary_server.config.host,
+            primary_server.config.port,
+        )
+        primary_server.install_signal_handlers = lambda: None
+        primary_task = asyncio.create_task(primary_server.serve(sockets=[primary_socket]))
+        local_server = None
+        local_task = None
+        local_ip = None
+        try:
+            for _ in range(200):
+                if primary_server.started:
+                    break
+                if primary_task.done():
+                    await primary_task
+                    return
+                await asyncio.sleep(0.05)
+            if not primary_server.started:
+                raise RuntimeError("Loopback API did not finish startup")
+
+            while not primary_server.should_exit:
+                if local_enabled:
+                    try:
+                        network = await asyncio.to_thread(provisioned_hotspot_network)
+                        address = network["address"] if network is not None else None
+                        if address != local_ip:
+                            if local_server is not None:
+                                local_server.should_exit = True
+                                await local_task
+                                local_server = None
+                                local_task = None
+                                _local_api_server = None
+                                _local_api_bound_ip = None
+                                # Closing the old WebSocket stops renewals; wait
+                                # past the 500 ms lease so its normal STOP fires.
+                                await asyncio.sleep(0.65)
+                            if address is not None:
+                                material = await asyncio.to_thread(
+                                    ensure_local_api_material, address
+                                )
+                                validate_api_tls_bind(
+                                    address,
+                                    material["certfile"],
+                                    material["keyfile"],
+                                    android_trust_confirmed=pinning_confirmed,
+                                )
+                                local_config = uvicorn.Config(
+                                    app,
+                                    host=address,
+                                    port=local_api_port(),
+                                    log_level="warning",
+                                    access_log=False,
+                                    ws_ping_interval=20.0,
+                                    ws_ping_timeout=10.0,
+                                    ssl_certfile=material["certfile"],
+                                    ssl_keyfile=material["keyfile"],
+                                    lifespan="off",
+                                    timeout_graceful_shutdown=1,
+                                )
+                                local_server = uvicorn.Server(local_config)
+                                local_server.install_signal_handlers = lambda: None
+                                local_socket = _bind_api_socket(address, local_api_port())
+                                local_task = asyncio.create_task(
+                                    local_server.serve(sockets=[local_socket])
+                                )
+                                local_ip = address
+                                _local_api_server = local_server
+                                _local_api_bound_ip = address
+                                print(
+                                    f"[API] Local HTTPS listener started on "
+                                    f"{address}:{local_api_port()}"
+                                )
+                            else:
+                                local_ip = None
+                                print("[API] Wi-Fi address unavailable; local HTTPS listener stopped")
+                    except Exception as exc:
+                        print(f"[API] Local HTTPS rebind failed ({type(exc).__name__})")
+                        if local_server is not None:
+                            local_server.should_exit = True
+                            await local_task
+                            local_server = None
+                            local_task = None
+                            local_ip = None
+                            _local_api_server = None
+                            _local_api_bound_ip = None
+                await asyncio.sleep(1.0)
+        finally:
+            if local_server is not None:
+                local_server.should_exit = True
+                await local_task
+            _local_api_server = None
+            _local_api_bound_ip = None
+            primary_server.should_exit = True
+            await primary_task
+
+    asyncio.run(run())
 
 
 def _start_api_server():
-    """Start the mobile API on this process's existing motor/serial transport."""
-    global _api_server, _api_thread
+    """Start loopback API and optional local HTTPS on the shared event loop."""
+    global _api_server, _api_thread, _api_command_manager
 
     try:
         import sys
@@ -448,7 +634,16 @@ def _start_api_server():
         import uvicorn
         from api.config import get_api_tls_files, validate_api_tls_bind
         from api.main import app, services
-        from core.config import api_host, api_port, api_tls_android_trust_confirmed
+        from core.config import (
+            api_host,
+            api_local_tls_pinning_confirmed,
+            api_port,
+            api_tls_android_trust_confirmed,
+        )
+        from core.local_api_access import (
+            enabled as local_api_enabled,
+            ensure_api_token,
+        )
         from core.robot_manager import RobotCommandManager
 
         host = api_host()
@@ -461,12 +656,27 @@ def _start_api_server():
             android_trust_confirmed=api_tls_android_trust_confirmed(),
         )
 
+        local_enabled = local_api_enabled()
+        pinning_confirmed = api_local_tls_pinning_confirmed()
+        if local_enabled and not pinning_confirmed:
+            print(
+                "[API] Local HTTPS disabled: app certificate pinning is not "
+                "confirmed; loopback API remains available"
+            )
+            local_enabled = False
+        if local_enabled:
+            # Persist the robot process's configured token before root-owned
+            # BLE provisioning can return the app connection bundle.
+            ensure_api_token()
+
         manager = RobotCommandManager(
             motor=motors,
             command_lock=_motion_lock,
             before_mode_switch=_cancel_motion_sources,
             before_external_stop=_cancel_motion_sources,
+            activity_callback=_mark_user_activity,
         )
+        _api_command_manager = manager
         services.attach_robot_manager(manager)
         config = uvicorn.Config(
             app,
@@ -480,26 +690,105 @@ def _start_api_server():
         )
         _api_server = uvicorn.Server(config)
         _api_thread = threading.Thread(
-            target=_api_server.run,
+            target=_run_api_servers,
+            args=(_api_server, app, validate_api_tls_bind, pinning_confirmed, local_enabled),
             name="thashu-api",
             daemon=True,
         )
         _api_thread.start()
         scheme = "https" if certfile and keyfile else "http"
         print(f"[API] Started at {scheme}://{host}:{port}; shares ESP32 transport")
+        if local_enabled:
+            print("[API] Local hotspot HTTPS monitoring enabled")
     except Exception as exc:
         print(f"[API] Startup failed ({type(exc).__name__}); robot voice/runtime remains available")
 
 
+def _enter_software_sleep():
+    """Stop motion, inhibit API moves, and park camera/audio until touch wake."""
+    manager = _api_command_manager
+    try:
+        if manager is not None:
+            manager.enter_sleep()
+        else:
+            _cancel_motion_sources()
+            sequence = stop_motion()
+            if sequence is None or motors.gpio.wait_for_ack(sequence, timeout=0.75) != "OK":
+                print("[POWER] Sleep deferred: ESP32 STOP was not acknowledged")
+                return False
+    except Exception as exc:
+        print(f"[POWER] Sleep deferred: could not confirm motor STOP: {exc}")
+        return False
+
+    wake.lock()
+    audio.pause()
+    vision.stop()
+    eyes.sleep()
+    print("[POWER] Software sleep: audio and camera paused; touch GPIO wakes Thashu")
+    return True
+
+
+def _camera_ready_for_wake():
+    vision.start()
+    deadline = time.monotonic() + WAKE_CAMERA_READY_TIMEOUT_SECONDS
+    while time.monotonic() < deadline and not _shutdown_event.is_set():
+        observed_at = vision.get_state().get("observed_at")
+        if isinstance(observed_at, (int, float)) and time.monotonic() - observed_at <= 0.75:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def _wake_from_touch():
+    """Restore audio/camera first, then animate and play the cached greeting."""
+    print("[POWER] Touch detected; restoring Thashu")
+    wake.lock()
+    if not _camera_ready_for_wake():
+        vision.stop()
+        eyes.sleep()
+        print("[POWER] Wake deferred: camera did not provide a fresh frame")
+        return False
+
+    if not audio.resume():
+        vision.stop()
+        eyes.sleep()
+        print("[POWER] Wake deferred: microphone stream could not be restored")
+        return False
+
+    # The camera has produced a fresh frame and the mic stream has reopened;
+    # only now begin the gradual eye and voice wake sequence.
+    audio.pause()
+    eyes.thinking()
+    time.sleep(0.35)
+    if not play_cached_response(WAKE_GREETING):
+        speak(WAKE_GREETING)
+    eyes.happy()
+    time.sleep(0.35)
+    eyes.idle()
+
+    if not audio.resume():
+        vision.stop()
+        eyes.sleep()
+        print("[POWER] Wake deferred: microphone failed after greeting")
+        return False
+
+    _rearm_wake_after_audio()
+    if _api_command_manager is not None:
+        _api_command_manager.exit_sleep()
+    _mark_user_activity()
+    print("[POWER] Awake. Say 'Hey Thashu'")
+    return True
+
+
 def _stop_api_server():
-    """Stop Uvicorn cleanly before closing the shared ESP32 transport."""
+    """Stop both API listeners before closing the shared ESP32 transport."""
     global _api_server, _api_thread
     if _api_server is not None:
         _api_server.should_exit = True
     if _api_thread is not None and _api_thread is not threading.current_thread():
-        _api_thread.join(timeout=5.0)
+        _api_thread.join(timeout=7.0)
         if _api_thread.is_alive():
-            print("[API] Server thread did not stop within 5 seconds")
+            print("[API] Server thread did not stop within 7 seconds")
     _api_thread = None
     _api_server = None
 
@@ -515,6 +804,8 @@ def _shutdown_runtime(reason="process exit"):
         _shutdown_event.set()
 
     print(f"[SYSTEM] Shutting down cleanly ({reason})")
+    if _roaming_active or _roaming_motion_active:
+        _clear_roaming_state()
     try:
         follow_logic.stop()
     except Exception as exc:
@@ -552,19 +843,10 @@ def _shutdown_runtime(reason="process exit"):
     except Exception as exc:
         print(f"[SYSTEM] ESP32 transport shutdown warning: {exc}")
 
-    current = threading.current_thread()
-    for thread in threading.enumerate():
-        if thread.name == "thashu-shutdown-button" and thread is not current:
-            thread.join(timeout=0.5)
-            if thread.is_alive():
-                print("[SYSTEM] Shutdown-button monitor is still stopping")
-
     try:
         GPIO.cleanup()
     except Exception as exc:
         print(f"[SYSTEM] GPIO cleanup warning: {exc}")
-
-
 atexit.register(_shutdown_runtime)
 
 
@@ -864,7 +1146,7 @@ def update_idle_face_tracking(snapshot):
     """Track one visible face with the camera servos while idle, independent of identity."""
     global _auto_face_track_id
 
-    if runtime.current != RuntimeState.IDLE or follow_logic.enabled:
+    if runtime.current != RuntimeState.IDLE or follow_logic.enabled or _roaming_active:
         return
 
     observed_at = (snapshot or {}).get("observed_at")
@@ -908,9 +1190,276 @@ def update_idle_face_tracking(snapshot):
     servo_tracker.update(x, y, frame_w, frame_h)
 
 
+def _clear_roaming_state():
+    global _roaming_active, _roaming_motion_active, _roaming_motion_direction
+    global _roaming_phase, _roaming_next_at, _roaming_gaze_track_id
+    global _roaming_start_pending, _roaming_obstacle_event
+    global _roaming_reverse_attempts, _roaming_forward_pulses
+    _roaming_active = False
+    _roaming_motion_active = False
+    _roaming_motion_direction = None
+    _roaming_phase = "idle"
+    _roaming_next_at = 0.0
+    _roaming_gaze_track_id = None
+    _roaming_start_pending = False
+    _roaming_obstacle_event = False
+    _roaming_reverse_attempts = 0
+    _roaming_forward_pulses = 0
+    servo_tracker.stop_search()
+
+
+def _stop_roaming(reason):
+    if not (_roaming_active or _roaming_motion_active):
+        return
+    _clear_roaming_state()
+    try:
+        manager = _api_command_manager
+        if manager is not None and manager.auto_active:
+            sequence = manager.stop_preserving_mode()
+        else:
+            sequence = stop_motion()
+    except Exception as exc:
+        sequence = None
+        print(f"[ROAM] STOP dispatch failed ({type(exc).__name__})")
+    acknowledgement = (
+        motors.gpio.wait_for_ack(sequence, timeout=0.75)
+        if sequence is not None
+        else None
+    )
+    print(
+        f"[ROAM] Stopped ({reason}); STOP sequence {sequence}, "
+        f"ACK {acknowledgement or 'unconfirmed'}"
+    )
+
+
+def _start_roaming():
+    global _roaming_active, _roaming_phase, _roaming_next_at
+    global _roaming_reverse_attempts, _roaming_forward_pulses
+    global _roaming_next_gaze_at, _roaming_obstacle_event
+    if runtime.current != RuntimeState.IDLE:
+        print("[ROAM] Start rejected; Thashu is not idle")
+        return False
+    manager = _api_command_manager
+    if manager is None:
+        print("[ROAM] Start rejected; API command manager is unavailable")
+        return False
+    with _motion_lock:
+        mode = getattr(manager, "mode", None)
+        mode = getattr(mode, "value", mode)
+        if mode != "AUTO" or manager.motion_inhibited:
+            print("[ROAM] Start rejected; AUTO mode and confirmed STOP are required")
+            return False
+        if not motors.gpio.is_connected():
+            print("[ROAM] Start rejected; ESP32 link is unavailable")
+            return False
+        if motors.gpio.get_sensor_snapshot(max_age=ROAM_SENSOR_MAX_AGE_SECONDS) is None:
+            print("[ROAM] Start rejected; fresh sensor telemetry is unavailable")
+            return False
+        try:
+            manager.start_auto()
+        except Exception as exc:
+            print(f"[ROAM] Start rejected ({type(exc).__name__})")
+            return False
+        if follow_logic.enabled:
+            follow_logic.stop()
+            servo_tracker.stop_search()
+        stop_motion()
+        _roaming_active = True
+        _roaming_phase = "evaluate"
+        _roaming_next_at = time.monotonic()
+        _roaming_reverse_attempts = 0
+        _roaming_forward_pulses = 0
+        _roaming_next_gaze_at = time.monotonic()
+        _roaming_obstacle_event = False
+        _mark_user_activity()
+    print("[ROAM] Enabled: bounded sensor-gated motion; wake word or STOP ends roaming")
+    return True
+
+
+def _roam_pulse(direction, duration):
+    global _roaming_motion_active, _roaming_motion_direction, _roaming_phase, _roaming_next_at
+    manager = _api_command_manager
+    with _motion_lock:
+        if (
+            not _roaming_active
+            or manager is None
+            or manager.mode.value != "AUTO"
+            or not manager.auto_active
+            or manager.motion_inhibited
+        ):
+            _clear_roaming_state()
+            return False
+        seq = start_bounded_motion(direction, ROAM_PWM, duration_override=duration)
+    if seq is None:
+        print(f"[ROAM] {direction} unavailable; disabling roaming")
+        _fail_roaming_motion("dispatch unavailable")
+        return False
+    ack = motors.gpio.wait_for_ack(seq, timeout=0.2)
+    if ack != "OK":
+        print(f"[ROAM] {direction} rejected ({ack or 'ACK_TIMEOUT'}); disabling roaming")
+        _fail_roaming_motion(ack or "ACK_TIMEOUT")
+        return False
+    with _motion_lock:
+        if (
+            not _roaming_active
+            or manager.mode.value != "AUTO"
+            or not manager.auto_active
+            or manager.motion_inhibited
+        ):
+            return False
+        _roaming_motion_active = True
+        _roaming_motion_direction = direction
+        _roaming_phase = "moving"
+        _roaming_next_at = time.monotonic() + duration
+    print(f"[ROAM] {direction} pulse accepted (PWM {ROAM_PWM}, {duration:.2f}s)")
+    return True
+
+
+def _fail_roaming_motion(reason):
+    """Latch movement inhibition after an autonomous pulse is uncertain."""
+    _clear_roaming_state()
+    manager = _api_command_manager
+    try:
+        if manager is not None:
+            manager.safety_stop()
+        else:
+            sequence = stop_motion()
+            if sequence is not None:
+                motors.gpio.wait_for_ack(sequence, timeout=0.75)
+    except Exception as exc:
+        print(f"[ROAM] Fail-safe STOP failed ({type(exc).__name__})")
+    print(f"[ROAM] Disabled after motion fault: {reason}")
+
+
+def _update_roaming_gaze(snapshot, now):
+    global _roaming_gaze_track_id, _roaming_gaze_until, _roaming_next_gaze_at
+    observed_at = (snapshot or {}).get("observed_at")
+    if not isinstance(observed_at, (int, float)) or not 0 <= now - observed_at <= 0.75:
+        servo_tracker.stop_search()
+        _roaming_gaze_track_id = None
+        _roaming_next_gaze_at = now + ROAM_GAZE_INTERVAL_SECONDS
+        return
+    people = [
+        p for p in ((snapshot or {}).get("persons") or [])
+        if isinstance(p, dict) and p.get("track_id") is not None
+        and not p.get("ambiguous", True) and p.get("center")
+    ]
+    if _roaming_gaze_track_id is not None and now < _roaming_gaze_until:
+        target = next((p for p in people if p.get("track_id") == _roaming_gaze_track_id), None)
+        if target:
+            frame_w = (snapshot or {}).get("frame_size", (640, 480))[0]
+            servo_tracker.update_pan_only(target["center"][0], frame_w)
+        return
+    if now < _roaming_next_gaze_at:
+        return
+    if not people:
+        _roaming_gaze_track_id = None
+        _roaming_next_gaze_at = now + ROAM_GAZE_INTERVAL_SECONDS
+        return
+    target = random.choice(people)
+    _roaming_gaze_track_id = target["track_id"]
+    _roaming_gaze_until = now + ROAM_GAZE_SECONDS
+    _roaming_next_gaze_at = now + ROAM_GAZE_INTERVAL_SECONDS
+    frame_w = (snapshot or {}).get("frame_size", (640, 480))[0]
+    servo_tracker.update_pan_only(target["center"][0], frame_w)
+    print(f"[ROAM] Briefly looking toward person track={_roaming_gaze_track_id}")
+
+
+def update_roaming(snapshot):
+    """Perform short IDLE-only roaming pulses after checking fresh safety telemetry."""
+    global _roaming_phase, _roaming_next_at, _roaming_motion_active
+    global _roaming_motion_direction, _roaming_reverse_attempts, _roaming_forward_pulses
+    global _roaming_obstacle_event
+    if not _roaming_active or runtime.current != RuntimeState.IDLE:
+        return
+    now = time.monotonic()
+    manager = _api_command_manager
+    if (
+        manager is None
+        or manager.mode.value != "AUTO"
+        or not manager.auto_active
+        or manager.motion_inhibited
+    ):
+        _stop_roaming("control state changed")
+        return
+    _update_roaming_gaze(snapshot, now)
+    if _roaming_obstacle_event:
+        _roaming_obstacle_event = False
+        _roaming_motion_active = False
+        _roaming_motion_direction = None
+        stop_sequence = stop_motion()
+        stop_ack = (
+            motors.gpio.wait_for_ack(stop_sequence, timeout=0.2)
+            if stop_sequence is not None
+            else None
+        )
+        if stop_ack != "OK":
+            _fail_roaming_motion("obstacle STOP ACK timeout")
+            return
+        _roaming_phase = "evaluate"
+        _roaming_next_at = now + 0.15
+    if _roaming_motion_active:
+        if now < _roaming_next_at:
+            return
+        direction = _roaming_motion_direction
+        stop_sequence = stop_motion()
+        stop_ack = (
+            motors.gpio.wait_for_ack(stop_sequence, timeout=0.2)
+            if stop_sequence is not None
+            else None
+        )
+        if stop_ack != "OK":
+            _fail_roaming_motion("pulse STOP ACK timeout")
+            return
+        _roaming_motion_active = False
+        _roaming_motion_direction = None
+        _roaming_phase = "evaluate"
+        _roaming_next_at = now + 0.20
+        print(f"[ROAM] {direction} pulse complete; waiting for fresh telemetry")
+        return
+    if now < _roaming_next_at:
+        return
+    sensors = motors.gpio.get_sensor_snapshot(max_age=ROAM_SENSOR_MAX_AGE_SECONDS)
+    if sensors is None:
+        _roaming_phase = "wait"
+        _roaming_next_at = now + ROAM_RETRY_DELAY_SECONDS
+        print("[ROAM] Sensor data missing or stale; staying stopped")
+        return
+    direction, forward_count, reverse_count, reason = select_roaming_action(
+        sensors,
+        forward_pulses=_roaming_forward_pulses,
+        reverse_attempts=_roaming_reverse_attempts,
+        choose=random.choice,
+    )
+    _roaming_forward_pulses = forward_count
+    _roaming_reverse_attempts = reverse_count
+    if direction is None:
+        _roaming_phase = "wait"
+        _roaming_next_at = now + ROAM_RETRY_DELAY_SECONDS
+        print(f"[ROAM] No sensor-cleared route ({reason}); staying stopped")
+        return
+    if reason == "periodic_turn":
+        print(f"[ROAM] Clear path; taking a random {direction.lower()} turn")
+    elif reason == "front_blocked_reverse":
+        print(f"[ROAM] Front blocked; brief reverse attempt {reverse_count}/2")
+    elif reason == "clearer_side":
+        print(f"[ROAM] Front blocked; trying the clearer {direction.lower()} side")
+    duration = {
+        "FORWARD": ROAM_FORWARD_PULSE_SECONDS,
+        "BACKWARD": ROAM_REVERSE_PULSE_SECONDS,
+        "LEFT": ROAM_TURN_PULSE_SECONDS,
+        "RIGHT": ROAM_TURN_PULSE_SECONDS,
+    }[direction]
+    _roam_pulse(direction, duration)
+
+
 def process_safety_events():
-    global _follow_safety_notice_latched
+    global _follow_safety_notice_latched, _roaming_obstacle_event
     for event in motors.gpio.drain_events():
+        if event in ("EVENT|0|STOP|OBSTACLE", "EVENT|0|BLOCKED|OBSTACLE") and _roaming_active:
+            _roaming_obstacle_event = True
+            print("[ROAM] ESP32 safety stop; silently rechecking clearances")
+            continue
         if event == "EVENT|0|STOP|OBSTACLE":
             _follow_safety_notice_latched = "obstacle_blocked"
             # This is an asynchronous ESP32 safety event; announce it in IDLE too,
@@ -940,21 +1489,19 @@ def main():
     global _identity_enrollment_state, _identity_pending_name
     global _memory_delete_pending, _memory_pending
     global _last_idle_recognized_person, _last_idle_recognized_at
+    global _last_announced_recognized_person, _recognized_person_absent_since
+    idle_reduced = False
+    software_sleeping = False
+    global _roaming_start_pending
     print("[SYSTEM] Jarvis started")
     _start_api_server()
 
     # Start systems
     audio.start()
 
-    # ── Start shutdown button monitor ───────────────────────────────────────
-    shutdown_thread = threading.Thread(
-        target=monitor_shutdown_button,
-        name="thashu-shutdown-button",
-        daemon=True,
-    )
-
-    shutdown_thread.start()
-
+    # GPIO17 is exclusively owned by the BLE provisioning service, which maps
+    # short-click to setup and long-hold to Pi shutdown.
+    setup_touch_wake_input()
     # ── Startup sound ───────────────────────────────────────────────────────
 
     wake.lock()
@@ -963,6 +1510,7 @@ def main():
     start_piper()
     preload_model()
     warmup_model()
+    prepare_command_voice_cache({"wake_greeting"})
 
     play(SOUND_STARTUP, blocking=True)
 
@@ -979,11 +1527,53 @@ def main():
     eyes.idle()
     # Start autonomous following only after the startup audio has finished.
     vision.start()
+    _mark_user_activity()
 
 
 
     while not _shutdown_event.is_set():
         process_safety_events()
+
+        if software_sleeping:
+            touch = GPIO.wait_for_edge(
+                TOUCH_WAKE_PIN,
+                GPIO.RISING,
+                timeout=1000,
+            )
+            if touch is not None and _wake_from_touch():
+                software_sleeping = False
+                idle_reduced = False
+            continue
+
+        manager_auto_active = False
+        if _api_command_manager is not None:
+            try:
+                manager_auto_active = _api_command_manager.auto_active
+            except Exception:
+                manager_auto_active = True
+        with _motion_lock:
+            timed_motion_active = _motion_timer is not None or _follow_motion_active
+        can_idle = (
+            runtime.current == RuntimeState.IDLE
+            and _identity_enrollment_state == "idle"
+            and not _follow_search_active
+            and not timed_motion_active
+            and not manager_auto_active
+            and not _roaming_active
+        )
+        if can_idle:
+            idle_seconds = _idle_duration()
+            if idle_seconds >= IDLE_SLEEP_AFTER_SECONDS:
+                if _enter_software_sleep():
+                    software_sleeping = True
+                    idle_reduced = True
+                    continue
+                time.sleep(0.25)
+            elif idle_seconds >= IDLE_REDUCE_AFTER_SECONDS and not idle_reduced:
+                vision.stop()
+                eyes.sleepy()
+                idle_reduced = True
+                print("[POWER] Idle for 5 minutes; camera paused and eyes drowsy")
 
         if runtime.current == RuntimeState.IDLE and _identity_enrollment_state == "capturing":
             capture = vision.enrollment_status()
@@ -1076,6 +1666,14 @@ def main():
             # continue to listen for the wake word.
             wake_triggered = not _follow_search_active and wake.process(chunk)
             if wake_triggered:
+                _mark_user_activity()
+                if idle_reduced:
+                    vision.start()
+                    eyes.idle()
+                    idle_reduced = False
+                if _roaming_active:
+                    _stop_roaming("wake word")
+                _roaming_start_pending = False
                 # Snapshot identity before the interaction pauses vision and STT delays dispatch.
                 recognized_person_at_wake = _recently_recognized_person()
                 transition_runtime(RuntimeState.WAKE_DETECTED)
@@ -1155,6 +1753,11 @@ def main():
                         "delete my saved memories",
                     ]
 
+                if expected_phrases is None and recognized_person_at_wake is None:
+                    expected_phrases = [
+                        "start roaming", "start roaming mode", "roaming mode",
+                        "roam around the room", "stop roaming", "stop roaming mode",
+                    ]
                 text = transcribe(raw_audio, expected_phrases=expected_phrases)
 
                 stt_time = time.time() - stt_start
@@ -1625,6 +2228,16 @@ def main():
                         )
                     else:
                         response = "I don't recognize a confirmed face right now."
+                elif (roaming_command := get_roaming_command(text)) == "START":
+                    _roaming_start_pending = True
+                    response = (
+                        "I'll try to start roaming after I finish speaking. "
+                        "It needs AUTO mode and fresh sensors. Say Hey Thashu to stop it."
+                    )
+                elif roaming_command == "STOP":
+                    _roaming_start_pending = False
+                    _stop_roaming("voice command")
+                    response = "Roaming mode is off."
                 elif (follow_command := get_follow_command(text)) == "STOP":
                     follow_logic.stop()
                     servo_tracker.stop_search()
@@ -1656,10 +2269,18 @@ def main():
                             print(f"[COMMAND] SERVO LOOK {look_direction} failed: {look_ack or 'ACK_TIMEOUT'}")
                             response = "I couldn't reach the servo controller."
                 elif is_stop_command(text):
+                    _roaming_start_pending = False
+                    if _roaming_active or _roaming_motion_active:
+                        _clear_roaming_state()
                     follow_logic.stop()
                     servo_tracker.stop_search()
                     print("[COMMAND] Explicit STOP recognized; sending directly to ESP32")
-                    stop_sequence = stop_motion()
+                    manager = _api_command_manager
+                    stop_sequence = (
+                        manager.stop_preserving_mode()
+                        if manager is not None
+                        else stop_motion()
+                    )
                     if stop_sequence is None:
                         print("[COMMAND] STOP could not be sent; ESP32 link is unavailable")
                         response = "I couldn't reach the motor controller, so I can't confirm the stop."
@@ -1765,7 +2386,12 @@ def main():
 
                 transition_runtime(RuntimeState.RETURN_TO_IDLE)
                 transition_runtime(RuntimeState.IDLE)
+                if _roaming_start_pending:
+                    _roaming_start_pending = False
+                    _start_roaming()
             elif not _follow_search_active:
+                if _roaming_active:
+                    update_roaming(vis)
                 # Consume all queued transitions and compare the newest identity
                 # with the last one announced. Reacquiring the same face after a
                 # conversation or a brief confidence flicker must stay silent.
@@ -1781,7 +2407,31 @@ def main():
                     ),
                     None,
                 )
-                if recognized_name is not None:
+                now = time.monotonic()
+                last_name_present = any(
+                    str(face.get("name") or "").strip().casefold()
+                    == (_last_announced_recognized_person or "").strip().casefold()
+                    for face in known_faces
+                )
+                if _last_announced_recognized_person and runtime.current == RuntimeState.IDLE:
+                    if not frame_fresh or last_name_present:
+                        _recognized_person_absent_since = None
+                    elif _recognized_person_absent_since is None:
+                        _recognized_person_absent_since = now
+
+                absent_seconds = (
+                    now - _recognized_person_absent_since
+                    if _recognized_person_absent_since is not None
+                    else 0.0
+                )
+                if recognized_name is not None and should_announce_recognized_person(
+                    recognized_name,
+                    _last_announced_recognized_person,
+                    absent_seconds=absent_seconds,
+                    rearm_after=RECOGNITION_ANNOUNCEMENT_REARM_SECONDS,
+                ):
+                    _last_announced_recognized_person = recognized_name
+                    _recognized_person_absent_since = None
                     print(f"[VISION] Announcing recognized person: {recognized_name}")
                     _announce_recognized_person(recognized_name)
 

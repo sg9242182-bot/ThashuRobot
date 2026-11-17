@@ -9,7 +9,10 @@ public:
         FRONT_LEFT = 0,
         FRONT_CENTER = 1,
         FRONT_RIGHT = 2,
-        SENSOR_COUNT = 3,
+        REAR_LEFT = 3,
+        REAR_CENTER = 4,
+        REAR_RIGHT = 5,
+        SENSOR_COUNT = 6,
     };
 
     bool begin();
@@ -25,21 +28,21 @@ public:
     uint8_t getRangeStatus(SensorId sensor) const;
 
 private:
-    static constexpr uint8_t SDA_PIN = 21;
-    static constexpr uint8_t SCL_PIN = 22;
+    static constexpr uint8_t OUT_OF_RANGE_STATUS = 4;
     static constexpr uint8_t OBSTACLE_DISTANCE_CM = 30;
     static constexpr unsigned long STARTUP_DELAY_MS = 10;
     static constexpr uint16_t CONTINUOUS_PERIOD_MS = 50;
     static constexpr unsigned long READING_MAX_AGE_MS = 150;
 
     Adafruit_VL53L0X sensors[SENSOR_COUNT];
-    uint16_t distanceMm[SENSOR_COUNT] = {0, 0, 0};
-    uint8_t rangeStatus[SENSOR_COUNT] = {255, 255, 255};
-    bool hasData[SENSOR_COUNT] = {false, false, false};
-    bool outOfRange[SENSOR_COUNT] = {false, false, false};
-    bool valid[SENSOR_COUNT] = {false, false, false};
-    bool obstacleDetected[SENSOR_COUNT] = {false, false, false};
-    unsigned long lastReadingTime[SENSOR_COUNT] = {0, 0, 0};
+    uint16_t distanceMm[SENSOR_COUNT] = {0, 0, 0, 0, 0, 0};
+    uint8_t rangeStatus[SENSOR_COUNT] = {255, 255, 255, 255, 255, 255};
+    bool hasData[SENSOR_COUNT] = {false, false, false, false, false, false};
+    bool outOfRange[SENSOR_COUNT] = {false, false, false, false, false, false};
+    bool valid[SENSOR_COUNT] = {false, false, false, false, false, false};
+    bool obstacleDetected[SENSOR_COUNT] = {false, false, false, false, false, false};
+    unsigned long lastReadingTime[SENSOR_COUNT] = {0, 0, 0, 0, 0, 0};
 
-    bool initializeSensor(SensorId sensor, uint8_t xshutPin, uint8_t address);
+    bool initializeSensor(SensorId sensor, uint8_t muxChannel);
+    void updateSensor(SensorId sensor);
 };

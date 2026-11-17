@@ -104,8 +104,57 @@ void main() {
         expect(response.requestId, request.requestId);
         expect(response.command, 'forward');
         expect(response.status, 'dispatched');
+        expect(response.leaseId, 'cmd-1');
       },
     );
+
+    test('renews a movement lease without resending a move command', () async {
+      transport.responses.add(
+        const PiApiHttpResponse(
+          statusCode: 200,
+          body:
+              '{"lease_id":"lease-1","status":"active",'
+              '"expires_at":"2026-11-17T12:00:00Z"}',
+        ),
+      );
+
+      await client.renewMovementLease(
+        leaseId: 'lease-1',
+        requestId: 'd1234567-89ab-4cde-8f01-23456789abcd',
+      );
+
+      expect(transport.lastUri!.path, '/api/v1/robot/commands/lease-1/renew');
+      expect(transport.lastJsonBody, {
+        'request_id': 'd1234567-89ab-4cde-8f01-23456789abcd',
+      });
+      expect(transport.lastHeaders!['Authorization'], 'Bearer test-token');
+      expect(transport.postCount, 1);
+    });
+
+    test('retries a move after connection loss with the identical request ID', () async {
+      transport.postFailures.add(const SocketException('connection closed'));
+      transport.responses.add(
+        const PiApiHttpResponse(
+          statusCode: 202,
+          body:
+              '{"request_id":"b1234567-89ab-4cde-8f01-23456789abcd",'
+              '"command_id":"cmd-recovered","command":"forward",'
+              '"status":"dispatched","control_mode":"MANUAL",'
+              '"error_code":null,"timestamp":"2026-11-17T12:00:00Z"}',
+        ),
+      );
+      final request = RobotMoveRequest(
+        requestId: 'b1234567-89ab-4cde-8f01-23456789abcd',
+        direction: 'forward',
+        speed: 100,
+      );
+
+      final result = await client.move(request, controlMode: 'MANUAL');
+
+      expect(result.commandId, 'cmd-recovered');
+      expect(transport.postCount, 2);
+      expect(transport.postedBodies, [request.toJson(), request.toJson()]);
+    });
 
     test('blocks a move locally unless mode and fields are valid', () async {
       final request = RobotMoveRequest(
@@ -538,6 +587,8 @@ void main() {
 
 class _FakeTransport implements PiApiTransport {
   final List<PiApiHttpResponse> responses = [];
+  final List<Object> postFailures = [];
+  final List<Object?> postedBodies = [];
   Object? failure;
   Completer<PiApiHttpResponse>? postCompleter;
   int postCount = 0;
@@ -567,6 +618,8 @@ class _FakeTransport implements PiApiTransport {
     lastUri = uri;
     lastHeaders = headers;
     lastJsonBody = jsonBody;
+    postedBodies.add(jsonBody);
+    if (postFailures.isNotEmpty) throw postFailures.removeAt(0);
     final error = failure;
     if (error != null) throw error;
     final completer = postCompleter;

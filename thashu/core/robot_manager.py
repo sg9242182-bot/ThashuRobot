@@ -72,6 +72,7 @@ class RobotCommandManager:
         before_manual_command=None,
         before_mode_switch=None,
         before_external_stop=None,
+        activity_callback=None,
         sensor_max_age=0.75,
         obstacle_clearance_mm=300,
     ):
@@ -84,12 +85,50 @@ class RobotCommandManager:
         self._before_manual_command = before_manual_command
         self._before_mode_switch = before_mode_switch
         self._before_external_stop = before_external_stop
+        self._activity_callback = activity_callback
         self._sensor_max_age = sensor_max_age
         self._obstacle_clearance_mm = obstacle_clearance_mm
         self._mode = ControlMode.AUTO
         self._auto_active = False
         self._motion_inhibited = False
+        self._sleeping = False
         self._state_version = 0
+
+    def _record_activity(self):
+        if self._activity_callback is not None:
+            try:
+                self._activity_callback()
+            except Exception:
+                pass
+
+    def enter_sleep(self, stop_timeout=0.75):
+        """Block new movement and require a normal STOP ACK before sleep."""
+        with self._command_lock:
+            self._sleeping = True
+            self._auto_active = False
+            if self._before_external_stop is not None:
+                self._before_external_stop()
+            sequence = self.motor.stop()
+            self._state_version += 1
+            transport = getattr(self.motor, "gpio", None)
+            wait_for_ack = getattr(transport, "wait_for_ack", None)
+            try:
+                acknowledgement = (
+                    wait_for_ack(sequence, timeout=stop_timeout)
+                    if sequence is not None and callable(wait_for_ack)
+                    else None
+                )
+            except Exception:
+                acknowledgement = None
+            if acknowledgement != "OK":
+                self._motion_inhibited = True
+                raise ControlModeError("SLEEP_STOP_UNCONFIRMED")
+
+    def exit_sleep(self):
+        """Allow commands after the Pi has completed its wake sequence."""
+        with self._command_lock:
+            self._sleeping = False
+            self._state_version += 1
 
     @property
     def mode(self):
@@ -114,6 +153,8 @@ class RobotCommandManager:
     def start_auto(self):
         """Enable the existing autonomous behavior after an explicit start."""
         with self._command_lock:
+            if self._sleeping:
+                raise ControlModeError("ROBOT_SLEEPING")
             if self._motion_inhibited:
                 raise ControlModeError("STOP_CONFIRMATION_REQUIRED")
             if self._mode != ControlMode.AUTO:
@@ -183,6 +224,9 @@ class RobotCommandManager:
         """
         next_mode = self._normalize_mode(mode)
         with self._command_lock:
+            if self._sleeping:
+                raise ControlModeError("ROBOT_SLEEPING")
+            self._record_activity()
             if self._before_mode_switch is not None:
                 self._before_mode_switch()
 
@@ -292,6 +336,7 @@ class RobotCommandManager:
 
         with self._command_lock:
             if command == "stop":
+                self._record_activity()
                 if self._before_external_stop is not None:
                     self._before_external_stop()
                 self._auto_active = False
@@ -311,6 +356,9 @@ class RobotCommandManager:
 
             if self._motion_inhibited:
                 raise ControlModeError("STOP_CONFIRMATION_REQUIRED")
+            if self._sleeping:
+                raise ControlModeError("ROBOT_SLEEPING")
+            self._record_activity()
 
             if (
                 command != "stop"

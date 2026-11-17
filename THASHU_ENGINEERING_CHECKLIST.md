@@ -36,17 +36,11 @@ ESP32 NodeMCU
 
 2 × 0.96-inch OLED displays (robot eyes)
 
-3 × VL53LDK ToF sensors:
+6 × VL53L0X-compatible ToF sensors: front-left/center/right and rear-left/center/right.
 
-Front-left
+1 × 7Semi TCA9548A 8-channel I²C multiplexer at address 0x70. ToFs use channels 0–5; left/right OLEDs use channels 6/7.
 
-Front-center
-
-Front-right
-
-1 × rear ultrasonic sensor
-
-Echo line uses a voltage divider for ESP32 safety
+The failed rear ultrasonic sensor is replaced in the target design; retain its wiring disconnected. The user identified the purchased rear ToF boards as GY-VL53L0X; verify breakout voltage before connecting power.
 
 Camera
 
@@ -84,7 +78,7 @@ OLED displays
 
 ToF sensors
 
-Rear ultrasonic
+Rear ToF sensors through the TCA9548A mux
 
 Servo hardware, if retained
 
@@ -668,17 +662,13 @@ ESP32 NodeMCU
 
 2 × 0.96-inch OLED displays (robot eyes)
 
-3 × VL53LDK ToF sensors:
+6 × VL53L0X-compatible ToF sensors:
 
-Front-left
+Front-left, front-center, front-right
 
-Front-center
+Rear-left, rear-center, rear-right
 
-Front-right
-
-1 × rear ultrasonic sensor
-
-Echo line uses a voltage divider for ESP32 safety
+1 × 7Semi TCA9548A 8-channel I²C multiplexer (0x70), used by all six ToFs and both OLEDs
 
 Camera
 
@@ -712,11 +702,7 @@ Motor control
 
 Hardware-level motor stop/safety
 
-OLED displays
-
-ToF sensors
-
-Rear ultrasonic
+OLED displays and six ToF sensors via the TCA9548A mux
 
 Servo hardware, if retained
 
@@ -1186,17 +1172,17 @@ Phase 12 — Mobile Control and Secure Pi API
 
 Status: IN PROGRESS
 
-Current branch: `phase-12-pi-api-https`, based on current `main`.
+Current source of truth: `main`. BLE handoff fixes, opt-in roaming, and Flutter movement recovery are included in commit `0421cf0`; target-device verification remains separate.
 
 Scope retained from the original Phase 12 target:
 
-\[ ] Mobile manual movement and STOP.
+\[x] Mobile manual movement and STOP routes are implemented; live app/robot acceptance is tracked below.
 
-\[ ] Robot status and sensor telemetry.
+\[x] Robot status and sensor telemetry routes are implemented; live reconnect/restart acceptance is tracked below.
 
 \[ ] Restart, shutdown, and reset controls with explicit safety/authorization rules.
 
-\[ ] Error and diagnostic status suitable for the app.
+\[x] Read-only error and diagnostic status endpoint is implemented; the current Flutter diagnostics screen remains limited to available telemetry/status fields.
 
 Implementation present on this branch:
 
@@ -1210,17 +1196,58 @@ Implementation present on this branch:
 
 \[x] Document private-LAN HTTPS setup and certificate trust requirements. No certificate or private key is committed.
 
-HTTPS deployment plan (2026-11-08; approved by Vishal): use Tailscale MagicDNS
-and Caddy with the generic Pi name `thashu-robot`. Caddy obtains its
-Android-trusted certificate through the Pi's Tailscale daemon and proxies to
-the API on `127.0.0.1:8000`; bind Caddy to the Pi's Tailscale IP and restrict
-access to approved tailnet phones. Keep the API loopback-only, leave
-`THASHU_API_TLS_ANDROID_TRUST_CONFIRMED=0`, and do not expose port 8000. Pi
-configuration and Android HTTPS/telemetry verification remain pending. The
-setup procedure is in `api/PI_SETUP.md`; Tailscale certificate hostnames are
-published in Certificate Transparency logs, so the robot name must stay generic.
+I²C multiplexer expansion (2026-11-14 to 2026-11-16; user-reported hardware check):
 
-\[x] Add Flutter runtime Pi address/token settings using HTTPS-only validation and platform secure storage; initialize REST and WebSocket clients from saved settings, add Android internet permission, and expose settings in the app. Integrated from Niteshvar's Phase 12 connection setup branch; Flutter dependency resolution/build and device verification remain pending.
+\[x] Place all six VL53L0X ToF sensors on dedicated TCA9548A channels 0–5. Each sensor stays at its default address 0x29; front XSHUT/address reassignment is removed.
+
+\[x] Place the two same-address (0x3C) OLED displays on mux channels 6 and 7, each with its own framebuffer and animation pose. Both eyes now use matching width, height, corner radius, and heart scale per expression while retaining small per-eye pose/animation differences; both blinks use the same start time.
+
+\[x] Use all three rear sensors in ESP32 reverse and turn safety checks. A close obstacle or stale/unavailable rear channel blocks reverse; the existing 30 cm threshold remains.
+
+\[x] Preserve the existing Pi serial frame shape and `US_REAR` field. Firmware reports the nearest rear ToF distance in millimetres, or FAR when all three are out of range. The Pi parser continues to populate `rear_mm`, so no Pi code change is needed for current aggregate rear-clear/reverse-blocking behavior. Per-sensor rear-left/center/right values are not exposed to the Pi or app.
+
+\[x] Wire the 7Semi TCA9548A at address 0x70: channels 0–5 are front-left/center/right and rear-left/center/right ToFs; channels 6–7 are the left/right OLEDs. Tharun confirmed the pin/channel mapping and later reported the mux-connected hardware working. Confirmed the rear modules are GY-VL53L0X. (User-reported hardware setup; electrical measurements were not recorded.)
+
+\[x] Compile/upload the firmware and verify boot/READY plus both OLEDs working with matched eye size and synchronized blink timing. Tharun reported these working after flashing the mux/eye updates. Individual verification of all six ToF readings remains open below.
+
+\[ ] With wheels raised, verify each of the six sensors independently, FAR reporting in open space, reverse rejection at or inside 300 mm, and fail-closed rejection for missing/stale rear readings. Confirm the Pi receives the aggregate `rear_mm` value.
+
+Hardware evidence is user-reported; no captured firmware build log or per-channel sensor measurements are attached. The separate six-sensor and reverse fail-safe checks below remain open.
+
+Independent OLED animation update (2026-11-14): Each OLED has a separate SSD1306 framebuffer and per-eye transition/blink state. Existing mood commands remain unchanged. Both blinks use the same start time; the displays are still refreshed sequentially over I²C, so a small transfer-time difference remains. The pair is rendered at up to 20 FPS.
+
+OLED size matching follow-up (2026-11-15): `eye_manager.cpp` assigns identical width, height, corner radius, and heart scale to both displays for each expression. Tharun later reported the updated eyes working on the robot. Vertical positioning and expression details can remain slightly asymmetric while the eye sizes match.
+
+HTTPS plan update: the project selected app-only BLE provisioning to the
+phone's hotspot for offline use. The earlier Tailscale + Caddy plan below is
+superseded for this workflow; do not treat it as the current connection path.
+The main API remains loopback-bound, with the optional local TLS listener
+gated by the active provisioned NetworkManager profile and hotspot gateway.
+
+Offline app-only hotspot path (implementation present; end-to-end reliability remains in progress):
+
+[x] Add Pi-side local API material management: persistent token, IP-SAN TLS certificate, and SHA-256 fingerprint stored outside the repository.
+
+[x] Extend the physical-button-gated BLE service with an encrypted read-only handoff for the local HTTPS URL, certificate fingerprint, and API token.
+
+[x] Add an opt-in second HTTPS listener on the current Wi-Fi IPv4 address while preserving the loopback API and shared ESP32/API runtime. Automatic address rebind closes the old listener, lets the current movement lease expire with normal STOP, preserves mode, and does not resume motion.
+
+[x] Integrate the Flutter BLE handoff and pin the supplied certificate for REST and WebSocket. Tharun reports provisioning and initial status/telemetry worked; the latest post-movement API recovery is not yet accepted.
+
+[x] Add Flutter held-movement lease renewal every 250 ms, stop renewals on pointer release/app pause/telemetry loss, poll dispatched command outcomes, preserve Manual Control state across tab changes, and retry uncertain move/GET requests safely using the same move request ID.
+
+[ ] Run Flutter formatting, analysis, tests, build, and the supervised manual lease/REST reconnect test against this exact `main` revision. This session has no Flutter SDK or connected phone, so code integration is not device verification.
+
+[x] Add voice-started autonomous roaming with short sensor-gated motion pulses, random direction changes, silent obstacle handling, and cancellation on wake word, voice/API STOP, mode change, shutdown, stale telemetry, or ESP32 fault. It requires AUTO mode, a connected ESP32, fresh telemetry, and confirmed motion state.
+
+[ ] Verify roaming with wheels raised in the agreed safe area, including blocked front/rear, stale/missing sensors, wake/STOP/mode-change cancellation, and distance traveled. Software policy tests do not establish physical stopping distance or safe roaming behavior.
+
+[ ] Verify service startup, BLE provisioning, HTTPS/authenticated telemetry, hotspot address changes, app reconnect, and Pi restart on the target devices with internet disabled. No movement commands are part of provisioning verification.
+
+Evidence/status (updated 2026-11-17): `main` commit `0421cf0` contains BLE handoff retries/peer checks, roaming, and Flutter movement recovery code. The user reports BLE setup connected the Pi to the hotspot, but after saving the app connection the Pi API still did not show as connected; previous phone runs also showed stale telemetry after moves. No successful phone test against this exact source revision is recorded. Keep end-to-end movement recovery, hotspot isolation, internet-disabled operation, reconnect/restart/address-change, and roaming hardware checks open.
+
+
+\[x] Add Flutter runtime Pi address/token settings using HTTPS-only validation and platform secure storage; initialize REST and WebSocket clients from saved settings, add Android internet permission, and expose settings in the app. Current-source Flutter checks and phone verification remain pending.
 
 Pi verification (2026-11-08; user-reported):
 
@@ -1246,11 +1273,11 @@ Still required:
 
 \[ ] Resolve Flutter dependencies and commit the generated lockfile; run Flutter analysis/tests and build the Android APK on the app toolchain.
 
-\[ ] Configure Caddy to use the Tailscale-provisioned certificate for `thashu-robot.<tailnet-name>.ts.net`; verify HTTPS and WebSocket TLS from Android with certificate validation enabled.
+\[-] Tailscale + Caddy hostname/certificate setup is superseded for the offline phone-hotspot workflow. Use only the provisioned hotspot HTTPS listener and app-pinned certificate path described above.
 
 \[ ] Verify telemetry and command-result behavior after API restart, including that uncertain in-flight commands are not replayed.
 
-\[ ] Complete the phone-to-Pi checks over the authorized tailnet and record the API/firmware revisions. Local robot operation must remain available when the tailnet is unavailable.
+\[ ] Complete supervised phone-to-Pi checks over the provisioned phone hotspot and record the app/API/firmware revisions. No Tailscale connection is required for this workflow.
 
 Phase 12 acceptance:
 
@@ -1263,6 +1290,24 @@ Phase 12 acceptance:
 \[ ] App status, sensor telemetry, and diagnostics match the agreed contract.
 
 \---
+
+I²C multiplexer hardware acceptance (started 2026-11-09; expanded 2026-11-14)
+
+Status: SOFTWARE CHANGES PRESENT; HARDWARE VALIDATION PENDING
+
+\[x] Add TCA9548A channel selection for six ToFs on channels 0–5 and both OLEDs on channels 6–7 to the integrated ESP32 firmware.
+
+\[x] Apply the existing 30 cm stop threshold and fail-closed freshness checks to each rear sensor for reverse safety.
+
+\[x] Retain Pi parser compatibility by reporting the nearest valid rear measurement in the legacy `US_REAR` telemetry slot (millimetres); report FAR only when all three are out of range. Missing/stale/invalid sensor data reports NA.
+
+\[ ] Confirm all ToF breakout voltage requirements and the mux/OLED wiring before powering the assembled bus.
+
+\[ ] Compile and upload on the robot with the mux installed at I²C address 0x70; confirm all six sensors and both OLEDs work.
+
+\[ ] Test all six ToFs individually and the two OLEDs. With wheels raised, verify the aggregate rear telemetry changes, obstacles at 300 mm or nearer block reverse, all-FAR permits reverse when front/other interlocks are clear, and any missing/stale rear reading blocks reverse.
+
+\[ ] Confirm Pi sensor snapshot continues to expose the nearest rear value as `rear_mm`. No per-sensor rear values are currently sent to the Pi/app.
 
 Phase 13 — Full Robot / Expo Validation
 
@@ -1426,7 +1471,7 @@ ESP32 manager ownership correction (2026-10-05): At the user's direction, the in
 Legacy runtime cleanup (2026-10-05): The former `ESP32Firmware/motors/motor_manager.ino` duplicated serial command parsing and safety policy outside the new dedicated managers. Its protocol handling now lives in `ESP32Firmware/communicationmanager/communication_manager.cpp`; safety policy lives in `ESP32Firmware/safetymanager/safety_manager.cpp`. The old entry sketch will be removed after this documented replacement; use `ESP32Firmware/ThashuController/ThashuController.ino` as the single integrated entry point.
 
 
-Required-hardware health update (2026-10-05): `EyeManager.begin()` now reports OLED initialization failure, and `EyeManager.update()` polls the shared OLED I2C address every 500 ms. `ServoManager` and `MotorManager` expose readiness; `SafetyManager` now checks those managers and stops motors on reported loss, while startup refuses `READY` if required initialization fails. These are software health signals only: identical OLEDs sharing address 0x3C cannot be individually distinguished by an I2C probe, and servo attachment status cannot detect a physically disconnected servo. No ESP32 compile or hardware validation has been performed.
+Required-hardware health update (2026-10-05; OLED probing improved by mux on 2026-11-14): `EyeManager.begin()` reports OLED initialization failure, and `EyeManager.update()` checks each OLED independently through mux channels 6 and 7 every 500 ms. `ServoManager` and `MotorManager` expose readiness; `SafetyManager` checks those managers and stops motors on reported loss, while startup refuses `READY` if required initialization fails. Servo attachment status still cannot detect a physically disconnected servo. The new per-display probe and independent rendering have not been compiled or hardware-validated.
 
 
 Serial capture follow-up (2026-10-11): With the OLED and rear ultrasonic disconnected, the sketch emitted `EVENT|0|READY` while telemetry stayed `NA`. `READY` is emitted by `CommunicationManager.begin()` and is not a live proof that every peripheral is present. The initial serial capture also exposed that `SafetyManager.update()` returned before refreshing ToF/ultrasonic data after OLED/servo health loss. Both integrated and source-folder SafetyManager copies now keep sensor updates running while forcing/staying in a stopped, not-ready state when required hardware is unhealthy. This correction has not yet been built or re-tested on the ESP32; the three ToF telemetry channels and OLED health behavior remain open acceptance checks. Phase 1 remains in progress.
@@ -1684,3 +1729,6 @@ Integrated persistent Piper and Whisper preload Pi trial (2026-11-07; user-repor
 
 
 Piper startup warm-up follow-up (2026-11-07): Added `start_piper()` to `thashu/voice/text_to_speech.py` and invoke it from `thashu/main.py` immediately after pausing the microphone, alongside Whisper preload. The persistent Piper child now begins loading before the first interaction, overlapping existing startup model work. Startup continues if Piper cannot start; it logs the failure and retries on the first dynamic reply. This is intended to move Piper's cold model-load delay away from the first answer, but no Pi validation has been run yet. Verify startup readiness time, first dynamic reply time-to-first-audio, subsequent reply time, playback completion/listening-state behavior, and clean shutdown. Phase 11 remains in progress.
+
+
+Idle power-save and touch wake (2026-11-16; implementation pending Pi verification): After five minutes without user activity while IDLE, stop camera processing and show the paired SLEEPY expression while retaining wake-word listening. After ten minutes, require an acknowledged normal ESP32 STOP, pause microphone and camera, and show the paired SLEEP expression. A 3.3 V TTP223 touch sensor on Raspberry Pi BCM GPIO22 (physical pin 15) wakes the robot; GPIO17 remains owned by the BLE setup service (short click opens setup; long hold shuts down). Wake waits for a fresh camera frame and a working microphone before the gradual eye transition and pre-cached Piper greeting, then resumes wake-word listening and API motion. Vision start now re-enables processing after a full stop. Eye expression width, height, and corner radius are equal for both OLEDs across expressions; expressive position/shape details remain intentionally distinct. Hardware behavior, wake timing, touch false-trigger behavior, and eye appearance on the robot still require Pi testing; these changes do not put the Pi into Linux shutdown or suspend.
