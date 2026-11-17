@@ -1172,7 +1172,7 @@ Phase 12 — Mobile Control and Secure Pi API
 
 Status: IN PROGRESS
 
-Current source of truth: `main`. The Phase 9 BLE handoff fixes, opt-in roaming, and Flutter movement recovery are being integrated onto this line; target-device verification remains separate.
+Current source of truth: `main`. BLE handoff fixes, opt-in roaming, and Flutter movement recovery are included in commit `0421cf0`; target-device verification remains separate.
 
 Scope retained from the original Phase 12 target:
 
@@ -1244,7 +1244,7 @@ Offline app-only hotspot path (implementation present; end-to-end reliability re
 
 [ ] Verify service startup, BLE provisioning, HTTPS/authenticated telemetry, hotspot address changes, app reconnect, and Pi restart on the target devices with internet disabled. No movement commands are part of provisioning verification.
 
-Evidence/status (updated 2026-11-17): `main` now contains BLE handoff retries/peer checks, roaming, and Flutter movement recovery code. The user reports BLE setup connected the Pi to the hotspot, but after saving the app connection the Pi API still did not show as connected; previous phone runs also showed stale telemetry after moves. No successful phone test against this exact source revision is recorded. Keep end-to-end movement recovery, hotspot isolation, internet-disabled operation, reconnect/restart/address-change, and roaming hardware checks open.
+Evidence/status (updated 2026-11-17): `main` commit `0421cf0` contains BLE handoff retries/peer checks, roaming, and Flutter movement recovery code. The user reports BLE setup connected the Pi to the hotspot, but after saving the app connection the Pi API still did not show as connected; previous phone runs also showed stale telemetry after moves. No successful phone test against this exact source revision is recorded. Keep end-to-end movement recovery, hotspot isolation, internet-disabled operation, reconnect/restart/address-change, and roaming hardware checks open.
 
 
 \[x] Add Flutter runtime Pi address/token settings using HTTPS-only validation and platform secure storage; initialize REST and WebSocket clients from saved settings, add Android internet permission, and expose settings in the app. Current-source Flutter checks and phone verification remain pending.

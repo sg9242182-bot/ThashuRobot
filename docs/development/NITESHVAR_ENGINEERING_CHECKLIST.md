@@ -203,7 +203,7 @@ Prove the mobile client works against the actual Pi API and document how to run 
 - [x] Run formatter and static analysis.
 - [x] Run unit/widget tests and fix regressions.
 - [x] Test against local fake transport and widget fixtures before live hardware.
-- [ ] With the team, test connection loss, Pi restart, WebSocket loss, API errors, mode transitions, and stop behavior. Manual movement lease renewal, idempotent move retry, command-result polling, and Manual Control page-state preservation are now ported to the local `main` checkout; run Flutter format/analyze/tests/build and test this exact revision on the phone before accepting it.
+- [ ] With the team, test connection loss, Pi restart, WebSocket loss, API errors, mode transitions, and stop behavior. Manual movement lease renewal, idempotent move retry, command-result polling, and Manual Control page-state preservation are on `main` at `0421cf0`; run Flutter format/analyze/tests/build and test this exact revision on the phone before accepting it.
 - [x] Confirm the API contract version/commit used for testing.
 - [x] Build the current Android debug APK.
 - [x] Install and launch the current APK on the physical Android phone.
@@ -248,7 +248,7 @@ Provision Wi-Fi through the app and consume the Pi's one-time local HTTPS connec
 - [ ] Flutter formatting, analysis, tests, Android build, security review, and supervised phone/Pi verification pass; evidence and remaining limits are recorded.
 
 ### Phase completion record
-- **Status:** In progress — BLE/hotspot setup and movement-recovery code are integrated locally on `main`; current Flutter checks and app/Pi movement integration are not yet accepted.
+- **Status:** In progress — BLE/hotspot setup and movement-recovery code are integrated on `main` at `0421cf0`; current Flutter checks and app/Pi movement integration are not yet accepted.
 - **Evidence:** Backend requires BlueZ authenticated-encryption GATT flags and numeric comparison with an audible code plus physical confirmation. The local HTTPS/WebSocket gate checks the provisioned NetworkManager profile and gateway source. Tharun reports nRF Connect pairing succeeded after matching the spoken/displayed code and short-clicking the Pi button; the status characteristic then read successfully. He later reported that provisioning through the Thashu app connected the Pi to the phone hotspot (2026-11-11). The exact app revision and offline status were not captured. HTTPS/WSS reachability and API handoff validation have not yet been reported.
 - **Open issues:** Run formatter/analyzer/tests/Android build against current `main`; complete the app-to-hotspot HTTPS/WSS and movement-recovery test; obtain Vishal's security-contract review; complete supervised reconnect/restart/address-change checks on the phone and Pi.
 - **Dependency owner:** Vishal — review BLE/TLS/token security. Tharun — verify local HTTPS and arrange supervised phone/Pi checks. Niteshvar — validate current Flutter head/build and support integration.
