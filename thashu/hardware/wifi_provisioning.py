@@ -7,6 +7,7 @@ the Pi. Credential writes require an encrypted BLE link. Secrets are never logge
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -78,14 +79,21 @@ class ProvisionState:
 
     def mark_credentials_accepted(self, device: str | None) -> str:
         with self.lock:
-            if time.monotonic() >= self.armed_until or not device:
-                return "rejected"
+            if time.monotonic() >= self.armed_until:
+                return "window_closed"
+            if not device:
+                return "missing_peer"
+            device = device.casefold()
             if self.credentials_accepted:
-                # Android/BlueZ may repeat a reliable write with a different
-                # byte representation. Once one valid payload is accepted,
-                # acknowledge further writes only from that bonded peer, but
-                # never apply them or start another network join.
-                return "duplicate" if device == self.credential_device else "rejected"
+                # Reliable writes may be repeated by Android/BlueZ. A repeat
+                # from the same bonded peer is acknowledged but never applied
+                # or used to start a second network join.
+                accepted_device = (
+                    self.credential_device.casefold()
+                    if self.credential_device
+                    else None
+                )
+                return "duplicate" if device == accepted_device else "different_peer"
             self.credentials_accepted = True
             self.credential_device = device
             return "accepted"
@@ -171,7 +179,16 @@ STATE = ProvisionState()
 
 def _bluetooth_device_path(options) -> str | None:
     device = options.get("device") if isinstance(options, dict) else None
+    # D-Bus a{sv} dictionaries may expose values wrapped in Variant objects.
+    device = getattr(device, "value", device)
     return device if isinstance(device, str) and device.startswith("/") else None
+
+
+def _peer_log_id(device: str | None) -> str:
+    """Return a short, non-reversible correlation ID for a BlueZ device path."""
+    if not device:
+        return "missing"
+    return hashlib.sha256(device.encode("utf-8", errors="replace")).hexdigest()[:10]
 
 
 def _keyfile_escape(value: str) -> str:
@@ -320,23 +337,34 @@ class WifiProvisioningService(Service):
     @credentials.setter
     def credentials(self, value: bytes, options) -> None:
         if not STATE.armed():
+            print("[BLE SETUP] Credential write rejected: setup window closed.")
             raise DBusError("org.bluez.Error.NotPermitted", "Provisioning window is closed.")
         try:
             ssid, password = _validate_credentials(value)
         except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
             STATE.set_status("invalid")
             raise DBusError("org.bluez.Error.InvalidArgs", "Invalid Wi-Fi credentials.")
-        write_result = STATE.mark_credentials_accepted(_bluetooth_device_path(options))
+        device = _bluetooth_device_path(options)
+        write_result = STATE.mark_credentials_accepted(device)
         if write_result == "duplicate":
-            # A repeat from the already-authenticated bonded peer is already
-            # being processed; acknowledge it without applying its payload.
-            print("[BLE SETUP] Repeated credential write from paired phone ignored.")
+            print(
+                f"[BLE SETUP] Repeated credential write acknowledged from peer {_peer_log_id(device)}; ignored."
+            )
             return
+        if write_result == "missing_peer":
+            print("[BLE SETUP] Credential write rejected: BlueZ supplied no device identity.")
+        elif write_result == "different_peer":
+            print(
+                f"[BLE SETUP] Credential write rejected: peer {_peer_log_id(device)} differs from the peer already accepted this session."
+            )
+        elif write_result == "window_closed":
+            print("[BLE SETUP] Credential write rejected: setup window closed during validation.")
         if write_result != "accepted":
             raise DBusError(
                 "org.bluez.Error.NotPermitted",
                 "Only one credential payload from the authenticated BLE peer is allowed per setup window.",
             )
+        print(f"[BLE SETUP] Credential payload accepted from peer {_peer_log_id(device)}.")
         STATE.set_status("received")
         threading.Thread(
             target=_apply_network,
