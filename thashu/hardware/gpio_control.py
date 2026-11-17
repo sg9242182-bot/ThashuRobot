@@ -31,6 +31,7 @@ class GPIOControl:
     DEFAULT_BAUD = 115200
     SERIAL_TIMEOUT = 0.2
     RX_SILENCE_TIMEOUT = 2.0
+    ESP32_RESET_HOLD_SECONDS = 0.1
 
     def __new__(cls, port=None, baud=DEFAULT_BAUD):
         if cls._instance is None:
@@ -60,6 +61,9 @@ class GPIOControl:
         self._controller_ready = False
         self._last_connect_attempt = 0.0
         self._stop_event = threading.Event()
+        # Reset once when this Python process first connects. Reconnects must
+        # not repeatedly reboot the controller after a transient USB failure.
+        self._startup_reset_attempted = False
 
         self._reader_thread = threading.Thread(
             target=self._reader_loop,
@@ -131,6 +135,9 @@ class GPIOControl:
                 timeout=self.SERIAL_TIMEOUT,
                 write_timeout=self.SERIAL_TIMEOUT,
             )
+            if not self._startup_reset_attempted:
+                self._startup_reset_attempted = True
+                self._reset_esp32_at_start(serial_conn)
             with self._state_lock:
                 if self._stop_event.is_set():
                     serial_conn.close()
@@ -148,6 +155,22 @@ class GPIOControl:
                 self._serial = None
             print(f"[GPIO] ESP32 connection unavailable: {exc}")
             return False
+
+    def _reset_esp32_at_start(self, serial_conn):
+        """Pulse the USB-UART RTS line to reset ESP32 EN once at app startup.
+
+        Keep DTR deasserted throughout so GPIO0 stays high and the ESP32 boots
+        its installed application instead of entering the ROM download mode.
+        This works on ESP32 boards whose USB-UART adapter routes RTS to EN.
+        """
+        try:
+            serial_conn.dtr = False
+            serial_conn.rts = True   # RTS asserted: EN low
+            time.sleep(self.ESP32_RESET_HOLD_SECONDS)
+            serial_conn.rts = False  # RTS released: EN high
+            print("[GPIO] ESP32 startup reset pulse sent via RTS/EN")
+        except (serial.SerialException, OSError, AttributeError) as exc:
+            print(f"[GPIO] ESP32 startup reset pulse unavailable; continuing: {exc}")
 
     def _disconnect(self, reason="unknown", expected_serial=None):
         with self._state_lock:

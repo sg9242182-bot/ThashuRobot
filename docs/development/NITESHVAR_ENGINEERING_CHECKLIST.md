@@ -224,21 +224,27 @@ Physical robot movement tests remain deferred to final project-wide verification
 Let an operator provision Thashu from the Thashu app alone and then connect to the Pi locally without requiring Tailscale, nRF Connect, or internet access.
 
 ### Checklist
-- [ ] Integrate the physical-button-gated BLE Wi-Fi provisioning service into Settings using the Pi service/characteristic UUIDs and status strings from the reviewed provisioning branch; do not fork or change the Pi BLE protocol without agreement.
-- [ ] Keep the existing 3-second Pi-button hold and 60-second provisioning window. The app must explain the timing, scan only for Thashu's service, request the minimum OS Bluetooth permissions, and send credentials through the encrypted GATT characteristic.
-- [ ] Collect hotspot SSID/password only for the provisioning attempt; never persist or log the password and clear it from memory/UI after success or failure.
-- [ ] Show the Pi-reported provisioning status truthfully: found, waiting, credentials sent, connecting, connected, expired, invalid, or failed. A BLE write ACK is not proof that Wi-Fi or the Pi API is reachable.
-- [ ] Agree with Vishal and Tharun on local API discovery, API listening/binding, TLS trust, and API-token enrollment. The current Pi API defaults to loopback and the approved HTTPS path is Tailscale+Caddy; BLE Wi-Fi provisioning alone does not make local API access work.
-- [ ] After the backend contract is approved, let the app discover/select the Pi on the local hotspot and initialize the existing REST and WebSocket clients without a manually typed Tailscale address or nRF Connect.
-- [ ] Verify the actual target Android phone can reach a Pi client on its own hotspot; if Android hotspot routing prevents this, agree on a supported local-network topology before presenting setup as successful.
-- [ ] Test with internet access disabled: app-only BLE provisioning, hotspot join, secure API status, telemetry/WebSocket, stale recovery, app reconnect, and Pi restart. Do not send movement commands in the onboarding test.
-- [ ] Keep the existing Tailscale connection as an optional developer/test path until the offline path is verified; do not remove it prematurely.
+- [x] Flutter implementation in PR #19 (`niteshvar/phase9-ble-handoff`) adds the app-side connection-info read for `...0004`, strict payload validation, secure URL/token/pin storage, and exact leaf-certificate pinning for REST and WSS. It preserves the earlier BLE scan, encrypted credentials write, and provisioning status UI.
+- [x] The Pi backend draft preserves the GPIO 17 three-second button hold, 60-second BLE window, existing service/credential/status UUIDs, and adds an authenticated-encrypted connection-info read containing the local HTTPS URL, certificate SHA-256 pin, and Bearer token.
+- [x] The Pi BLE service pre-generates and plays Piper WAV announcements for setup-open, setup-timeout, and shutdown; it speaks the six-digit numeric-comparison code without logging it and waits for the Pi button before approving the pairing.
+- [x] The Pi backend draft keeps the existing loopback API listener and adds an opt-in HTTPS listener on the configured Wi-Fi interface's current IPv4 address; it does not bind to 0.0.0.0 or start a second ESP32 owner.
+- [x] The hotspot address-change behavior is defined as automatic API rebind. Closing the prior local listener drops its WebSocket; the Pi waits beyond the current 500 ms movement lease before binding the new address. Mode is preserved and movement is not resumed.
+- [x] Flutter implementation reads the new connection-info characteristic after Pi status `connected`, saves the URL/token/pin in secure storage, and pins the certificate for both REST and WebSocket connections. This is code-complete in PR #19; current-head checks and device validation remain open.
+- [ ] Verify the target Android phone can reach the Pi on its own hotspot with internet disabled; retry connection while the listener comes up after NetworkManager reports connected.
+- [ ] Test app-only BLE provisioning, hotspot join, pinned HTTPS status, authenticated telemetry/WebSocket, stale recovery, app reconnect, changed hotspot address, and Pi restart. Provisioning tests must not send movement commands.
+- [ ] Keep the existing Tailscale connection as an optional developer/test path until the offline app path is verified.
 
 ### Exit criteria
 - [ ] A fresh phone can complete pairing and local API setup entirely in the Thashu app with no helper app or internet.
-- [ ] The phone trusts the Pi's local API securely; no global cleartext exception or public port forwarding is used.
-- [ ] Status and telemetry work across app reconnect and Pi restart, with no movement command sent by provisioning.
+- [ ] The phone validates the Pi's pinned local certificate for REST and WSS; no global cleartext exception or public port forwarding is used.
+- [ ] Status and telemetry work across app reconnect, hotspot address change, and Pi restart, with no movement command sent by provisioning.
 - [ ] Flutter formatting, analysis, tests, Android build, and supervised phone/Pi verification pass; evidence and remaining limits are recorded.
+
+### Current implementation record
+- **Status:** In progress — Pi implementation is on draft PR #18 and Flutter implementation is on draft PR #19; integration acceptance remains open.
+- **Evidence:** Draft PR [#18](https://github.com/sg9242182-bot/ThashuRobot/pull/18) adds `thashu/core/local_api_access.py`, the opt-in listener in `thashu/main.py`, encrypted BLE connection-info in `thashu/hardware/wifi_provisioning.py`, its systemd unit, and setup documentation. User-reported Pi smoke check (2026-11-09): imports passed in the Pi virtual environment; the draft BLE service opened through the GPIO button; nRF Connect provisioned the phone hotspot, observed connection, and read `...0004` with all three expected fields (`api_base_url`, `server_cert_sha256`, `api_token`). Secret values were not shared. This does not verify Flutter integration, TLS pin validation, API reachability, changed-address rebind, or restart. Niteshvar reports `flutter analyze` and 62 Flutter tests passed on `5429d661`; PR #19 now points to `70aa5ae`, for which GitHub reports no check runs. Formatting and Android build results are not recorded.
+- **Open issues:** Reinstall the updated BLE systemd unit on the Pi and verify the spoken cues, matching/mismatched pairing behavior, and cached WAV playback. Verify latest Flutter head `70aa5ae` with format/analyze/test/build; obtain Vishal's pairing/TLS contract review; test local HTTPS/API/WebSocket and address-change/restart on target devices. No movement command was sent during provisioning.
+- **Dependency owner:** Tharun — verify the local HTTPS runtime and address-change/restart behavior after app pinning is ready. Niteshvar — connect the app to the info characteristic and pin TLS for REST/WSS. Both — supervised phone/Pi end-to-end check.
 
 ## Phase completion record
 

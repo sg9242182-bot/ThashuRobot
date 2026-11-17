@@ -30,7 +30,21 @@ def api_port() -> int:
 
 
 def api_token() -> str | None:
-    return os.getenv("THASHU_API_TOKEN")
+    configured = os.getenv("THASHU_API_TOKEN")
+    if configured:
+        return configured
+    state_home = Path(os.getenv("XDG_DATA_HOME", Path.home() / ".local/share"))
+    token_path = Path(
+        os.getenv(
+            "THASHU_LOCAL_API_STATE_DIR",
+            state_home / "thashu" / "local_api",
+        )
+    ).expanduser() / "api.token"
+    try:
+        value = token_path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return None
+    return value or None
 
 
 def api_state_db_path() -> Path:
@@ -97,4 +111,12 @@ def api_tls_android_trust_confirmed() -> bool:
     value = os.environ.get("THASHU_API_TLS_ANDROID_TRUST_CONFIRMED", "0").strip()
     if value not in {"0", "1"}:
         raise ValueError("THASHU_API_TLS_ANDROID_TRUST_CONFIRMED must be 0 or 1")
+    return value == "1"
+
+
+def api_local_tls_pinning_confirmed() -> bool:
+    """Require an explicit operator opt-in to the app-pinned local TLS listener."""
+    value = os.environ.get("THASHU_API_LOCAL_TLS_PINNING_CONFIRMED", "0").strip()
+    if value not in {"0", "1"}:
+        raise ValueError("THASHU_API_LOCAL_TLS_PINNING_CONFIRMED must be 0 or 1")
     return value == "1"

@@ -1,0 +1,31 @@
+[Unit]
+Description=Thashu physical-button-gated Bluetooth Wi-Fi provisioning
+After=bluetooth.service NetworkManager.service
+Wants=bluetooth.service NetworkManager.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/%i/ThashuRobot/thashu
+Environment=PYTHONUNBUFFERED=1
+Environment=THASHU_LOCAL_API_STATE_DIR=/home/%i/.local/share/thashu/local_api
+Environment=THASHU_LOCAL_API_OWNER=%i
+Environment=XDG_DATA_HOME=/home/%i/.local/share
+Environment=THASHU_MODELS_DIR=/home/%i/.local/share/thashu/models
+Environment=THASHU_VOICE_CACHE_DIR=/home/%i/.local/share/thashu/voice_responses
+Environment=THASHU_PIPER_BIN=/home/%i/piper/piper/piper
+Environment=THASHU_AUDIO_OUTPUT=sysdefault:CARD=Headphones
+Environment=THASHU_LIBPIPER=/home/%i/piper1-gpl/libpiper/install/lib/libpiper.so
+Environment=THASHU_ESPEAK_DATA_DIR=/home/%i/piper1-gpl/libpiper/install/share/espeak-ng-data
+Environment=LD_LIBRARY_PATH=/home/%i/piper1-gpl/libpiper/install/lib
+ExecStart=/home/%i/.venvs/thashu/bin/python -m hardware.wifi_provisioning
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=false
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=/etc/NetworkManager/system-connections /home/%i/.local/share
+
+[Install]
+WantedBy=multi-user.target

@@ -219,3 +219,76 @@ supports WebSocket reverse proxying: [MagicDNS](https://tailscale.com/docs/featu
 [Caddy certificates on Tailscale](https://tailscale.com/docs/integrations/web-servers/caddy/caddy-certificates),
 [Caddy reverse proxy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy),
 [Android network security](https://developer.android.com/privacy-and-security/security-config).
+
+
+## App-only offline hotspot API (draft implementation)
+
+The app-only path does not need Tailscale or internet access. The loopback API on
+`127.0.0.1:8000` remains available for the existing local/Caddy path. When
+explicitly enabled, the robot also serves the same API over HTTPS on the Pi's
+current `wlan0` IPv4 address at port `8443`. It binds to that one address;
+it does not bind to `0.0.0.0`. The two Uvicorn listeners share one asyncio
+event loop and the existing ESP32 manager.
+
+The BLE provisioning service adds encrypted, read-only characteristic
+`8c6d0004-7a4b-4f61-b7a5-927f4e2a1000`. After the credentials write succeeds
+and the Pi reports `connected`, the app must read it before the existing
+60-second button window closes. It returns JSON fields `api_base_url`,
+`server_cert_sha256`, and `api_token`. The app must save the URL, pin, and
+token in secure storage. It must validate the exact TLS certificate pin for
+REST and WebSocket; Android's global cleartext setting is not changed.
+
+The Pi stores the persistent token, TLS key, certificate, and current IP under
+`~/.local/share/thashu/local_api/`. Files are owner-only except the public
+certificate. The TLS certificate is regenerated when the Wi-Fi IPv4 address
+changes, and its IP subject alternative name matches the new URL. The token is
+kept stable across address changes and restarts. The certificate pin is
+delivered only over the encrypted GATT connection during the Pi-button-gated
+window; credentials, token, and private key are not logged.
+
+### Enable only after Flutter certificate pinning is integrated
+
+Do not set the following flags until the app validates the BLE-delivered
+certificate fingerprint for both HTTPS and WSS:
+
+```bash
+export THASHU_API_LOCAL_ACCESS=1
+export THASHU_API_LOCAL_TLS_PINNING_CONFIRMED=1
+export THASHU_API_WIFI_INTERFACE=wlan0
+export THASHU_API_LOCAL_PORT=8443
+```
+
+Start the robot with those variables in its environment. If pin confirmation is
+missing, the local listener stays disabled while the normal loopback API
+continues to work. The app can then use the current local URL from the BLE
+bundle. If DHCP changes the Pi address while running, the local listener closes,
+the active WebSocket disconnects, and the existing 500 ms movement lease sends
+normal STOP before the new HTTPS listener opens. Mode is preserved and motion
+does not resume automatically. A process restart is not required.
+
+Install the physical-button BLE service from
+`thashu/deploy/systemd/thashu-wifi-provisioning@.service` after installing
+the project's Python requirements. The service runs as root for GPIO/BlueZ,
+but stores its generated token/key material for the configured robot account.
+It does not own the motor controller or ESP32 serial port. It pre-generates
+cached Piper WAV announcements for BLE setup opening, timeout, and shutdown.
+On numeric-comparison pairing, it speaks the six-digit code; accept the phone
+prompt only when it matches, then short-click GPIO 17 to confirm on the Pi.
+The systemd unit points Piper and its voice cache at the robot user's files.
+
+### Verification still required
+
+- The Pi-side connection-info GATT addition and local HTTPS listener have not
+  yet been run on hardware.
+- Flutter must read the new characteristic, persist the returned URL/token/pin,
+  and implement certificate pinning for HTTP and WebSocket.
+- Verify from the target phone that it can reach a Pi client connected to that
+  phone's hotspot, with internet disabled.
+- Verify HTTPS health/status and authenticated telemetry, then repeat after
+  changing the Pi hotspot address and after a Pi restart.
+- Provisioning tests must not send movement commands. Confirm disconnect/rebind
+  expires a movement lease with normal STOP before enabling local access for
+  control.
+
+Do not mark Phase 9 complete from code alone. Record the exact Pi/app revisions,
+the no-internet phone test results, and the changed-IP/restart results first.
