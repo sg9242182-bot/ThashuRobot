@@ -178,7 +178,13 @@ STATE = ProvisionState()
 
 
 def _bluetooth_device_path(options) -> str | None:
-    device = options.get("device") if isinstance(options, dict) else None
+    # bluez-peripheral passes a CharacteristicWriteOptions/ReadOptions object,
+    # whose device is a property. Accept a raw dict as well for compatibility
+    # with callers that pass the underlying D-Bus options directly.
+    if isinstance(options, dict):
+        device = options.get("device")
+    else:
+        device = getattr(options, "device", None)
     # D-Bus a{sv} dictionaries may expose values wrapped in Variant objects.
     device = getattr(device, "value", device)
     return device if isinstance(device, str) and device.startswith("/") else None
