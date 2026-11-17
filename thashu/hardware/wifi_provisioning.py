@@ -105,22 +105,33 @@ class ProvisionState:
 
     def info(self, device: str | None) -> bytes:
         with self.lock:
-            if (
-                time.monotonic() >= self.handoff_until
-                or self.connection_info_payload is None
-                or not self.credentials_accepted
-                or not device
-                or device != self.credential_device
-                or self.status != "connected"
+            if time.monotonic() >= self.handoff_until:
+                reason = "handoff expired or not prepared"
+            elif self.connection_info_payload is None:
+                reason = "connection details not prepared"
+            elif not self.credentials_accepted:
+                reason = "no accepted credential write"
+            elif not device:
+                reason = "BlueZ supplied no device identity"
+            elif (
+                not self.credential_device
+                or device.casefold() != self.credential_device.casefold()
             ):
-                raise DBusError(
-                    "org.bluez.Error.NotPermitted",
-                    "Connection information is not available for this setup session.",
+                reason = (
+                    "peer identity mismatch "
+                    f"(read={_peer_log_id(device)}, "
+                    f"write={_peer_log_id(self.credential_device)})"
                 )
-            # Android can report a transient GATT error after the Pi has
-            # handled a read. Keep the same authenticated handoff briefly
-            # available so Flutter can retry without resending the password.
-            return self.connection_info_payload
+            elif self.status != "connected":
+                reason = f"provisioning status is {self.status}"
+            else:
+                return self.connection_info_payload
+
+            print(f"[BLE SETUP] Connection-info read rejected: {reason}.")
+            raise DBusError(
+                "org.bluez.Error.NotPermitted",
+                "Connection information is not available for this setup session.",
+            )
 
     def set_status(self, value: str) -> None:
         with self.lock:
