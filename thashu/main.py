@@ -513,6 +513,9 @@ def _run_api_servers(primary_server, app, validate_api_tls_bind, pinning_confirm
     Both listeners share the same ApiServices instance/event loop. The local
     listener is rebound only to the configured Wi-Fi interface's current IP.
     """
+    # Imported here because API startup imports uvicorn in a different scope.
+    import uvicorn
+
     from core.local_api_access import (
         ensure_local_api_material,
         local_api_port,
@@ -597,7 +600,7 @@ def _run_api_servers(primary_server, app, validate_api_tls_bind, pinning_confirm
                                 local_ip = None
                                 print("[API] Wi-Fi address unavailable; local HTTPS listener stopped")
                     except Exception as exc:
-                        print(f"[API] Local HTTPS rebind failed ({type(exc).__name__})")
+                        print(f"[API] Local HTTPS rebind failed ({type(exc).__name__}: {exc!r})")
                         if local_server is not None:
                             local_server.should_exit = True
                             await local_task
