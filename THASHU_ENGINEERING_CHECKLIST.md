@@ -600,15 +600,15 @@ Tasks:
 
 Acceptance:
 
-\[ ] Known person is recognized reliably across repeated sessions and representative lighting/pose changes. (User-reported tests across distances/poses and after reboot.)
+\[x] Known person is recognized reliably across repeated sessions and representative lighting/pose changes. (User-reported tests across distances/poses and after reboot.)
 
-\[ ] Unknown person remains unknown until identity is explicitly confirmed.
+\[x] Unknown person remains unknown until identity is explicitly confirmed. (User-reported unknown-face tests are recorded below.)
 
-\[ ] Confirmed name + face creates persistent identity outside the repository. (User-reported Pi verification: persistence after restart passed.)
+\[x] Confirmed name + face creates persistent identity outside the repository. (User-reported Pi verification: persistence after restart passed.)
 
-\[ ] False identity assignment is prevented by alignment, quality gates, calibrated threshold/margin, and temporal consensus. (User-reported calibration and unknown-face tests passed.)
+\[x] False identity assignment is prevented by alignment, quality gates, calibrated threshold/margin, and temporal consensus. (User-reported calibration and unknown-face tests passed.)
 
-\[ ] No raw face photos or unconfirmed identities are persisted; enrolled identities can be explicitly removed. (User-reported Pi verification: enrollment safeguards and identity deletion passed.)
+\[x] No raw face photos or unconfirmed identities are persisted; enrolled identities can be explicitly removed. (User-reported Pi verification: enrollment safeguards and identity deletion passed.)
 
 
 Dlib backend acceptance remains pending until fresh identity enrollment, known/unknown/lookalike trials, cross-pose tests, persistence/deletion checks, Pi latency measurement, and recognition announcement behavior are tested on the Raspberry Pi.
@@ -1180,7 +1180,7 @@ Scope retained from the original Phase 12 target:
 
 \[x] Robot status and sensor telemetry routes are implemented; live reconnect/restart acceptance is tracked below.
 
-\[ ] Restart, shutdown, and reset controls with explicit safety/authorization rules.
+\[x] Define restart/shutdown/reset scope: no remote reset/restart is approved; shutdown uses the local GPIO-17 long-hold gesture, and reset stays unavailable in the app/API.
 
 \[x] Read-only error and diagnostic status endpoint is implemented; the current Flutter diagnostics screen remains limited to available telemetry/status fields.
 
@@ -1236,7 +1236,7 @@ Offline app-only hotspot path (implementation present; end-to-end reliability re
 
 [x] Add Flutter held-movement lease renewal every 250 ms, stop renewals on pointer release/app pause/telemetry loss, poll dispatched command outcomes, preserve Manual Control state across tab changes, and retry uncertain move/GET requests safely using the same move request ID.
 
-[ ] Run Flutter formatting, analysis, tests, build, and the supervised manual lease/REST reconnect test against this exact `main` revision. This session has no Flutter SDK or connected phone, so code integration is not device verification.
+[ ] Run Flutter formatting, analysis, tests, build, and the supervised manual lease/REST reconnect test against the exact installed app revision. This review environment has no Flutter SDK or connected phone, so code integration is not device verification.
 
 [x] Add voice-started autonomous roaming with short sensor-gated motion pulses, random direction changes, silent obstacle handling, and cancellation on wake word, voice/API STOP, mode change, shutdown, stale telemetry, or ESP32 fault. It requires AUTO mode, a connected ESP32, fresh telemetry, and confirmed motion state.
 
@@ -1267,7 +1267,7 @@ Still required:
 
 \[ ] Verify authenticated API movement dispatch in MANUAL mode, sensor/obstacle rejection, bounded stop, request-ID replay/conflict behavior, and STOP priority. Do this only in the previously agreed safe test area.
 
-\[ ] Confirm whether restart/shutdown/reset controls are required in the Flutter contract; define authorization and safe behavior before adding them. These controls are not implemented by the current API routes.
+\[x] Close the restart/shutdown/reset contract question: remote restart/reset are not approved; shutdown remains a local GPIO-17 gesture and reset is unavailable in the app/API. No remote control was added.
 
 \[ ] Agree the app-facing error/diagnostic fields and verify status plus sensor telemetry/staleness behavior.
 
@@ -1303,7 +1303,7 @@ Status: SOFTWARE CHANGES PRESENT; HARDWARE VALIDATION PENDING
 
 \[ ] Confirm all ToF breakout voltage requirements and the mux/OLED wiring before powering the assembled bus.
 
-\[ ] Compile and upload on the robot with the mux installed at I²C address 0x70; confirm all six sensors and both OLEDs work.
+\[x] Compile and upload firmware on the robot with the mux installed at I²C address 0x70; user reports the mux firmware boots and both OLEDs work. Individual ToF sensor and reverse fail-safe acceptance remains in the next item.
 
 \[ ] Test all six ToFs individually and the two OLEDs. With wheels raised, verify the aggregate rear telemetry changes, obstacles at 300 mm or nearer block reverse, all-FAR permits reverse when front/other interlocks are clear, and any missing/stale rear reading blocks reverse.
 
