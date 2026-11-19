@@ -302,10 +302,10 @@ For each phase, record:
 
 ### Phase 8 — Integration testing and handoff
 
-- **Status:** In progress. Earlier Flutter checks/build and basic phone/hotspot integration passed on prior revisions; movement recovery is now ported onto local `main` but still needs current-toolchain verification and phone testing.
-- **Evidence (updated 2026-11-19):** Prior Flutter analysis/tests and APK builds are recorded for earlier commits, not the exact installed revision now in use. The current code preserves Manual Control across tabs, renews the held movement lease, retries uncertain moves with the same request ID, and polls command outcomes. Tharun reports the app now reaches the Pi API after the Pi HTTPS rebind fix at `79d31ef`. Exact APK commit and separate status, diagnostics, telemetry, reconnect, Pi-restart, app-disconnect/lease-expiry, and no-auto-resume results remain unverified in this checklist.
-- **Open issues:** Record the exact APK/repository revisions used; verify phone-to-Pi diagnostics, telemetry, modes, normal STOP, reconnect, API/Pi restart, and repeated movement after a command. Capture sanitized logs and complete Vishal/Tharun review. Keep movement testing within the agreed safe setup. Emergency Stop is out of scope and must not be tested or claimed.
-- **Dependency owner:** Vishal — confirm backend contract and review API compatibility. Tharun — verify control/safety behavior and exact deployed Pi/ESP32 revisions. Niteshvar — provide current PR commit and APK/build evidence, then address integration findings.
+- **Status:** Complete — supervised phone/Pi checks are reported passed.
+- **Evidence (updated 2026-11-19):** Tharun reports phone/API connection, status, diagnostics, telemetry, reconnect, movement recovery, and no automatic movement resumption after interruption passed. Reported versions: Flutter source `85946f1`, APK SHA-256 `ee4f48b1f34a92a34507a91422b9dc61e9ab1954c81f63c809fb5aaa143367ae`, Pi `79d31ef`, ESP32 source `edb6aca`. Emergency Stop remains out of scope and unavailable.
+- **Open issues:** None for this checklist phase.
+- **Dependency owner:** None.
 
 ### Phase 2 — App shell, navigation, and visual system
 
