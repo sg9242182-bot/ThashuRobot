@@ -1208,11 +1208,11 @@ I²C multiplexer expansion (2026-11-14 to 2026-11-16; user-reported hardware che
 
 \[x] Wire the 7Semi TCA9548A at address 0x70: channels 0–5 are front-left/center/right and rear-left/center/right ToFs; channels 6–7 are the left/right OLEDs. Tharun confirmed the pin/channel mapping and later reported the mux-connected hardware working. Confirmed the rear modules are GY-VL53L0X. (User-reported hardware setup; electrical measurements were not recorded.)
 
-\[x] Compile/upload the firmware and verify boot/READY plus both OLEDs working with matched eye size and synchronized blink timing. Tharun reported these working after flashing the mux/eye updates. Individual verification of all six ToF readings remains open below.
+\[x] Compile/upload the firmware and verify boot/READY plus both OLEDs working with matched eye size and synchronized blink timing. Tharun reported these working after flashing the mux/eye updates.
 
-\[ ] With wheels raised, verify each of the six sensors independently, FAR reporting in open space, reverse rejection at or inside 300 mm, and fail-closed rejection for missing/stale rear readings. Confirm the Pi receives the aggregate `rear_mm` value.
+\[x] Tharun reports all six ToFs and reverse safety passed: individual readings/FAR, reverse rejection at or inside 300 mm, fail-closed behavior for missing/stale rear readings, and the Pi aggregate `rear_mm` value. Firmware source revision reported for the flashed update: `edb6aca` (2026-11-19).
 
-Hardware evidence is user-reported; no captured firmware build log or per-channel sensor measurements are attached. The separate six-sensor and reverse fail-safe checks below remain open.
+Hardware evidence is user-reported; no captured firmware build log or per-channel sensor measurements are attached. Electrical voltage measurements remain unrecorded.
 
 Independent OLED animation update (2026-11-14): Each OLED has a separate SSD1306 framebuffer and per-eye transition/blink state. Existing mood commands remain unchanged. Both blinks use the same start time; the displays are still refreshed sequentially over I²C, so a small transfer-time difference remains. The pair is rendered at up to 20 FPS.
 
@@ -1303,11 +1303,11 @@ Status: SOFTWARE CHANGES PRESENT; HARDWARE VALIDATION PENDING
 
 \[ ] Confirm all ToF breakout voltage requirements and the mux/OLED wiring before powering the assembled bus.
 
-\[x] Compile and upload firmware on the robot with the mux installed at I²C address 0x70; user reports the mux firmware boots and both OLEDs work. Individual ToF sensor and reverse fail-safe acceptance remains in the next item.
+\[x] Compile and upload firmware on the robot with the mux installed at I²C address 0x70; user reports the mux firmware boots and both OLEDs work.
 
-\[ ] Test all six ToFs individually and the two OLEDs. With wheels raised, verify the aggregate rear telemetry changes, obstacles at 300 mm or nearer block reverse, all-FAR permits reverse when front/other interlocks are clear, and any missing/stale rear reading blocks reverse.
+\[x] Tharun reports all six ToFs and reverse-safety acceptance passed, including individual readings, aggregate rear telemetry, the 300 mm block threshold, and fail-closed handling of missing/stale rear readings (firmware source `edb6aca`).
 
-\[ ] Confirm Pi sensor snapshot continues to expose the nearest rear value as `rear_mm`. No per-sensor rear values are currently sent to the Pi/app.
+\[x] Tharun reports the Pi sensor snapshot exposes the nearest rear measurement as `rear_mm`. No per-sensor rear values are sent to the Pi/app.
 
 Phase 13 — Full Robot / Expo Validation
 
