@@ -296,7 +296,7 @@ Make the backend maintainable by the team.
 - [x] Document installation, configuration, run, test, service, and recovery procedures in `api/PI_SETUP.md` and `api/README.md`.
 - [x] Keep architecture, API, protocol, and troubleshooting docs aligned with implementation; remaining unapproved diagnostic/E-stop behavior is explicitly listed as pending.
 - [x] Configure CI checks for formatting, static analysis, and automated tests.
-- [ ] Confirm CI passes on the current branch revision. Latest available run `44128213488` failed at “Check backend formatting” on `85946f1`; remaining test steps were skipped, and no run is recorded for current HEAD `65a462d`.
+- [ ] Confirm CI passes on the current branch revision. Latest available run `44128213488` failed at “Check backend formatting” on `85946f1`; remaining test steps were skipped, and no run is recorded for the current HEAD.
 - [x] Remove debug shortcuts and temporary bypasses. No authentication or robot-safety bypass is enabled; face-match debug logging is a documented opt-in configuration flag.
 - [x] Record unresolved issues and their owners in the phase summary and contract-gap document.
 - [x] Summarize completed component work and open dependencies in the phase summary, with commit/PR and test evidence below.
