@@ -83,7 +83,7 @@ Make hardware communication explicit and reliable before exposing movement contr
 - [x] Collaborate with Tharun to approve transport, framing, message schema, and deployed protocol revision. Tharun confirmed v0 command, ACK, telemetry, and event frames on 2026-11-03; CMD/ACK carry no version field.
 - [x] Define command correlation by sequence, acknowledgements, response/error codes, telemetry fields, and compatibility behavior. Record that v0 has no session-aware stale-ACK protection or duplicate-command detection.
 - [x] Define serial connection startup, partial reads, message boundaries, malformed frames, buffer limits, and reconnect behavior. Pi buffering, frame-size limits, and reconnect handling are implemented and documented.
-- [x] Define heartbeat/timeout responsibilities and safe behavior on missed heartbeat or lost connection.
+- [x] Define heartbeat/timeout responsibilities and safe behavior on missed heartbeat or lost connection. Tharun reports the physical ESP32 watchdog check passed.
 - [x] Validate incoming messages and reject unknown or out-of-range commands in the integrated ESP32 parser; Pi ACK handling matches the v0 sequence number.
 - [x] Ensure one authoritative robot manager path dispatches API movement commands to the motor service.
 - [x] Separate transport parsing from robot behavior and API code.
@@ -175,7 +175,7 @@ Publish useful, consistent live state to the mobile app.
 - [x] Publish only documented WebSocket event shapes: `esp32_line` with Pi `received_at` and `command_result`. The API does not claim raw lines are command success.
 - [x] Distinguish live, stale, unavailable, and unknown values across backend status and the client. API status distinguishes transport availability and keeps untracked readiness `unknown`; the Flutter client derives sensor staleness from Pi receive timestamps.
 - [x] Implement WebSocket client disconnect cleanup, bounded backpressure, and telemetry-reader shutdown/restart after all clients disconnect and reconnect.
-- [x] Align keepalive and reconnection behavior with Niteshvar: server Ping/Pong uses 20/10 seconds, while Flutter reconnect behavior is covered by the merged client implementation. Live network/server restart verification remains a Phase 9 task.
+- [x] Align keepalive and reconnection behavior with Niteshvar: server Ping/Pong uses 20/10 seconds, while Flutter reconnect behavior is covered by the merged client implementation. Tharun reports live reconnect and Pi/API restart checks passed in Phase 9.
 - [x] Prevent a slow client from blocking robot control or telemetry collection. Serial input is read once and fanned out through per-client bounded queues; oldest queued events are dropped for slow clients, and missed command results remain recoverable by command ID.
 - [x] Ensure REST status and WebSocket events derive from the same authoritative Pi manager/transport. The API attaches the robot process's manager once; status and telemetry read that same transport. Controller readiness stays `unknown` until firmware READY tracking is implemented.
 - [x] Keep WebSocket events limited to documented fields; tests verify the configured Bearer token is not broadcast.
@@ -183,10 +183,10 @@ Publish useful, consistent live state to the mobile app.
 - [x] Test API server restart cleanup and a fresh telemetry connection after restart; the API suite passed 55/55.
 - [x] Verify the Flutter client marks sensor data stale after one second without a new sensor frame and clears stale on the next valid frame, including `NA` and `FAR`. Niteshvar's merged PR #9 contains parser/widget tests for this behavior; its description reports Flutter analysis and tests passed. No robot test is claimed.
 
-**Phase 5 evidence (updated 2026-11-08):** The API reads the shared GPIO transport once, fans documented `esp32_line` and `command_result` events to per-client bounded queues, and restarts collection after subscriber reconnect. REST status and WebSocket collection use the same manager/transport instance; status reports controller readiness as `unknown` until a firmware READY tracker is implemented and agreed. Vishal reported the API suite passed 55/55; protocol tests now pass 16/16 with the current logging/backoff and telemetry-edge tests. The stream timestamps each serial frame at Pi receipt. The agreed client behavior is 1-second sensor freshness, refreshed by a valid sensor frame including `NA`/`FAR`, with Uvicorn Ping/Pong at 20/10 seconds. Niteshvar's PR #9 is merged and its description records Flutter analysis/tests passing and alignment to the documented API; physical phone-to-Pi verification remains pending. The full robot verification remains reserved for the final integration branch.
+**Phase 5 evidence (updated 2026-11-08):** The API reads the shared GPIO transport once, fans documented `esp32_line` and `command_result` events to per-client bounded queues, and restarts collection after subscriber reconnect. REST status and WebSocket collection use the same manager/transport instance; status reports controller readiness as `unknown` until a firmware READY tracker is implemented and agreed. Vishal reported the API suite passed 55/55; protocol tests now pass 16/16 with the current logging/backoff and telemetry-edge tests. The stream timestamps each serial frame at Pi receipt. The agreed client behavior is 1-second sensor freshness, refreshed by a valid sensor frame including `NA`/`FAR`, with Uvicorn Ping/Pong at 20/10 seconds. Niteshvar's PR #9 is merged and its description records Flutter analysis/tests passing and alignment to the documented API. The phone-to-Pi verification was completed later; see the Phase 9 evidence dated 2026-11-19.
 
 ### Exit criteria
-- [x] Mobile receives consistent telemetry in component tests against the documented event schema; real network delivery remains pending in Phase 9.
+- [x] Mobile receives consistent telemetry in component tests against the documented event schema; Tharun later reports live phone-to-Pi telemetry checks passed (Phase 9, 2026-11-19).
 - [x] Stale/disconnected states are unambiguous in the Flutter client and Pi status response (`unknown` readiness is preserved).
 - [x] WebSocket traffic cannot block robot command processing; bounded per-client queues are covered by API tests.
 
@@ -227,7 +227,7 @@ Support predictable startup, shutdown, configuration, and recovery.
 - [x] Verify safety behavior remains owned by the Pi/ESP32 layers even if the mobile app disappears. Backend code gates move/renew on authenticated telemetry, expires the manual lease, and dispatches normal STOP. Tharun reports the restrained lease-expiry/app-disconnect safety check passed; Niteshvar's app disconnect/restart checks are reported complete. The firmware's 300 mm obstacle-stop threshold is a separate check.
 
 ### Exit criteria
-- [x] Startup and shutdown are repeatable in component lifecycle tests; target-Pi behavior remains for Phase 9.
+- [x] Startup and shutdown are repeatable in component lifecycle tests; Tharun reports target-Pi startup, shutdown, and restart recovery checks passed in Phase 9.
 - [x] Recovery is bounded and documented; serial retries cap at 30 seconds and no movement command is automatically replayed after restart.
 - [x] API or controller-link failure does not imply robot readiness; health and status separate API liveness, transport, and unknown controller readiness.
 
@@ -239,7 +239,7 @@ Test boundaries and failure behavior before full hardware integration.
 ### Checklist
 - [x] Test malformed/oversized requests, invalid commands, stale mode, and duplicate requests with fake transports. Unknown-version testing is not applicable to deployed protocol v0, which has no version field; the Pi test rejects a versioned ACK as unsupported input.
 - [x] Test serial silence/reconnect, partial and oversized parser frames, delayed acknowledgements, and separation of `ACK|sequence|ALIVE` from command ACKs using fake fixtures. The physical ESP32 watchdog response to a missed Pi heartbeat remains for final integration.
-- [x] Exercise mobile/WebSocket disconnect, API service restart with persistent state, and ESP32 transport reconnect in component tests; actual Pi power-cycle verification remains for final integration.
+- [x] Exercise mobile/WebSocket disconnect, API service restart with persistent state, and ESP32 transport reconnect in component tests. Tharun reports Pi/API restart recovery from the current app passed in final integration.
 - [x] Verify the documented command timeout and stop path with Tharun. Tharun confirms Phase 12 waits 750 ms for a movement ACK; on timeout the Pi dispatches normal STOP and records `timed_out` with `ACK_TIMEOUT`. Fake API test `test_missing_ack_becomes_timeout` checks both the timeout result and STOP dispatch; GitHub Actions run #33 passed on commit `bf702e9`. This confirms code/test behavior, not a physical ACK-timeout test.
 - [x] Ensure a failure does not create contradictory state or an unbounded command queue; manager mode/STOP concurrency, API queue limits, failure recovery, and bounded WebSocket queues have fake-based coverage.
 - [x] Review authentication, authorization, request limits, logs, and secret handling; API tests cover Bearer authentication, route surface, rate limits, and token exclusion from telemetry events.
@@ -260,7 +260,7 @@ Test boundaries and failure behavior before full hardware integration.
 Validate the end-to-end path with the owners of the connected components.
 
 ### Checklist
-- [x] Publish the current API and WebSocket contracts for Niteshvar in `api/README.md`; his merged PR #9 records implementation against this documented contract. Live deployment details remain pending.
+- [x] Publish the current API and WebSocket contracts for Niteshvar in `api/README.md`; his merged PR #9 records implementation against this documented contract. Live deployment results and revisions are recorded in the Phase 9 update below.
 - [x] Confirm app behavior against real Pi backend responses. Vishal reports the agreed real-time phone/Pi checks passed; exact tested revisions and captured results are still to be recorded below.
 - [x] Review the revised offline-hotspot security design. Vishal reports the three Pi/phone checks passed on 2026-11-12: BLE numeric-comparison plus physical-button approval, hotspot profile/source-address restriction, and BLE delivery of the HTTPS address/certificate pin/token followed by pinned app connection. This confirms those security-setup checks only; it does not complete every endpoint or robot-command verification.
 - [x] Review Flutter REST/WebSocket paths, authentication, request/response fields, movement-lease renewal, and diagnostics against `api/README.md`. PR #19 static review passed at `5cfeb5e`; Tharun reports the merged app source at `85946f1` was built and the supervised phone/Pi checks passed. Artifact identity is recorded in the 2026-11-19 evidence; a distinct Pi restart check remains open.
@@ -315,7 +315,7 @@ For each phase, record:
 - **Contract/version:** the API/protocol revision used
 - **Dependency owner:** Tharun, Niteshvar, or another named owner as applicable
 
-### Current phase summary (updated 2026-11-09)
+### Current phase summary (updated 2026-11-19)
 
 | Phase | Status | Remaining item(s) |
 |---|---|---|
@@ -324,12 +324,12 @@ For each phase, record:
 | 2 — Serial protocol | Complete | Tharun reports Phase 2 testing complete; exact test output and firmware/backend revisions should be recorded when available. |
 | 3 — Robot manager/modes | Complete | Emergency Stop was removed from Phase 3 scope; remaining mode, STOP, and command-lifecycle work is complete per the checklist and Tharun's report. |
 | 4 — REST API | Complete for component implementation | Live Pi/client verification is in Phase 9. |
-| 5 — WebSocket/telemetry | In progress | Backend/client contract and component logic are implemented; private-network/server-restart integration is pending. |
+| 5 — WebSocket/telemetry | Complete | Component tests and Tharun-reported phone/Pi telemetry, reconnect, and restart checks passed; exact deployment versions are recorded in Phase 9. |
 | 6 — Diagnostics | Complete | Approved contract and read-only diagnostics endpoint implemented; GitHub Actions run 42512821791 passed 73 API/protocol tests. Flutter client work is tracked in Phase 9. |
-| 7 — Configuration/recovery | In progress | Backend movement lease and Flutter renewal/recovery are implemented. Tharun reports the restrained lease-expiry/app-disconnect and physical ACK-timeout/watchdog checks passed; deployment revision is recorded below. |
-| 8 — Security/failure tests | In progress | Fake tests cover the 750 ms ACK-timeout/normal-STOP path. Tharun reports physical ACK-timeout STOP and ESP32 watchdog checks passed; backend CI passed on `4a8c788`. |
-| 9 — Mobile/hardware integration | In progress | App/API, telemetry/diagnostics/reconnect, Pi restart recovery, lease safety, sensor mux, BLE negative tests/source restriction, trace, revisions, owner reviews, and independent setup reproduction are reported complete. Recovery/Reset remains unavailable. |
-| 10 — Handoff | In progress | Current backend CI passed on `4a8c788`; Tharun reports independent setup reproduction passed. |
+| 7 — Configuration/recovery | Complete | Backend movement lease, Flutter renewal/recovery, and Tharun-reported restrained lease-expiry/app-disconnect checks passed. |
+| 8 — Security/failure tests | Complete | Fake-based failure tests, reported physical ACK-timeout STOP/watchdog checks, and backend CI run `44475092148` passed. |
+| 9 — Mobile/hardware integration | Complete | App/API, telemetry/diagnostics/reconnect, Pi restart recovery, lease safety, sensor mux, BLE negative tests/source restriction, trace, revisions, owner reviews, and independent setup reproduction are reported complete. Recovery/Reset remains unavailable/out of scope. |
+| 10 — Handoff | Complete | Backend CI passed on `4a8c788`; Tharun reports independent setup reproduction passed. |
 
 **Latest repository and device evidence (updated 2026-11-19):** The Pi runs backend commit `79d31ef`, which fixes the local HTTPS rebind `uvicorn` import failure. Tharun reports current app/API, telemetry, diagnostics, reconnect, restrained lease/app-disconnect, sensor mux, sanitized command-trace, and owner-review checks passed. Recorded app checkout is `85946f1` with APK SHA-256 `ee4f48b1f34a92a34507a91422b9dc61e9ab1954c81f63c809fb5aaa143367ae`; the ESP32 source revision is `edb6aca`, and Tharun confirms upload after the sleep/wake update. Software checks in the review environment (system Python 3.14) passed 67 focused tests; API route tests could not import because FastAPI is absent, and runtime-cleanup tests could not import because pyserial is absent. Independent setup reproduction is reported passed by Tharun; current backend CI passed on `4a8c788`. Emergency Stop and remote reset remain unavailable/out of scope.
 
