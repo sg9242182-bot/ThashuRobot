@@ -1172,7 +1172,7 @@ Phase 12 — Mobile Control and Secure Pi API
 
 Status: IN PROGRESS
 
-Current source of truth: `main`. BLE handoff fixes, opt-in roaming, and Flutter movement recovery are included in commit `0421cf0`; target-device verification remains separate.
+Current integration branch: `phase-12-pi-api-https` (latest audited HEAD `79d31ef`). This branch includes the BLE handoff, opt-in roaming, Flutter movement recovery, and local hotspot HTTPS backend. The repository implementation is not proof that each feature passed on the target robot.
 
 Scope retained from the original Phase 12 target:
 
@@ -1232,7 +1232,7 @@ Offline app-only hotspot path (implementation present; end-to-end reliability re
 
 [x] Add an opt-in second HTTPS listener on the current Wi-Fi IPv4 address while preserving the loopback API and shared ESP32/API runtime. Automatic address rebind closes the old listener, lets the current movement lease expire with normal STOP, preserves mode, and does not resume motion.
 
-[x] Integrate the Flutter BLE handoff and pin the supplied certificate for REST and WebSocket. Tharun reports provisioning and initial status/telemetry worked; the latest post-movement API recovery is not yet accepted.
+[x] Integrate the Flutter BLE handoff and pin the supplied certificate for REST and WebSocket. Tharun reports app provisioning and API connectivity now work after the HTTPS listener fix; exact installed app/Pi revisions and itemized recovery evidence are not recorded.
 
 [x] Add Flutter held-movement lease renewal every 250 ms, stop renewals on pointer release/app pause/telemetry loss, poll dispatched command outcomes, preserve Manual Control state across tab changes, and retry uncertain move/GET requests safely using the same move request ID.
 
@@ -1244,7 +1244,7 @@ Offline app-only hotspot path (implementation present; end-to-end reliability re
 
 [ ] Verify service startup, BLE provisioning, HTTPS/authenticated telemetry, hotspot address changes, app reconnect, and Pi restart on the target devices with internet disabled. No movement commands are part of provisioning verification.
 
-Evidence/status (updated 2026-11-17): `main` commit `0421cf0` contains BLE handoff retries/peer checks, roaming, and Flutter movement recovery code. The user reports BLE setup connected the Pi to the hotspot, but after saving the app connection the Pi API still did not show as connected; previous phone runs also showed stale telemetry after moves. No successful phone test against this exact source revision is recorded. Keep end-to-end movement recovery, hotspot isolation, internet-disabled operation, reconnect/restart/address-change, and roaming hardware checks open.
+Evidence/status (updated 2026-11-19): The backend HTTPS rebind failed because `_run_api_servers` referenced `uvicorn` without importing it in that scope. Commit `79d31ef` fixes the import and keeps the exception detail in the rebind log. Tharun reports the app/API connection now works after pulling the fix. In this review environment (system Python 3.14), 67 focused software tests passed across API hotspot middleware, roaming/local API access, robot manager, button/recognition announcements, memory, camera, and vision lifecycle. API route tests could not import because FastAPI is absent; runtime-cleanup tests could not import because pyserial is absent. These are environment limitations, not test passes. This does not establish that all three checklist owners' acceptance tests are complete. Keep exact deployed Pi/app/firmware revisions, phone diagnostics/telemetry/reconnect/restart evidence, movement-lease expiry/app-disconnect stopping, roaming hardware acceptance, mux per-sensor/reverse fail-safe checks, and independent setup reproduction open until captured.
 
 
 \[x] Add Flutter runtime Pi address/token settings using HTTPS-only validation and platform secure storage; initialize REST and WebSocket clients from saved settings, add Android internet permission, and expose settings in the app. Current-source Flutter checks and phone verification remain pending.
