@@ -34,12 +34,15 @@ def api_token() -> str | None:
     if configured:
         return configured
     state_home = Path(os.getenv("XDG_DATA_HOME", Path.home() / ".local/share"))
-    token_path = Path(
-        os.getenv(
-            "THASHU_LOCAL_API_STATE_DIR",
-            state_home / "thashu" / "local_api",
-        )
-    ).expanduser() / "api.token"
+    token_path = (
+        Path(
+            os.getenv(
+                "THASHU_LOCAL_API_STATE_DIR",
+                state_home / "thashu" / "local_api",
+            )
+        ).expanduser()
+        / "api.token"
+    )
     try:
         value = token_path.read_text(encoding="utf-8").strip()
     except FileNotFoundError:
