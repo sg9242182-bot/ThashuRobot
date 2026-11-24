@@ -146,6 +146,23 @@ _ROAM_STOP_PHRASES = {
     "stop exploring",
 }
 
+_COMPETITION_COMMANDS = {
+    "competition mode": "START",
+    "begin competition mode": "START",
+    "start competition mode": "START",
+    "start competition demo": "START",
+    "start the competition demo": "START",
+    "next demo": "NEXT",
+    "continue demo": "NEXT",
+    "next demonstration": "NEXT",
+    "skip demo": "SKIP",
+    "skip this demo": "SKIP",
+    "stop competition mode": "STOP",
+    "end competition mode": "STOP",
+    "stop competition demo": "STOP",
+    "end competition demo": "STOP",
+}
+
 
 
 def get_follow_command(user_input: str):
@@ -166,6 +183,12 @@ def get_roaming_command(user_input: str):
     if normalized in _ROAM_STOP_PHRASES:
         return "STOP"
     return None
+
+
+def get_competition_command(user_input: str):
+    """Return an exact start/advance/stop command for the guided demo."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", (user_input or "").lower()).strip()
+    return _COMPETITION_COMMANDS.get(normalized)
 
 
 _RECOGNITION_ENROLL_PHRASES = {

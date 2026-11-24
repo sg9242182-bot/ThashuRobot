@@ -27,7 +27,7 @@ from vision.follow_logic   import FollowLogic
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
 from hardware.servo_tracking import ServoTracker
-from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, get_enrollment_spelling, is_recognition_query, get_person_memory_request, get_event_memory_request, get_person_event_query, get_place_event_query, get_person_memory_save_confirmation, is_person_memory_query, get_person_memory_delete_command, should_announce_recognized_person, get_roaming_command
+from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, get_enrollment_spelling, is_recognition_query, get_person_memory_request, get_event_memory_request, get_person_event_query, get_place_event_query, get_person_memory_save_confirmation, is_person_memory_query, get_person_memory_delete_command, should_announce_recognized_person, get_roaming_command, get_competition_command
 from core.model_paths import model_path, project_path
 from memory.people import PeopleMemory
 
@@ -132,6 +132,9 @@ _roaming_forward_pulses = 0
 _roaming_gaze_track_id = None
 _roaming_gaze_until = 0.0
 _roaming_next_gaze_at = 0.0
+_competition_active = False
+_competition_stage_index = 0
+_COMPETITION_STAGE_COUNT = 10
 _motion_timer = None
 _motion_generation = 0
 _motion_lock = threading.RLock()
@@ -1276,6 +1279,108 @@ def _start_roaming():
     return True
 
 
+def _competition_sensor_value(value):
+    if value == "FAR":
+        return "clear beyond its range"
+    if value is None:
+        return "unavailable"
+    return f"{int(value)} millimetres"
+
+
+def _run_competition_eye_demo():
+    """Show the ESP32-rendered expressions without issuing motor commands."""
+    for expression in ("THINKING", "ALERT", "HAPPY", "IDLE"):
+        eyes.set(expression)
+        time.sleep(0.55)
+
+
+def _competition_stage_response(stage_index, recognized_person=None):
+    """Return the next guided competition cue and any safe live sensor data."""
+    stages = (
+        (
+            "eyes",
+            "Watch my eyes change expressions. They are rendered by my ESP32 controller.",
+        ),
+        (
+            "head",
+            "I will look left, right, and center using my pan and tilt servos.",
+        ),
+        (
+            "vision",
+            (
+                f"I recognize you as {recognized_person}. My camera can track faces and people."
+                if recognized_person
+                else "My camera is ready for face recognition and person tracking. Stand in view, then ask who I recognize."
+            ),
+        ),
+        (
+            "voice",
+            "My wake word and speech system are ready. Ask me a question or give me a voice command.",
+        ),
+        (
+            "memory",
+            "When I recognize a saved person, I can use their confirmed memories. Ask what I remember about you.",
+        ),
+        (
+            "follow",
+            "I can follow one clearly selected person with short, sensor-checked movement pulses. Say follow me to demonstrate, and say stop following to end it.",
+        ),
+        ("sensors", ""),
+        (
+            "roaming",
+            "My roaming mode uses fresh front and rear sensors, low-speed pulses, and normal STOP between moves. Clear the demo area first, then say start roaming when ready. Say Hey Thashu or stop roaming to end it.",
+        ),
+        (
+            "app",
+            "My Thashu phone app connects over Bluetooth setup and the phone hotspot. The operator can show status, diagnostics, telemetry, and manual control from the app now.",
+        ),
+        (
+            "sleep",
+            "After five idle minutes I reduce camera activity and make my eyes sleepy. After ten minutes I enter software sleep; touch my GPIO 22 sensor to wake me. This demo leaves me awake so we can continue.",
+        ),
+    )
+    if stage_index >= len(stages):
+        return None, None
+    action, response = stages[stage_index]
+    if action == "sensors":
+        snapshot = motors.gpio.get_sensor_snapshot(max_age=ROAM_SENSOR_MAX_AGE_SECONDS)
+        if snapshot is None:
+            response = "My distance sensor report is stale or unavailable, so movement safety checks will stay stopped until fresh readings return."
+        else:
+            response = (
+                "Live distance readings: front left "
+                f"{_competition_sensor_value(snapshot['tof_left_mm'])}, front center "
+                f"{_competition_sensor_value(snapshot['tof_center_mm'])}, front right "
+                f"{_competition_sensor_value(snapshot['tof_right_mm'])}, and rear "
+                f"{_competition_sensor_value(snapshot['rear_mm'])}."
+            )
+    return action, response
+
+
+def _competition_stop_and_confirm():
+    """Cancel every motion source and require the ESP32's normal STOP ACK."""
+    manager = _api_command_manager
+    try:
+        if manager is not None:
+            sequence = manager.stop_preserving_mode()
+        else:
+            _cancel_motion_sources()
+            sequence = stop_motion()
+    except Exception as exc:
+        print(f"[COMPETITION] STOP dispatch failed ({type(exc).__name__})")
+        return False
+    acknowledgement = (
+        motors.gpio.wait_for_ack(sequence, timeout=0.75)
+        if sequence is not None
+        else None
+    )
+    print(
+        f"[COMPETITION] Normal STOP sequence {sequence}; "
+        f"ACK {acknowledgement or 'unconfirmed'}"
+    )
+    return acknowledgement == "OK"
+
+
 def _roam_pulse(direction, duration):
     global _roaming_motion_active, _roaming_motion_direction, _roaming_phase, _roaming_next_at
     manager = _api_command_manager
@@ -1486,6 +1591,7 @@ def _screen_enrollment_samples(vision, name, samples):
 
 # ── Main loop ──────────────────────────────────────────────────────────────────
 def main():
+    global _competition_active, _competition_stage_index
     global _identity_enrollment_state, _identity_pending_name
     global _memory_delete_pending, _memory_pending
     global _last_idle_recognized_person, _last_idle_recognized_at
@@ -1758,6 +1864,20 @@ def main():
                         "start roaming", "start roaming mode", "roaming mode",
                         "roam around the room", "stop roaming", "stop roaming mode",
                     ]
+                if _identity_enrollment_state == "idle":
+                    competition_phrases = [
+                        "competition mode", "begin competition mode",
+                        "start competition mode", "start competition demo",
+                        "start the competition demo",
+                    ]
+                    if _competition_active:
+                        competition_phrases.extend([
+                            "next demo", "next demonstration", "continue demo",
+                            "skip demo",
+                            "stop competition mode", "end competition mode",
+                            "stop competition demo", "end competition demo",
+                        ])
+                    expected_phrases = list(expected_phrases or []) + competition_phrases
                 text = transcribe(raw_audio, expected_phrases=expected_phrases)
 
                 stt_time = time.time() - stt_start
@@ -1791,6 +1911,7 @@ def main():
                 brain_start = time.time()
 
                 identity_command = get_recognition_command(text)
+                competition_post_action = None
                 identity_save_confirmation = (
                     identity_command == "CONFIRM_SAVE"
                     or (
@@ -2228,6 +2349,81 @@ def main():
                         )
                     else:
                         response = "I don't recognize a confirmed face right now."
+                elif (competition_command := get_competition_command(text)) == "START":
+                    if _competition_active:
+                        response = "Competition mode is already on. Say next demo to continue, or stop competition mode to end it."
+                    elif not _competition_stop_and_confirm():
+                        response = "I could not confirm STOP, so I did not start competition mode."
+                    else:
+                        _competition_active = True
+                        _competition_stage_index = 0
+                        _mark_user_activity()
+                        print("[COMPETITION] Guided showcase started")
+                        response = (
+                            "Competition showcase ready. I will guide you through my eyes, head, "
+                            "vision, voice, memory, follow, safety sensors, roaming, phone app, "
+                            "and touch wake. I will not start moving on my own. Say next demo "
+                            "for each cue, or stop competition mode to finish."
+                        )
+                elif competition_command in ("NEXT", "SKIP", "STOP"):
+                    if not _competition_active:
+                        response = "Competition mode is not running. Say start competition mode to begin."
+                    elif not _competition_stop_and_confirm():
+                        _competition_active = False if competition_command == "STOP" else _competition_active
+                        response = (
+                            "I sent STOP but could not confirm it. Competition mode is paused; "
+                            "check the robot before continuing."
+                        )
+                    elif competition_command == "STOP":
+                        _competition_active = False
+                        _competition_stage_index = 0
+                        print("[COMPETITION] Guided showcase ended")
+                        response = "Competition mode is off. I am stopped and ready for normal commands."
+                    elif competition_command == "SKIP":
+                        skipped_stage = min(
+                            _competition_stage_index + 1,
+                            _COMPETITION_STAGE_COUNT,
+                        )
+                        _competition_stage_index = skipped_stage
+                        print(f"[COMPETITION] Cue {skipped_stage} skipped")
+                        response = "I skipped that demo cue. Say next demo when you are ready."
+                    elif _competition_stage_index >= _COMPETITION_STAGE_COUNT:
+                        _competition_active = False
+                        _competition_stage_index = 0
+                        print("[COMPETITION] Guided showcase completed")
+                        response = "That is the end of my competition showcase. I am stopped and ready for questions."
+                    else:
+                        stage_index = _competition_stage_index
+                        action, response = _competition_stage_response(
+                            stage_index,
+                            recognized_person=recognized_person_at_wake,
+                        )
+                        if action == "head":
+                            head_ok = True
+                            for direction in ("LEFT", "RIGHT", "CENTER"):
+                                sequence = servo_tracker.look(direction)
+                                acknowledgement = (
+                                    motors.gpio.wait_for_ack(sequence, timeout=0.75)
+                                    if sequence is not None
+                                    else None
+                                )
+                                if acknowledgement != "OK":
+                                    head_ok = False
+                                    break
+                                time.sleep(0.25)
+                            if not head_ok:
+                                response = "I could not confirm the head movement, so this demo cue is still waiting. Check the servo controller and say next demo to retry."
+                                action = None
+                            else:
+                                print("[COMPETITION] Head scan completed with ESP32 ACKs")
+                        if action == "eyes":
+                            competition_post_action = "eyes"
+                        if action is not None:
+                            _competition_stage_index += 1
+                            print(
+                                f"[COMPETITION] Cue {stage_index + 1}/"
+                                f"{_COMPETITION_STAGE_COUNT}: {action}"
+                            )
                 elif (roaming_command := get_roaming_command(text)) == "START":
                     _roaming_start_pending = True
                     response = (
@@ -2358,6 +2554,9 @@ def main():
                             )
                     else:
                         speak(response)
+
+                    if competition_post_action == "eyes":
+                        _run_competition_eye_demo()
 
                     # A safety stop can arrive while this confirmation is playing.
                     # Handle it before reopening the microphone or returning to IDLE.
