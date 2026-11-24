@@ -146,21 +146,19 @@ _ROAM_STOP_PHRASES = {
     "stop exploring",
 }
 
-_COMPETITION_COMMANDS = {
-    "competition mode": "START",
-    "begin competition mode": "START",
-    "start competition mode": "START",
-    "start competition demo": "START",
-    "start the competition demo": "START",
-    "next demo": "NEXT",
-    "continue demo": "NEXT",
-    "next demonstration": "NEXT",
-    "skip demo": "SKIP",
-    "skip this demo": "SKIP",
-    "stop competition mode": "STOP",
-    "end competition mode": "STOP",
-    "stop competition demo": "STOP",
-    "end competition demo": "STOP",
+_SELF_INTRO_PHRASES = {
+    "tell me about yourself", "tell us about yourself",
+    "tell me more about yourself", "tell me everything about yourself",
+    "explain yourself", "explain about yourself", "introduce yourself",
+    "introduce yourself to everyone", "describe yourself",
+    "give me your introduction", "what makes you different",
+    "what makes you stand out", "what makes you different from other robots",
+    "what makes thashu special", "what makes thashu different",
+    "what is special about you", "what are your capabilities",
+    "describe your features", "what features do you have",
+    "what can you demonstrate", "what can you do",
+    "tell me what you can do", "what is your purpose", "how do you work",
+    "tell me what makes you unique",
 }
 
 
@@ -185,10 +183,10 @@ def get_roaming_command(user_input: str):
     return None
 
 
-def get_competition_command(user_input: str):
-    """Return an exact start/advance/stop command for the guided demo."""
+def is_self_intro_request(user_input: str) -> bool:
+    """Return whether the user asked Thashu for its full feature introduction."""
     normalized = re.sub(r"[^a-z0-9]+", " ", (user_input or "").lower()).strip()
-    return _COMPETITION_COMMANDS.get(normalized)
+    return normalized in _SELF_INTRO_PHRASES
 
 
 _RECOGNITION_ENROLL_PHRASES = {
