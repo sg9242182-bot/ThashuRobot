@@ -81,6 +81,8 @@ class VisionCore:
         self._running = False
         self._lifecycle_lock = threading.Lock()
         self._lock = threading.Lock()
+        self._runtime_allows_processing = True
+        self._showcase_processing_requested = False
         self._processing_enabled = threading.Event()
         self._processing_enabled.set()  # Runtime starts in IDLE.
 
@@ -113,7 +115,10 @@ class VisionCore:
             return
 
         target_state = payload["to"]
-        enable_processing = target_state == "IDLE"
+        self._runtime_allows_processing = target_state == "IDLE"
+        enable_processing = (
+            self._runtime_allows_processing or self._showcase_processing_requested
+        )
         was_enabled = self._processing_enabled.is_set()
         if enable_processing:
             if not was_enabled:
@@ -139,6 +144,16 @@ class VisionCore:
             self._reported_person_count = 0
             self._tracker_reset_pending = True
             self._recognition_votes.clear()
+
+    def set_showcase_processing(self, enabled):
+        """Temporarily allow camera tracking during a spoken self-introduction."""
+        self._showcase_processing_requested = bool(enabled)
+        if self._showcase_processing_requested and self._running:
+            with self._lock:
+                self._tracker_reset_pending = True
+            self._processing_enabled.set()
+        elif not self._runtime_allows_processing:
+            self._processing_enabled.clear()
 
     def start(self):
         """Start the camera and one vision worker; repeated starts are harmless."""

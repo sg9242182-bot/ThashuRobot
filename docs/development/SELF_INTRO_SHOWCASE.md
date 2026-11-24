@@ -7,8 +7,9 @@ phrase to start one spoken feature tour.
 The response covers the Pi/ESP32 split, voice and local reasoning, expressive
 eyes, head servos, camera face and upper-body tracking, consent-based saved-face
 recognition, distance sensors, follow, phone-app control, and idle power saving.
-If the current recognition logic has confirmed an enrolled person, Thashu may
-name them; otherwise it explains that it has no confirmed identity to announce.
+Between spoken parts, the camera briefly resumes and the head tracks one clear
+face or upper-body target. If current recognition confirms an enrolled person,
+Thashu may name them; otherwise it says no confirmed identity is available.
 
 The tour then attempts one short, low-speed step in each direction: forward,
 backward, left, and right. Each movement goes through `RobotCommandManager`,

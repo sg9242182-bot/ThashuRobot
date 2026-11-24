@@ -1354,6 +1354,49 @@ def _speak_self_intro_move(line, direction, manager):
     return not speaker.is_alive() and outcome["stop_ack"] == "OK"
 
 
+def _track_people_during_self_intro(seconds=2.5):
+    """Briefly show real face/body tracking while speech is paused between lines."""
+    tracked = False
+    recognized_name = None
+    try:
+        vision.set_showcase_processing(True)
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            snapshot = vision.get_state()
+            observed_at = snapshot.get("observed_at")
+            age = time.monotonic() - observed_at if isinstance(observed_at, (int, float)) else None
+            if age is not None and 0.0 <= age <= 0.75:
+                faces = [
+                    face for face in snapshot.get("faces", [])
+                    if isinstance(face, dict)
+                    and face.get("track_id") is not None
+                    and not face.get("ambiguous", True)
+                ]
+                persons = [
+                    person for person in snapshot.get("persons", [])
+                    if isinstance(person, dict)
+                    and person.get("track_id") is not None
+                    and not person.get("ambiguous", True)
+                ]
+                frame_w, frame_h = snapshot.get("frame_size", (640, 480))
+                if len(faces) == 1:
+                    target = faces[0]
+                    x, y = target["center"]
+                    servo_tracker.update(x, y, frame_w, frame_h)
+                    tracked = True
+                    if target.get("is_owner") and target.get("name") not in (None, "Unknown"):
+                        recognized_name = target["name"]
+                elif not faces and len(persons) == 1:
+                    servo_tracker.update_pan_only(persons[0]["center"][0], frame_w)
+                    tracked = True
+            time.sleep(0.12)
+    except Exception as exc:
+        print(f"[INTRO] Live vision demo unavailable ({type(exc).__name__})")
+    finally:
+        vision.set_showcase_processing(False)
+    return tracked, recognized_name
+
+
 def _run_self_intro_showcase(recognized_person=None):
     """Introduce Thashu and demonstrate responsive hardware with guarded pulses."""
     speak(
@@ -1363,31 +1406,37 @@ def _run_self_intro_showcase(recognized_person=None):
     )
     eyes.set("THINKING")
     speak(
-        "My camera detects faces and people, tracks upper-body pose, and recognizes "
-        "people enrolled with permission."
+        "My camera can find a face or a person's upper body and follow that track "
+        "with my head. I'll look for someone now."
     )
-    if recognized_person:
-        speak(f"I currently recognize you as {recognized_person}.")
+    live_track, live_recognized_person = _track_people_during_self_intro()
+    recognized_person = live_recognized_person or recognized_person
+    if live_track:
+        speak("I found and tracked a person with my camera.")
     else:
-        speak(
-            "I only identify a saved person when my recognition system confirms "
-            "a match; I don't have a confirmed identity to announce right now."
-        )
+        speak("I didn't get a stable camera track just now, so I won't claim that it worked.")
+    if recognized_person:
+        speak(f"My saved-face recognition confirms you as {recognized_person}.")
+    else:
+        speak("I only name a saved person after recognition confirms a match.")
 
-    head_ok = True
-    for direction in ("LEFT", "RIGHT", "CENTER"):
-        sequence = servo_tracker.look(direction)
-        if sequence is None or motors.gpio.wait_for_ack(sequence, timeout=0.75) != "OK":
-            head_ok = False
-            break
-    if head_ok:
+    if live_track:
         eyes.set("HAPPY")
         speak(
-            "My head can turn toward what I see, and I can follow a selected person "
-            "when they explicitly ask me to follow."
+            "My head turned to keep that person in view. I can also follow a selected "
+            "person, but that movement starts only when someone explicitly says follow me."
         )
     else:
-        speak("My head movement isn't responding, so I won't pretend it worked.")
+        head_ok = True
+        for direction in ("LEFT", "RIGHT", "CENTER"):
+            sequence = servo_tracker.look(direction)
+            if sequence is None or motors.gpio.wait_for_ack(sequence, timeout=0.75) != "OK":
+                head_ok = False
+                break
+        if head_ok:
+            speak("My head servos can look left, right, and center.")
+        else:
+            speak("My camera didn't find a stable target, and my head servos didn't respond.")
 
     manager = _api_command_manager
     original_mode = None
@@ -2398,7 +2447,12 @@ def main():
                                 + "; ".join(entries)
                                 + "."
                             )
-                elif is_self_intro_request(text):
+                elif (
+                    is_self_intro_request(text)
+                    and _identity_enrollment_state == "idle"
+                    and _memory_pending is None
+                    and _memory_delete_pending is None
+                ):
                     self_intro_demo = True
                     response = brain.quick.get_response(text) or "I'm Thashu, a student-built robot."
                 elif is_recognition_query(text):
