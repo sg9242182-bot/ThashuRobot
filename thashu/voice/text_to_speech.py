@@ -25,7 +25,7 @@ VOICE_CACHE_DIR = os.path.expanduser(os.environ.get(
 
 # Short, fixed replies are generated once on the Pi and kept outside the repo.
 COMMAND_VOICE_PROMPTS = {
-    "wake_greeting": "Mmm... I'm awake! Give me a moment to open my eyes.",
+    "wake_greeting_v2": "Oh, hi. I'm waking up now... just a moment.",
     "forward_slow": "Forward slowly.",
     "forward_medium": "Moving forward.",
     "forward_fast": "Forward quickly.",

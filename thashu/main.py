@@ -70,7 +70,7 @@ TOUCH_WAKE_PIN = 22  # BCM GPIO22, physical pin 15; active-high TTP223 output.
 IDLE_REDUCE_AFTER_SECONDS = 5 * 60
 IDLE_SLEEP_AFTER_SECONDS = 10 * 60
 WAKE_CAMERA_READY_TIMEOUT_SECONDS = 12.0
-WAKE_GREETING = "Mmm... I'm awake! Give me a moment to open my eyes."
+WAKE_GREETING = "Oh, hi. I'm waking up now... just a moment."
 ROAM_PWM = 100
 ROAM_FORWARD_PULSE_SECONDS = 0.25
 ROAM_REVERSE_PULSE_SECONDS = 0.20
@@ -1728,7 +1728,7 @@ def main():
     start_piper()
     preload_model()
     warmup_model()
-    prepare_command_voice_cache({"wake_greeting"})
+    prepare_command_voice_cache({"wake_greeting_v2"})
 
     play(SOUND_STARTUP, blocking=True)
 
