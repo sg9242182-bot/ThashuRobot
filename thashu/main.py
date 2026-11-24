@@ -1865,6 +1865,20 @@ def main():
                         "roam around the room", "stop roaming", "stop roaming mode",
                     ]
                 if _identity_enrollment_state == "idle":
+                    expected_phrases = list(expected_phrases or []) + [
+                        "tell me about yourself", "tell us about yourself",
+                        "tell me more about yourself", "tell me everything about yourself",
+                        "explain yourself",
+                        "explain about yourself", "introduce yourself",
+                        "describe yourself", "tell me what you can do",
+                        "what is your purpose", "introduce yourself to everyone",
+                        "what makes you different", "what makes you stand out",
+                        "what makes you different from other robots",
+                        "what makes Thashu special", "what makes Thashu different",
+                        "what is special about you", "what are your capabilities", "describe your features",
+                        "what features do you have", "what can you demonstrate",
+                        "how do you work", "give me your introduction",
+                    ]
                     competition_phrases = [
                         "competition mode", "begin competition mode",
                         "start competition mode", "start competition demo",
@@ -1877,7 +1891,7 @@ def main():
                             "stop competition mode", "end competition mode",
                             "stop competition demo", "end competition demo",
                         ])
-                    expected_phrases = list(expected_phrases or []) + competition_phrases
+                    expected_phrases.extend(competition_phrases)
                 text = transcribe(raw_audio, expected_phrases=expected_phrases)
 
                 stt_time = time.time() - stt_start

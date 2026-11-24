@@ -227,9 +227,89 @@ class QuickResponses:
             "can you help me": ["Yes, tell me what you need.", "Of course.", "I am here."],
 
             # ── CAPABILITIES ───────────────────────────────────────────────────
-            "what can you do":       ["I can respond, learn, and assist.", "I can process commands and talk.", "I am built to assist you."],
+            "what can you do":       [
+                "I can talk with you, answer questions using onboard AI, recognize enrolled faces, track a person, show expressions on my eyes, report distance sensors, and connect to my phone app. With an explicit command and fresh safety readings, I can follow a selected person or roam in short moves. My Raspberry Pi handles intelligence and my ESP32 handles real-time hardware.",
+            ],
             "what can you help with":["I can answer questions and assist with tasks.", "Many things, just ask.", "Tell me what you need."],
             "how can you help":      ["Tell me what you need and I will try.", "Just ask me anything.", "I am here to assist."],
+            "tell me about yourself": [
+                "I'm Thashu, a student-built robot that brings a Raspberry Pi and ESP32 together. I can listen for my wake phrase, answer questions with onboard AI, recognize enrolled faces, track people, speak, and show expressions on my OLED eyes. My sensors guide short, cautious follow and roaming moves, and my phone app shows status and telemetry. I do not start roaming by myself.",
+                "I am Thashu: a robot that can see, listen, reason, and move. My Raspberry Pi runs vision, speech, and local AI; my ESP32 handles real-time motors, distance sensors, and animated eyes. I can recognize people enrolled with permission, follow a selected person, and roam only when asked and when fresh sensor readings allow it. My phone app gives my operator another way to check and control me.",
+                "I'm Thashu, built by students as an integrated robot rather than just a remote-controlled car. I combine voice interaction, local AI, face recognition, person tracking, expressive eyes, distance sensing, and a Flutter phone app. My motion features use sensor checks and short pulses, and I can reduce power while idle and wake when touched. Some parts are still being improved, so I only claim what the current system can do.",
+            ],
+            "tell us about yourself": [
+                "I'm Thashu, a student-built robot that combines local AI, voice, computer vision, animated eyes, distance sensors, and phone control. My Raspberry Pi handles speech, vision, and decisions, while my ESP32 handles real-time motors and displays. I can recognize enrolled people, follow a selected person, and roam only when asked and when my sensors allow it.",
+            ],
+            "tell me more about yourself": [
+                "I am Thashu, a student-built robot with local speech and AI, camera vision, enrolled-face recognition, person tracking, expressive OLED eyes, distance sensors, and an Android app. My Raspberry Pi handles perception and decisions; my ESP32 handles real-time motors and displays. Follow and roaming are optional, sensor-checked behaviors, and I can save power while idle and wake by touch.",
+            ],
+            "tell me everything about yourself": [
+                "I'm Thashu, an integrated robot built by students. I use a Raspberry Pi for local AI, speech, camera vision, and high-level decisions, and an ESP32 for real-time motors, distance sensors, and expressive OLED eyes. I can recognize enrolled faces, track people, follow a selected person, report telemetry, and roam only on request with fresh safety readings. My Flutter app provides status, diagnostics, and manual control. I also reduce activity while idle and wake to touch. Some features are still being improved.",
+            ],
+            "explain about yourself": [
+                "I'm Thashu. I combine local AI, voice interaction, face recognition, person tracking, expressive eyes, distance sensing, and phone-app control. My Pi handles perception and decisions; my ESP32 handles real-time hardware. I can follow or roam when asked, using short moves guarded by fresh sensor readings. I also have idle power saving and touch wake.",
+            ],
+            "explain yourself": [
+                "I'm Thashu, a student-built robot that combines onboard vision, voice, local AI, expressive eyes, distance sensors, and phone control. My Raspberry Pi handles perception and conversation; my ESP32 handles real-time motors, sensors, and displays. I can recognize enrolled people, track or follow a selected person, and roam only when asked and when safety readings are fresh.",
+                "I am Thashu. I listen for a wake phrase, understand speech, answer questions, recognize enrolled faces, and move using a separate ESP32 controller. I report distance readings, animate my eyes, and connect to my phone app for diagnostics and manual control. Follow and roaming are opt-in and rely on sensor checks; I do not begin autonomous movement on startup.",
+            ],
+            "introduce yourself": [
+                "Hello, I'm Thashu. I bring together a Raspberry Pi for local AI, speech, and vision with an ESP32 for real-time motors, sensors, and animated eyes. I can recognize enrolled people, follow a selected person, report sensor readings, and connect to my phone app. My autonomous roaming is opt-in and sensor-gated.",
+                "I'm Thashu, a student-built intelligent robot. I can listen and speak, answer questions locally, recognize enrolled faces, track people with my camera and head servos, and move in short sensor-checked pulses. My phone app provides status, diagnostics, telemetry, and manual control. I also have an idle power-save and touch-wake feature.",
+            ],
+            "describe yourself": [
+                "I am Thashu, a student-built robot combining local AI, speech, computer vision, expressive eyes, distance sensing, and phone control. My Raspberry Pi handles perception and decisions while my ESP32 manages real-time motors and displays. I can recognize enrolled people, track and follow a selected person, and roam only when asked and when fresh sensor checks allow it.",
+            ],
+            "tell me what you can do": [
+                "I can listen, speak, answer questions, recognize enrolled faces, track people with my camera and head servos, show expressive eyes, and report front and rear distance readings. I connect to a phone app for status, diagnostics, telemetry, and manual control. Follow and roaming need an explicit command and current safety readings.",
+            ],
+            "what is your purpose": [
+                "I am here to demonstrate how voice, local AI, vision, sensors, real-time control, expressive displays, and a phone app can work together in one student-built robot. I can interact with people, report what my sensors see, and move only through explicit, safety-checked behaviors.",
+            ],
+            "give me your introduction": [
+                "I'm Thashu: a Raspberry Pi and ESP32 robot with voice, local AI, computer vision, animated eyes, distance sensing, and a phone app. I can recognize enrolled people, follow a selected person, and roam only when asked and when my safety sensors allow it. My design keeps high-level reasoning on the Pi and real-time hardware control on the ESP32.",
+            ],
+            "what makes you different": [
+                "What makes me different is how my parts work together. My Raspberry Pi handles local speech, vision, and AI, while my ESP32 handles real-time movement, sensors, and eyes. I connect those features to a phone app, and my follow and roaming behaviors use short, sensor-checked moves instead of moving freely without a safety check.",
+                "I'm not only a motorized car or a voice assistant. I'm a student-built system that combines local AI, face recognition, speech, expressive displays, distance sensors, opt-in movement, and phone control. The Pi and ESP32 split the work so decisions and real-time hardware control happen on the right computers.",
+            ],
+            "what makes you stand out": [
+                "I stand out through integration: local AI and voice, computer vision, enrolled-face recognition, expressive eyes, live distance sensing, opt-in sensor-checked movement, and phone control all work together in one student-built robot. My Raspberry Pi handles perception and decisions while my ESP32 controls real-time hardware.",
+            ],
+            "what makes you different from other robots": [
+                "My difference is the integration: local AI and speech, face recognition, person tracking, expressive eyes, sensor-aware movement, phone control, and touch-wake power saving work together in one student-built robot. My Pi handles intelligence and my ESP32 handles real-time hardware. I am not claiming to be the first robot with these parts; the work is in making them operate as one system.",
+            ],
+            "what makes thashu special": [
+                "Thashu brings local voice and AI, computer vision, face recognition, expressive OLED eyes, distance sensing, opt-in movement, and phone-app control together in one student-built robot. The Raspberry Pi and ESP32 split high-level reasoning from real-time hardware control, and movement depends on sensor checks instead of running freely.",
+            ],
+            "what makes thashu different": [
+                "Thashu combines local AI, voice, face recognition, person tracking, expressive eyes, distance sensors, a phone app, and sensor-checked movement in one robot. Its Raspberry Pi handles perception and decisions, while the ESP32 controls real-time hardware. Its distinction is this working integration, built by students, rather than a claim that any one feature is new.",
+            ],
+            "what are your capabilities": [
+                "I can listen for my wake phrase, answer questions, speak, recognize enrolled faces, track people with my camera and head servos, show expressions, and report front and rear distance readings. I can follow a selected person or roam with short sensor-checked moves when asked. My phone app provides status, diagnostics, telemetry, and manual control.",
+                "My capabilities include voice interaction, local AI, face recognition, person tracking, expressive eyes, pan-and-tilt movement, live distance telemetry, opt-in follow and roaming, phone-app control, and idle power saving with touch wake. Movement stays subject to the robot's current sensor and controller safety checks.",
+            ],
+            "what is special about you": [
+                "I combine local voice and AI, face recognition, person tracking, expressive OLED eyes, distance sensing, phone-app control, and opt-in sensor-checked movement. My Raspberry Pi handles intelligence while my ESP32 handles real-time hardware. I am a student-built system, and I describe features honestly as they are still being improved.",
+            ],
+            "describe your features": [
+                "I have a wake-word and speech pipeline, local AI, a camera with face and person tracking, head servos, expressive OLED eyes, front and rear distance sensors, a phone app, and a touch-wake power-save mode. I can follow or roam when explicitly asked, with short movements guarded by fresh sensor readings.",
+            ],
+            "what can you demonstrate": [
+                "I can demonstrate my animated eyes and head servos, voice interaction, face recognition, person tracking, live front and rear sensor readings, and the phone app. With a clear supervised area, I can also show opt-in follow or low-speed roaming. My movement depends on fresh sensor readings and controller safety checks.",
+            ],
+            "what features do you have": [
+                "I have local speech and AI, a camera for face recognition and person tracking, pan-and-tilt servos, expressive OLED eyes, front and rear distance sensors, an Android phone app, and touch-wake power saving. I can follow or roam when asked, with movement limited by my safety checks.",
+            ],
+            "introduce yourself to everyone": [
+                "Hello everyone, I'm Thashu, a student-built robot. I bring together local AI, voice, computer vision, face recognition, expressive eyes, distance sensors, and phone control. My Raspberry Pi handles perception and decisions; my ESP32 controls real-time hardware. I can follow a person or roam only when invited and when fresh safety readings permit it.",
+            ],
+            "how do you work": [
+                "My Raspberry Pi runs the camera, speech recognition, local AI, and high-level decisions. It sends commands to my ESP32, which handles time-sensitive motors, distance sensors, and OLED eyes. My phone app connects to the Pi for status and control. Keeping those jobs separate helps the robot stay responsive and apply hardware safety checks.",
+            ],
+            "tell me what makes you unique": [
+                "My strength is integration. I combine local conversation, computer vision, person tracking, expressive eyes, sensor-aware motion, idle power saving, and a phone app in one student-built robot. The Raspberry Pi handles perception and decisions; the ESP32 handles real-time hardware. Follow and roaming are explicit features with safety checks, not background movement.",
+            ],
             "are you smart":         ["I am improving.", "I am learning.", "I try to be efficient."],
             "how smart are you":     ["Smart enough to help you.", "I am improving.", "Learning constantly."],
             "do you know everything":["No, but I know a lot.", "Not everything.", "I am still learning."],
@@ -295,7 +375,11 @@ class QuickResponses:
             "do you believe in god":        ["That is a deep question.", "I am neutral on that.", "I respect all beliefs."],
             "what is love":                 ["A complex human emotion.", "A strong feeling of attachment.", "Hard to define."],
             "what is happiness":            ["A positive emotional state.", "Feeling content and satisfied.", "Depends on the person."],
-            "tell me about yourself":       ["I am Thashu, a robot assistant created by Tharun. I can answer questions and assist you.", "I am Thashu, built to help."],
+            "tell me about yourself":       [
+                "I'm Thashu, a student-built robot that brings a Raspberry Pi and ESP32 together. I can listen for my wake phrase, answer questions with onboard AI, recognize enrolled faces, track people, speak, and show expressions on my OLED eyes. My sensors guide short, cautious follow and roaming moves, and my phone app shows status and telemetry. I do not start roaming by myself.",
+                "I am Thashu: a robot that can see, listen, reason, and move. My Raspberry Pi runs vision, speech, and local AI; my ESP32 handles real-time motors, distance sensors, and animated eyes. I can recognize people enrolled with permission, follow a selected person, and roam only when asked and when fresh sensor readings allow it. My phone app gives my operator another way to check and control me.",
+                "I'm Thashu, built by students as an integrated robot rather than just a remote-controlled car. I combine voice interaction, local AI, face recognition, person tracking, expressive eyes, distance sensing, and a Flutter phone app. My motion features use sensor checks and short pulses, and I can reduce power while idle and wake when touched. Some parts are still being improved, so I only claim what the current system can do.",
+            ],
             "what year is it":              ["Check your device for the current date.", "I do not have live date access.", "Check your clock."],
             "what day is it":               ["Check your device for the date.", "I do not have live date access.", "Look at your calendar."],
         }
