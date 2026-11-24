@@ -1,0 +1,35 @@
+[Unit]
+Description=Thashu robot runtime for %i
+After=network.target sound.target thashu-wifi-provisioning@%i.service
+Wants=thashu-wifi-provisioning@%i.service
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=%i
+SupplementaryGroups=audio video dialout gpio
+WorkingDirectory=/home/%i/ThashuRobot/thashu
+Environment=HOME=/home/%i
+Environment=PYTHONUNBUFFERED=1
+Environment=XDG_DATA_HOME=/home/%i/.local/share
+Environment=THASHU_MODELS_DIR=/home/%i/.local/share/thashu/models
+Environment=THASHU_PIPER_BIN=/home/%i/piper/piper/piper
+Environment=THASHU_AUDIO_OUTPUT=sysdefault:CARD=Headphones
+Environment=LD_LIBRARY_PATH=/home/%i/piper1-gpl/libpiper/install/lib
+Environment=THASHU_API_LOCAL_ACCESS=1
+Environment=THASHU_API_LOCAL_TLS_PINNING_CONFIRMED=1
+Environment=THASHU_API_WIFI_INTERFACE=wlan0
+Environment=THASHU_API_LOCAL_PORT=8443
+ExecStart=/home/%i/ThashuRobot/thashu/deploy/systemd/run-thashu.sh
+KillSignal=SIGINT
+TimeoutStopSec=20
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=false
+ReadWritePaths=/home/%i/.local/share
+
+[Install]
+WantedBy=multi-user.target
