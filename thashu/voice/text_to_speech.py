@@ -25,7 +25,7 @@ VOICE_CACHE_DIR = os.path.expanduser(os.environ.get(
 
 # Short, fixed replies are generated once on the Pi and kept outside the repo.
 COMMAND_VOICE_PROMPTS = {
-    "wake_greeting_v2": "Oh, hi. I'm waking up now... just a moment.",
+    "wake_greeting_v3": "Just a moment... I am waking up.",
     "forward_slow": "Forward slowly.",
     "forward_medium": "Moving forward.",
     "forward_fast": "Forward quickly.",
@@ -80,6 +80,9 @@ COMMAND_VOICE_PROMPTS = {
     "controller_unavailable_short": "I couldn't reach the motor controller.",
     "motor_command_rejected": "The motor controller rejected that command.",
 }
+
+COMMAND_VOICE_LENGTH_SCALES = {"wake_greeting_v3": 1.2}
+
 def _quick_response_voice_prompts():
     """Build stable cache names for every possible fixed quick-response reply."""
     prompts = {}
@@ -192,6 +195,7 @@ def prepare_command_voice_cache(names=None):
             raise ValueError(f"Unknown voice cache name(s): {', '.join(sorted(unknown))}")
         prompts = {name: ALL_VOICE_PROMPTS[name] for name in requested}
     for name, prompt in prompts.items():
+        length_scale = COMMAND_VOICE_LENGTH_SCALES.get(name, 1.0)
         output_path = _voice_path(name)
         if os.path.isfile(output_path) and os.path.getsize(output_path) > 44:
             print(f"[PIPER] Cached voice ready: {name}")
@@ -200,13 +204,15 @@ def prepare_command_voice_cache(names=None):
         temporary_path = output_path + ".tmp.wav"
         try:
             if _streaming_piper is not None:
-                _streaming_piper.write_wav(prompt, temporary_path)
+                _streaming_piper.write_wav(
+                    prompt, temporary_path, length_scale=length_scale
+                )
             else:
                 result = subprocess.run(
                     [
                         PIPER_PATH, "--model", MODEL_PATH,
                         "--output_file", temporary_path,
-                        "--length_scale", "1.0",
+                        "--length_scale", str(length_scale),
                     ],
                     input=prompt.encode("utf-8"),
                     stdout=subprocess.DEVNULL,
@@ -251,6 +257,7 @@ class _PersistentPiper:
     def __init__(self):
         self._request_lock = threading.Lock()
         self._process = None
+        self._process_length_scale = None
 
     def _close_streams(self, process):
         for name in ("stdin", "stdout", "stderr"):
@@ -263,13 +270,18 @@ class _PersistentPiper:
 
     def _stop_process(self):
         process, self._process = self._process, None
+        self._process_length_scale = None
         if process is None:
             return
         _terminate_process(process)
         self._close_streams(process)
 
-    def _ensure_process(self):
-        if self._process is not None and self._process.poll() is None:
+    def _ensure_process(self, length_scale=1.0):
+        if (
+            self._process is not None
+            and self._process.poll() is None
+            and self._process_length_scale == length_scale
+        ):
             return self._process
         self._stop_process()
         self._process = subprocess.Popen(
@@ -277,13 +289,14 @@ class _PersistentPiper:
                 PIPER_PATH,
                 "--model", MODEL_PATH,
                 "--output-raw",
-                "--length_scale", "1.0",
+                "--length_scale", str(length_scale),
             ],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             bufsize=0,
         )
+        self._process_length_scale = length_scale
         return self._process
 
     def _start_player(self):
@@ -307,10 +320,10 @@ class _PersistentPiper:
         player.stdin.write(chunk)
         return player
 
-    def speak(self, text):
+    def speak(self, text, length_scale=1.0):
         # Only one caller may write to Piper or own its unframed PCM stream.
         with self._request_lock:
-            process = self._ensure_process()
+            process = self._ensure_process(length_scale=length_scale)
             player = None
             first_audio_at = []
             stderr_buffer = bytearray()
@@ -452,7 +465,7 @@ def start_piper() -> bool:
             return False
 
 
-def speak(text: str):
+def speak(text: str, length_scale=1.0):
     if not text or not text.strip():
         return
 
@@ -471,9 +484,9 @@ def speak(text: str):
     try:
         with _lock:
             if _streaming_piper is not None:
-                _streaming_piper.speak(text)
+                _streaming_piper.speak(text, length_scale=length_scale)
             else:
-                _persistent_piper.speak(text)
+                _persistent_piper.speak(text, length_scale=length_scale)
     except Exception as exc:
         print(f"[TTS ERROR]: {exc}")
 

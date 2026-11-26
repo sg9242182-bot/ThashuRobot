@@ -70,7 +70,7 @@ TOUCH_WAKE_PIN = 22  # BCM GPIO22, physical pin 15; active-high TTP223 output.
 IDLE_REDUCE_AFTER_SECONDS = 5 * 60
 IDLE_SLEEP_AFTER_SECONDS = 10 * 60
 WAKE_CAMERA_READY_TIMEOUT_SECONDS = 12.0
-WAKE_GREETING = "Oh, hi. I'm waking up now... just a moment."
+WAKE_GREETING = "Just a moment... I am waking up."
 ROAM_PWM = 100
 ROAM_FORWARD_PULSE_SECONDS = 0.25
 ROAM_REVERSE_PULSE_SECONDS = 0.20
@@ -92,7 +92,7 @@ motors = MotorController()
 audio  = AudioManager(sample_rate=SAMPLE_RATE, blocksize=BLOCK_SIZE)
 wake = WakeWordEngine(
     model_path=model_path("openwakeword", "hey_jarvis_v0.1.onnx"),
-    threshold=0.5,
+    threshold=0.12,
     cooldown=4.0
 )
 vad    = VoiceActivityDetector()
@@ -761,7 +761,7 @@ def _wake_from_touch():
     eyes.thinking()
     time.sleep(0.35)
     if not play_cached_response(WAKE_GREETING):
-        speak(WAKE_GREETING)
+        speak(WAKE_GREETING, length_scale=1.2)
     eyes.happy()
     time.sleep(0.35)
     eyes.idle()
@@ -1728,7 +1728,7 @@ def main():
     start_piper()
     preload_model()
     warmup_model()
-    prepare_command_voice_cache({"wake_greeting_v2"})
+    prepare_command_voice_cache({"wake_greeting_v3"})
 
     play(SOUND_STARTUP, blocking=True)
 
