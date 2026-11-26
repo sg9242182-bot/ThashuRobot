@@ -6,6 +6,7 @@ import os
 import atexit
 import statistics
 import random
+from core.roaming import select_roaming_action
 
 import numpy as np
 import RPi.GPIO as GPIO
@@ -26,7 +27,7 @@ from vision.follow_logic   import FollowLogic
 from hardware.eyes        import Eyes
 from hardware.motors      import MotorController
 from hardware.servo_tracking import ServoTracker
-from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, get_enrollment_spelling, is_recognition_query, get_person_memory_request, get_event_memory_request, get_person_event_query, get_place_event_query, get_person_memory_save_confirmation, is_person_memory_query, get_person_memory_delete_command, should_announce_recognized_person, get_roaming_command
+from core.decision        import get_forward_speed, get_direction_command, get_follow_command, get_look_command, is_stop_command, get_recognition_command, get_registration_name, get_remove_identity_name, get_spelled_registration_name, get_enrollment_spelling, is_recognition_query, get_person_memory_request, get_event_memory_request, get_person_event_query, get_place_event_query, get_person_memory_save_confirmation, is_person_memory_query, get_person_memory_delete_command, should_announce_recognized_person, get_roaming_command, is_self_intro_request
 from core.model_paths import model_path, project_path
 from memory.people import PeopleMemory
 
@@ -69,13 +70,12 @@ TOUCH_WAKE_PIN = 22  # BCM GPIO22, physical pin 15; active-high TTP223 output.
 IDLE_REDUCE_AFTER_SECONDS = 5 * 60
 IDLE_SLEEP_AFTER_SECONDS = 10 * 60
 WAKE_CAMERA_READY_TIMEOUT_SECONDS = 12.0
-WAKE_GREETING = "Mmm... I'm awake! Give me a moment to open my eyes."
+WAKE_GREETING = "Oh, hi. I'm waking up now... just a moment."
 ROAM_PWM = 100
 ROAM_FORWARD_PULSE_SECONDS = 0.25
 ROAM_REVERSE_PULSE_SECONDS = 0.20
 ROAM_TURN_PULSE_SECONDS = 0.30
 ROAM_SENSOR_MAX_AGE_SECONDS = 0.75
-ROAM_OBSTACLE_MM = 300
 ROAM_GAZE_SECONDS = 3.0
 ROAM_GAZE_INTERVAL_SECONDS = 5.0
 ROAM_RETRY_DELAY_SECONDS = 0.6
@@ -468,6 +468,9 @@ def _cancel_motion_sources():
     global _auto_face_track_id, _follow_start_pending, _follow_region_pending
     global _follow_search_active, _follow_motion_active
     global _motion_timer, _motion_generation
+    global _roaming_active, _roaming_start_pending, _roaming_motion_active
+    global _roaming_motion_direction, _roaming_phase, _roaming_next_at
+    global _roaming_gaze_track_id, _roaming_obstacle_event
 
     with _motion_lock:
         _follow_start_pending = False
@@ -481,6 +484,14 @@ def _cancel_motion_sources():
             _motion_timer.cancel()
             _motion_timer = None
         _follow_motion_active = False
+        _roaming_active = False
+        _roaming_start_pending = False
+        _roaming_motion_active = False
+        _roaming_motion_direction = None
+        _roaming_phase = "idle"
+        _roaming_next_at = 0.0
+        _roaming_gaze_track_id = None
+        _roaming_obstacle_event = False
 
 
 def _bind_api_socket(host, port):
@@ -794,7 +805,7 @@ def _shutdown_runtime(reason="process exit"):
 
     print(f"[SYSTEM] Shutting down cleanly ({reason})")
     if _roaming_active or _roaming_motion_active:
-        _stop_roaming("shutdown")
+        _clear_roaming_state()
     try:
         follow_logic.stop()
     except Exception as exc:
@@ -1179,71 +1190,373 @@ def update_idle_face_tracking(snapshot):
     servo_tracker.update(x, y, frame_w, frame_h)
 
 
-def _roam_clear(value):
-    return value == "FAR" or (isinstance(value, (int, float)) and value > ROAM_OBSTACLE_MM)
-
-
-def _stop_roaming(reason):
+def _clear_roaming_state():
     global _roaming_active, _roaming_motion_active, _roaming_motion_direction
     global _roaming_phase, _roaming_next_at, _roaming_gaze_track_id
+    global _roaming_start_pending, _roaming_obstacle_event
+    global _roaming_reverse_attempts, _roaming_forward_pulses
     _roaming_active = False
     _roaming_motion_active = False
     _roaming_motion_direction = None
     _roaming_phase = "idle"
     _roaming_next_at = 0.0
     _roaming_gaze_track_id = None
-    sequence = stop_motion()
+    _roaming_start_pending = False
+    _roaming_obstacle_event = False
+    _roaming_reverse_attempts = 0
+    _roaming_forward_pulses = 0
     servo_tracker.stop_search()
-    print(f"[ROAM] Stopped ({reason}); STOP sequence {sequence}")
+
+
+def _stop_roaming(reason):
+    if not (_roaming_active or _roaming_motion_active):
+        return
+    _clear_roaming_state()
+    try:
+        manager = _api_command_manager
+        if manager is not None and manager.auto_active:
+            sequence = manager.stop_preserving_mode()
+        else:
+            sequence = stop_motion()
+    except Exception as exc:
+        sequence = None
+        print(f"[ROAM] STOP dispatch failed ({type(exc).__name__})")
+    acknowledgement = (
+        motors.gpio.wait_for_ack(sequence, timeout=0.75)
+        if sequence is not None
+        else None
+    )
+    print(
+        f"[ROAM] Stopped ({reason}); STOP sequence {sequence}, "
+        f"ACK {acknowledgement or 'unconfirmed'}"
+    )
 
 
 def _start_roaming():
     global _roaming_active, _roaming_phase, _roaming_next_at
     global _roaming_reverse_attempts, _roaming_forward_pulses
     global _roaming_next_gaze_at, _roaming_obstacle_event
-    if not motors.gpio.is_connected():
-        print("[ROAM] Start rejected; ESP32 link is unavailable")
+    if runtime.current != RuntimeState.IDLE:
+        print("[ROAM] Start rejected; Thashu is not idle")
         return False
-    if follow_logic.enabled:
-        follow_logic.stop()
-        servo_tracker.stop_search()
-    stop_motion()
-    _roaming_active = True
-    _roaming_phase = "evaluate"
-    _roaming_next_at = time.monotonic()
-    _roaming_reverse_attempts = 0
-    _roaming_forward_pulses = 0
-    _roaming_next_gaze_at = time.monotonic()
-    _roaming_obstacle_event = False
+    manager = _api_command_manager
+    if manager is None:
+        print("[ROAM] Start rejected; API command manager is unavailable")
+        return False
+    with _motion_lock:
+        mode = getattr(manager, "mode", None)
+        mode = getattr(mode, "value", mode)
+        if mode != "AUTO" or manager.motion_inhibited:
+            print("[ROAM] Start rejected; AUTO mode and confirmed STOP are required")
+            return False
+        if not motors.gpio.is_connected():
+            print("[ROAM] Start rejected; ESP32 link is unavailable")
+            return False
+        if motors.gpio.get_sensor_snapshot(max_age=ROAM_SENSOR_MAX_AGE_SECONDS) is None:
+            print("[ROAM] Start rejected; fresh sensor telemetry is unavailable")
+            return False
+        try:
+            manager.start_auto()
+        except Exception as exc:
+            print(f"[ROAM] Start rejected ({type(exc).__name__})")
+            return False
+        if follow_logic.enabled:
+            follow_logic.stop()
+            servo_tracker.stop_search()
+        stop_motion()
+        _roaming_active = True
+        _roaming_phase = "evaluate"
+        _roaming_next_at = time.monotonic()
+        _roaming_reverse_attempts = 0
+        _roaming_forward_pulses = 0
+        _roaming_next_gaze_at = time.monotonic()
+        _roaming_obstacle_event = False
+        _mark_user_activity()
     print("[ROAM] Enabled: bounded sensor-gated motion; wake word or STOP ends roaming")
     return True
 
 
+SELF_INTRO_PULSE_SECONDS = 0.35
+SELF_INTRO_PWM = 105
+
+
+def _start_self_intro_pulse(direction, manager):
+    """Run one short sensor-gated move and require both move and STOP ACKs."""
+    global _motion_timer, _motion_generation
+    command = direction.lower()
+    stopped = threading.Event()
+    outcome = {"stop_ack": None}
+
+    def finish_pulse(generation):
+        global _motion_timer
+        with _motion_lock:
+            if generation != _motion_generation:
+                stopped.set()
+                return
+            _motion_timer = None
+            try:
+                stop_sequence = manager.stop_pulse()
+            except Exception as exc:
+                print(f"[INTRO] Timed STOP failed ({type(exc).__name__})")
+                stopped.set()
+                return
+        outcome["stop_ack"] = (
+            motors.gpio.wait_for_ack(stop_sequence, timeout=0.75)
+            if stop_sequence is not None
+            else None
+        )
+        stopped.set()
+
+    with _motion_lock:
+        if _motion_timer is not None:
+            return None
+        try:
+            sequence = manager.dispatch(
+                command,
+                speed=SELF_INTRO_PWM,
+                control_mode="MANUAL",
+                require_current_mode=True,
+            )
+        except Exception as exc:
+            print(f"[INTRO] {direction} blocked ({type(exc).__name__}: {exc})")
+            return None
+        _motion_generation += 1
+        generation = _motion_generation
+        _motion_timer = threading.Timer(
+            SELF_INTRO_PULSE_SECONDS, finish_pulse, args=(generation,)
+        )
+        _motion_timer.daemon = True
+        _motion_timer.start()
+
+    acknowledgement = motors.gpio.wait_for_ack(sequence, timeout=0.5)
+    if acknowledgement != "OK":
+        print(f"[INTRO] {direction} not acknowledged ({acknowledgement or 'timeout'})")
+        try:
+            stop_sequence = manager.stop_preserving_mode()
+            motors.gpio.wait_for_ack(stop_sequence, timeout=0.75)
+        except Exception:
+            pass
+        return None
+    return stopped, outcome
+
+
+def _speak_self_intro_move(line, direction, manager):
+    """Speak the direction while a low-speed demonstration pulse runs."""
+    speaker = threading.Thread(target=speak, args=(line,), daemon=True)
+    speaker.start()
+    pulse = _start_self_intro_pulse(direction, manager)
+    speaker.join(timeout=12.0)
+    if pulse is None:
+        speak("That step was blocked by my controller or sensor safety check, so I stayed still.")
+        return False
+    stopped, outcome = pulse
+    stopped.wait(timeout=1.25)
+    return not speaker.is_alive() and outcome["stop_ack"] == "OK"
+
+
+def _track_people_during_self_intro(seconds=2.5):
+    """Briefly show real face/body tracking while speech is paused between lines."""
+    tracked = False
+    recognized_name = None
+    try:
+        vision.set_showcase_processing(True)
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            snapshot = vision.get_state()
+            observed_at = snapshot.get("observed_at")
+            age = time.monotonic() - observed_at if isinstance(observed_at, (int, float)) else None
+            if age is not None and 0.0 <= age <= 0.75:
+                faces = [
+                    face for face in snapshot.get("faces", [])
+                    if isinstance(face, dict)
+                    and face.get("track_id") is not None
+                    and not face.get("ambiguous", True)
+                ]
+                persons = [
+                    person for person in snapshot.get("persons", [])
+                    if isinstance(person, dict)
+                    and person.get("track_id") is not None
+                    and not person.get("ambiguous", True)
+                ]
+                frame_w, frame_h = snapshot.get("frame_size", (640, 480))
+                if len(faces) == 1:
+                    target = faces[0]
+                    x, y = target["center"]
+                    servo_tracker.update(x, y, frame_w, frame_h)
+                    tracked = True
+                    if target.get("is_owner") and target.get("name") not in (None, "Unknown"):
+                        recognized_name = target["name"]
+                elif not faces and len(persons) == 1:
+                    servo_tracker.update_pan_only(persons[0]["center"][0], frame_w)
+                    tracked = True
+            time.sleep(0.12)
+    except Exception as exc:
+        print(f"[INTRO] Live vision demo unavailable ({type(exc).__name__})")
+    finally:
+        vision.set_showcase_processing(False)
+    return tracked, recognized_name
+
+
+def _run_self_intro_showcase(recognized_person=None):
+    """Introduce Thashu and demonstrate responsive hardware with guarded pulses."""
+    speak(
+        "I'm Thashu, a student-built robot. My Raspberry Pi handles voice, vision, "
+        "and local reasoning; my ESP32 handles real-time motors, sensors, servos, "
+        "and my expressive OLED eyes."
+    )
+    eyes.set("THINKING")
+    speak(
+        "My camera can find a face or a person's upper body and follow that track "
+        "with my head. I'll look for someone now."
+    )
+    live_track, live_recognized_person = _track_people_during_self_intro()
+    recognized_person = live_recognized_person or recognized_person
+    if live_track:
+        speak("I found and tracked a person with my camera.")
+    else:
+        speak("I didn't get a stable camera track just now, so I won't claim that it worked.")
+    if recognized_person:
+        speak(f"My saved-face recognition confirms you as {recognized_person}.")
+    else:
+        speak("I only name a saved person after recognition confirms a match.")
+
+    if live_track:
+        eyes.set("HAPPY")
+        speak(
+            "My head turned to keep that person in view. I can also follow a selected "
+            "person, but that movement starts only when someone explicitly says follow me."
+        )
+    else:
+        head_ok = True
+        for direction in ("LEFT", "RIGHT", "CENTER"):
+            sequence = servo_tracker.look(direction)
+            if sequence is None or motors.gpio.wait_for_ack(sequence, timeout=0.75) != "OK":
+                head_ok = False
+                break
+        if head_ok:
+            speak("My head servos can look left, right, and center.")
+        else:
+            speak("My camera didn't find a stable target, and my head servos didn't respond.")
+
+    manager = _api_command_manager
+    original_mode = None
+    can_move = bool(
+        manager is not None
+        and not manager.motion_inhibited
+        and not manager.auto_active
+        and not _roaming_active
+        and not _roaming_motion_active
+        and not follow_logic.enabled
+        and not _follow_search_active
+        and not _follow_motion_active
+        and _motion_timer is None
+    )
+    if can_move:
+        original_mode = manager.mode.value
+        try:
+            manager.switch_mode("MANUAL")
+        except Exception as exc:
+            print(f"[INTRO] Movement showcase not armed ({type(exc).__name__})")
+            can_move = False
+
+    if can_move:
+        speak(
+            "I can move forward, backward, and turn left or right. I'll show brief "
+            "low-speed steps; fresh distance sensors must allow every direction."
+        )
+        for direction, line in (
+            ("FORWARD", "Forward."),
+            ("BACKWARD", "Backward."),
+            ("LEFT", "Turning left."),
+            ("RIGHT", "Turning right."),
+        ):
+            if not _speak_self_intro_move(line, direction, manager):
+                print(f"[INTRO] Motion showcase stopped at {direction}; checking STOP")
+                break
+        try:
+            manager.switch_mode(original_mode)
+        except Exception as exc:
+            print(f"[INTRO] Could not restore {original_mode} mode ({type(exc).__name__})")
+            speak("I could not confirm my normal control mode. Please check me before moving again.")
+    else:
+        eyes.set("ALERT")
+        speak(
+            "My movement demo is unavailable because the controller or safety checks "
+            "aren't ready. I will stay still."
+        )
+
+    eyes.set("HAPPY")
+    speak(
+        "I can report live front and rear sensor readings, answer questions with my "
+        "local AI, and remember facts you ask me to save after I read them back for "
+        "your confirmation. My phone app shows status and diagnostics, and I reduce "
+        "power while idle. Ask me something and I'll show you how I think."
+    )
+
+
 def _roam_pulse(direction, duration):
     global _roaming_motion_active, _roaming_motion_direction, _roaming_phase, _roaming_next_at
-    seq = start_bounded_motion(direction, ROAM_PWM, duration_override=duration)
+    manager = _api_command_manager
+    with _motion_lock:
+        if (
+            not _roaming_active
+            or manager is None
+            or manager.mode.value != "AUTO"
+            or not manager.auto_active
+            or manager.motion_inhibited
+        ):
+            _clear_roaming_state()
+            return False
+        seq = start_bounded_motion(direction, ROAM_PWM, duration_override=duration)
     if seq is None:
-        _roaming_phase = "wait"
-        _roaming_next_at = time.monotonic() + ROAM_RETRY_DELAY_SECONDS
-        print(f"[ROAM] {direction} unavailable; remaining stopped")
+        print(f"[ROAM] {direction} unavailable; disabling roaming")
+        _fail_roaming_motion("dispatch unavailable")
         return False
     ack = motors.gpio.wait_for_ack(seq, timeout=0.2)
     if ack != "OK":
-        stop_motion()
-        _roaming_phase = "wait"
-        _roaming_next_at = time.monotonic() + ROAM_RETRY_DELAY_SECONDS
-        print(f"[ROAM] {direction} rejected ({ack or 'ACK_TIMEOUT'}); remaining stopped")
+        print(f"[ROAM] {direction} rejected ({ack or 'ACK_TIMEOUT'}); disabling roaming")
+        _fail_roaming_motion(ack or "ACK_TIMEOUT")
         return False
-    _roaming_motion_active = True
-    _roaming_motion_direction = direction
-    _roaming_phase = "moving"
-    _roaming_next_at = time.monotonic() + duration
+    with _motion_lock:
+        if (
+            not _roaming_active
+            or manager.mode.value != "AUTO"
+            or not manager.auto_active
+            or manager.motion_inhibited
+        ):
+            return False
+        _roaming_motion_active = True
+        _roaming_motion_direction = direction
+        _roaming_phase = "moving"
+        _roaming_next_at = time.monotonic() + duration
     print(f"[ROAM] {direction} pulse accepted (PWM {ROAM_PWM}, {duration:.2f}s)")
     return True
 
 
+def _fail_roaming_motion(reason):
+    """Latch movement inhibition after an autonomous pulse is uncertain."""
+    _clear_roaming_state()
+    manager = _api_command_manager
+    try:
+        if manager is not None:
+            manager.safety_stop()
+        else:
+            sequence = stop_motion()
+            if sequence is not None:
+                motors.gpio.wait_for_ack(sequence, timeout=0.75)
+    except Exception as exc:
+        print(f"[ROAM] Fail-safe STOP failed ({type(exc).__name__})")
+    print(f"[ROAM] Disabled after motion fault: {reason}")
+
+
 def _update_roaming_gaze(snapshot, now):
     global _roaming_gaze_track_id, _roaming_gaze_until, _roaming_next_gaze_at
+    observed_at = (snapshot or {}).get("observed_at")
+    if not isinstance(observed_at, (int, float)) or not 0 <= now - observed_at <= 0.75:
+        servo_tracker.stop_search()
+        _roaming_gaze_track_id = None
+        _roaming_next_gaze_at = now + ROAM_GAZE_INTERVAL_SECONDS
+        return
     people = [
         p for p in ((snapshot or {}).get("persons") or [])
         if isinstance(p, dict) and p.get("track_id") is not None
@@ -1278,19 +1591,44 @@ def update_roaming(snapshot):
     if not _roaming_active or runtime.current != RuntimeState.IDLE:
         return
     now = time.monotonic()
+    manager = _api_command_manager
+    if (
+        manager is None
+        or manager.mode.value != "AUTO"
+        or not manager.auto_active
+        or manager.motion_inhibited
+    ):
+        _stop_roaming("control state changed")
+        return
     _update_roaming_gaze(snapshot, now)
     if _roaming_obstacle_event:
         _roaming_obstacle_event = False
         _roaming_motion_active = False
         _roaming_motion_direction = None
-        stop_motion()
+        stop_sequence = stop_motion()
+        stop_ack = (
+            motors.gpio.wait_for_ack(stop_sequence, timeout=0.2)
+            if stop_sequence is not None
+            else None
+        )
+        if stop_ack != "OK":
+            _fail_roaming_motion("obstacle STOP ACK timeout")
+            return
         _roaming_phase = "evaluate"
         _roaming_next_at = now + 0.15
     if _roaming_motion_active:
         if now < _roaming_next_at:
             return
         direction = _roaming_motion_direction
-        stop_motion()
+        stop_sequence = stop_motion()
+        stop_ack = (
+            motors.gpio.wait_for_ack(stop_sequence, timeout=0.2)
+            if stop_sequence is not None
+            else None
+        )
+        if stop_ack != "OK":
+            _fail_roaming_motion("pulse STOP ACK timeout")
+            return
         _roaming_motion_active = False
         _roaming_motion_direction = None
         _roaming_phase = "evaluate"
@@ -1305,42 +1643,32 @@ def update_roaming(snapshot):
         _roaming_next_at = now + ROAM_RETRY_DELAY_SECONDS
         print("[ROAM] Sensor data missing or stale; staying stopped")
         return
-    left, center, right = (sensors.get(k) for k in ("tof_left_mm", "tof_center_mm", "tof_right_mm"))
-    front_clear = all(_roam_clear(v) for v in (left, center, right))
-    rear_clear = _roam_clear(sensors.get("rear_mm"))
-    if front_clear:
-        _roaming_reverse_attempts = 0
-        _roaming_forward_pulses += 1
-        if _roaming_forward_pulses >= 4:
-            _roaming_forward_pulses = 0
-            turn = random.choice(("LEFT", "RIGHT"))
-            print(f"[ROAM] Clear path; taking a random {turn.lower()} turn")
-            _roam_pulse(turn, ROAM_TURN_PULSE_SECONDS)
-        else:
-            _roam_pulse("FORWARD", ROAM_FORWARD_PULSE_SECONDS)
+    direction, forward_count, reverse_count, reason = select_roaming_action(
+        sensors,
+        forward_pulses=_roaming_forward_pulses,
+        reverse_attempts=_roaming_reverse_attempts,
+        choose=random.choice,
+    )
+    _roaming_forward_pulses = forward_count
+    _roaming_reverse_attempts = reverse_count
+    if direction is None:
+        _roaming_phase = "wait"
+        _roaming_next_at = now + ROAM_RETRY_DELAY_SECONDS
+        print(f"[ROAM] No sensor-cleared route ({reason}); staying stopped")
         return
-    if rear_clear and _roaming_reverse_attempts < 2:
-        _roaming_reverse_attempts += 1
-        print(f"[ROAM] Front blocked; brief reverse attempt {_roaming_reverse_attempts}/2")
-        _roam_pulse("BACKWARD", ROAM_REVERSE_PULSE_SECONDS)
-        return
-    if rear_clear:
-        left_clear, right_clear = _roam_clear(left), _roam_clear(right)
-        if left_clear or right_clear:
-            if left_clear and not right_clear:
-                turn = "LEFT"
-            elif right_clear and not left_clear:
-                turn = "RIGHT"
-            else:
-                lm = float("inf") if left == "FAR" else float(left)
-                rm = float("inf") if right == "FAR" else float(right)
-                turn = "LEFT" if lm >= rm else "RIGHT"
-            print(f"[ROAM] Front blocked; trying the clearer {turn.lower()} side")
-            _roam_pulse(turn, ROAM_TURN_PULSE_SECONDS)
-            return
-    _roaming_phase = "wait"
-    _roaming_next_at = now + ROAM_RETRY_DELAY_SECONDS
-    print("[ROAM] No sensor-cleared route; staying stopped and rechecking")
+    if reason == "periodic_turn":
+        print(f"[ROAM] Clear path; taking a random {direction.lower()} turn")
+    elif reason == "front_blocked_reverse":
+        print(f"[ROAM] Front blocked; brief reverse attempt {reverse_count}/2")
+    elif reason == "clearer_side":
+        print(f"[ROAM] Front blocked; trying the clearer {direction.lower()} side")
+    duration = {
+        "FORWARD": ROAM_FORWARD_PULSE_SECONDS,
+        "BACKWARD": ROAM_REVERSE_PULSE_SECONDS,
+        "LEFT": ROAM_TURN_PULSE_SECONDS,
+        "RIGHT": ROAM_TURN_PULSE_SECONDS,
+    }[direction]
+    _roam_pulse(direction, duration)
 
 
 def process_safety_events():
@@ -1400,7 +1728,7 @@ def main():
     start_piper()
     preload_model()
     warmup_model()
-    prepare_command_voice_cache({"wake_greeting"})
+    prepare_command_voice_cache({"wake_greeting_v2"})
 
     play(SOUND_STARTUP, blocking=True)
 
@@ -1449,6 +1777,7 @@ def main():
             and not _follow_search_active
             and not timed_motion_active
             and not manager_auto_active
+            and not _roaming_active
         )
         if can_idle:
             idle_seconds = _idle_duration()
@@ -1647,6 +1976,21 @@ def main():
                         "start roaming", "start roaming mode", "roaming mode",
                         "roam around the room", "stop roaming", "stop roaming mode",
                     ]
+                if _identity_enrollment_state == "idle":
+                    expected_phrases = list(expected_phrases or []) + [
+                        "tell me about yourself", "tell us about yourself",
+                        "tell me more about yourself", "tell me everything about yourself",
+                        "explain yourself",
+                        "explain about yourself", "introduce yourself",
+                        "describe yourself", "tell me what you can do",
+                        "what is your purpose", "introduce yourself to everyone",
+                        "what makes you different", "what makes you stand out",
+                        "what makes you different from other robots",
+                        "what makes Thashu special", "what makes Thashu different",
+                        "what is special about you", "what are your capabilities", "describe your features",
+                        "what features do you have", "what can you demonstrate",
+                        "what can you do", "how do you work", "give me your introduction",
+                    ]
                 text = transcribe(raw_audio, expected_phrases=expected_phrases)
 
                 stt_time = time.time() - stt_start
@@ -1680,6 +2024,7 @@ def main():
                 brain_start = time.time()
 
                 identity_command = get_recognition_command(text)
+                self_intro_demo = False
                 identity_save_confirmation = (
                     identity_command == "CONFIRM_SAVE"
                     or (
@@ -2102,6 +2447,14 @@ def main():
                                 + "; ".join(entries)
                                 + "."
                             )
+                elif (
+                    is_self_intro_request(text)
+                    and _identity_enrollment_state == "idle"
+                    and _memory_pending is None
+                    and _memory_delete_pending is None
+                ):
+                    self_intro_demo = True
+                    response = brain.quick.get_response(text) or "I'm Thashu, a student-built robot."
                 elif is_recognition_query(text):
                     recently_recognized = (
                         _last_idle_recognized_person is not None
@@ -2119,7 +2472,10 @@ def main():
                         response = "I don't recognize a confirmed face right now."
                 elif (roaming_command := get_roaming_command(text)) == "START":
                     _roaming_start_pending = True
-                    response = "Roaming mode will start after I finish speaking. Say Hey Thashu to stop it."
+                    response = (
+                        "I'll try to start roaming after I finish speaking. "
+                        "It needs AUTO mode and fresh sensors. Say Hey Thashu to stop it."
+                    )
                 elif roaming_command == "STOP":
                     _roaming_start_pending = False
                     _stop_roaming("voice command")
@@ -2156,12 +2512,17 @@ def main():
                             response = "I couldn't reach the servo controller."
                 elif is_stop_command(text):
                     _roaming_start_pending = False
-                    if _roaming_active:
-                        _stop_roaming("voice STOP")
+                    if _roaming_active or _roaming_motion_active:
+                        _clear_roaming_state()
                     follow_logic.stop()
                     servo_tracker.stop_search()
                     print("[COMMAND] Explicit STOP recognized; sending directly to ESP32")
-                    stop_sequence = stop_motion()
+                    manager = _api_command_manager
+                    stop_sequence = (
+                        manager.stop_preserving_mode()
+                        if manager is not None
+                        else stop_motion()
+                    )
                     if stop_sequence is None:
                         print("[COMMAND] STOP could not be sent; ESP32 link is unavailable")
                         response = "I couldn't reach the motor controller, so I can't confirm the stop."
@@ -2231,7 +2592,11 @@ def main():
 
                     tts_start = time.time()
 
-                    if response == "Follow mode is on.":
+                    if self_intro_demo:
+                        _run_self_intro_showcase(
+                            recognized_person=recognized_person_at_wake,
+                        )
+                    elif response == "Follow mode is on.":
                         if not play_cached_response(response):
                             print(
                                 "[FOLLOW] Activation WAV is missing; run "

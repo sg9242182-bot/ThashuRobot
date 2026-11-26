@@ -146,6 +146,21 @@ _ROAM_STOP_PHRASES = {
     "stop exploring",
 }
 
+_SELF_INTRO_PHRASES = {
+    "tell me about yourself", "tell us about yourself",
+    "tell me more about yourself", "tell me everything about yourself",
+    "explain yourself", "explain about yourself", "introduce yourself",
+    "introduce yourself to everyone", "describe yourself",
+    "give me your introduction", "what makes you different",
+    "what makes you stand out", "what makes you different from other robots",
+    "what makes thashu special", "what makes thashu different",
+    "what is special about you", "what are your capabilities",
+    "describe your features", "what features do you have",
+    "what can you demonstrate", "what can you do",
+    "tell me what you can do", "what is your purpose", "how do you work",
+    "tell me what makes you unique",
+}
+
 
 
 def get_follow_command(user_input: str):
@@ -166,6 +181,12 @@ def get_roaming_command(user_input: str):
     if normalized in _ROAM_STOP_PHRASES:
         return "STOP"
     return None
+
+
+def is_self_intro_request(user_input: str) -> bool:
+    """Return whether the user asked Thashu for its full feature introduction."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", (user_input or "").lower()).strip()
+    return normalized in _SELF_INTRO_PHRASES
 
 
 _RECOGNITION_ENROLL_PHRASES = {

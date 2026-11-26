@@ -1172,17 +1172,17 @@ Phase 12 — Mobile Control and Secure Pi API
 
 Status: IN PROGRESS
 
-Current merged implementation: `codex/idle-sleep-touch-wake` (includes the mux work, offline BLE/hotspot API path, and subsequent Pi changes).
+Current source of truth: `main`. BLE handoff fixes, opt-in roaming, and Flutter movement recovery are included in commit `0421cf0`; target-device verification remains separate.
 
 Scope retained from the original Phase 12 target:
 
-\[ ] Mobile manual movement and STOP.
+\[x] Mobile manual movement and STOP routes are implemented; live app/robot acceptance is tracked below.
 
-\[ ] Robot status and sensor telemetry.
+\[x] Robot status and sensor telemetry routes are implemented; live reconnect/restart acceptance is tracked below.
 
 \[ ] Restart, shutdown, and reset controls with explicit safety/authorization rules.
 
-\[ ] Error and diagnostic status suitable for the app.
+\[x] Read-only error and diagnostic status endpoint is implemented; the current Flutter diagnostics screen remains limited to available telemetry/status fields.
 
 Implementation present on this branch:
 
@@ -1232,14 +1232,22 @@ Offline app-only hotspot path (implementation present; end-to-end reliability re
 
 [x] Add an opt-in second HTTPS listener on the current Wi-Fi IPv4 address while preserving the loopback API and shared ESP32/API runtime. Automatic address rebind closes the old listener, lets the current movement lease expire with normal STOP, preserves mode, and does not resume motion.
 
-[x] Integrate the Flutter BLE handoff and pin the supplied certificate for REST and WebSocket. The app is present on the phone and Tharun reports it reached the Pi and displayed status/telemetry; reliable post-movement recovery is still open below.
+[x] Integrate the Flutter BLE handoff and pin the supplied certificate for REST and WebSocket. Tharun reports provisioning and initial status/telemetry worked; the latest post-movement API recovery is not yet accepted.
+
+[x] Add Flutter held-movement lease renewal every 250 ms, stop renewals on pointer release/app pause/telemetry loss, poll dispatched command outcomes, preserve Manual Control state across tab changes, and retry uncertain move/GET requests safely using the same move request ID.
+
+[ ] Run Flutter formatting, analysis, tests, build, and the supervised manual lease/REST reconnect test against this exact `main` revision. This session has no Flutter SDK or connected phone, so code integration is not device verification.
+
+[x] Add voice-started autonomous roaming with short sensor-gated motion pulses, random direction changes, silent obstacle handling, and cancellation on wake word, voice/API STOP, mode change, shutdown, stale telemetry, or ESP32 fault. It requires AUTO mode, a connected ESP32, fresh telemetry, and confirmed motion state.
+
+[ ] Verify roaming with wheels raised in the agreed safe area, including blocked front/rear, stale/missing sensors, wake/STOP/mode-change cancellation, and distance traveled. Software policy tests do not establish physical stopping distance or safe roaming behavior.
 
 [ ] Verify service startup, BLE provisioning, HTTPS/authenticated telemetry, hotspot address changes, app reconnect, and Pi restart on the target devices with internet disabled. No movement commands are part of provisioning verification.
 
-Evidence/status (updated 2026-11-16): Tharun reports the Thashu app completed BLE provisioning to the phone hotspot and displayed the Pi as reachable with fresh sensor telemetry. Subsequent movement commands were followed by diagnostics REST connection closure and stale telemetry; waiting or changing app pages sometimes restored service. Therefore the initial handoff/reachability path has been exercised, but repeat-command reliability, hotspot isolation, internet-disabled behavior, and reconnect/restart/address-change checks are not accepted. Exact app/backend/firmware revisions were not captured. Keep Phase 12 in progress.
+Evidence/status (updated 2026-11-17): `main` commit `0421cf0` contains BLE handoff retries/peer checks, roaming, and Flutter movement recovery code. The user reports BLE setup connected the Pi to the hotspot, but after saving the app connection the Pi API still did not show as connected; previous phone runs also showed stale telemetry after moves. No successful phone test against this exact source revision is recorded. Keep end-to-end movement recovery, hotspot isolation, internet-disabled operation, reconnect/restart/address-change, and roaming hardware checks open.
 
 
-\[x] Add Flutter runtime Pi address/token settings using HTTPS-only validation and platform secure storage; initialize REST and WebSocket clients from saved settings, add Android internet permission, and expose settings in the app. Integrated from Niteshvar's Phase 12 connection setup branch; Flutter dependency resolution/build and device verification remain pending.
+\[x] Add Flutter runtime Pi address/token settings using HTTPS-only validation and platform secure storage; initialize REST and WebSocket clients from saved settings, add Android internet permission, and expose settings in the app. Current-source Flutter checks and phone verification remain pending.
 
 Pi verification (2026-11-08; user-reported):
 
@@ -1265,11 +1273,11 @@ Still required:
 
 \[ ] Resolve Flutter dependencies and commit the generated lockfile; run Flutter analysis/tests and build the Android APK on the app toolchain.
 
-\[ ] Configure Caddy to use the Tailscale-provisioned certificate for `thashu-robot.<tailnet-name>.ts.net`; verify HTTPS and WebSocket TLS from Android with certificate validation enabled.
+\[-] Tailscale + Caddy hostname/certificate setup is superseded for the offline phone-hotspot workflow. Use only the provisioned hotspot HTTPS listener and app-pinned certificate path described above.
 
 \[ ] Verify telemetry and command-result behavior after API restart, including that uncertain in-flight commands are not replayed.
 
-\[ ] Complete the phone-to-Pi checks over the authorized tailnet and record the API/firmware revisions. Local robot operation must remain available when the tailnet is unavailable.
+\[ ] Complete supervised phone-to-Pi checks over the provisioned phone hotspot and record the app/API/firmware revisions. No Tailscale connection is required for this workflow.
 
 Phase 12 acceptance:
 
@@ -1724,3 +1732,5 @@ Piper startup warm-up follow-up (2026-11-07): Added `start_piper()` to `thashu/v
 
 
 Idle power-save and touch wake (2026-11-16; implementation pending Pi verification): After five minutes without user activity while IDLE, stop camera processing and show the paired SLEEPY expression while retaining wake-word listening. After ten minutes, require an acknowledged normal ESP32 STOP, pause microphone and camera, and show the paired SLEEP expression. A 3.3 V TTP223 touch sensor on Raspberry Pi BCM GPIO22 (physical pin 15) wakes the robot; GPIO17 remains owned by the BLE setup service (short click opens setup; long hold shuts down). Wake waits for a fresh camera frame and a working microphone before the gradual eye transition and pre-cached Piper greeting, then resumes wake-word listening and API motion. Vision start now re-enables processing after a full stop. Eye expression width, height, and corner radius are equal for both OLEDs across expressions; expressive position/shape details remain intentionally distinct. Hardware behavior, wake timing, touch false-trigger behavior, and eye appearance on the robot still require Pi testing; these changes do not put the Pi into Linux shutdown or suspend.
+
+Competition showcase mode (2026-11-24; implementation pending Pi/competition rehearsal): Added a voice-led, ten-cue showcase for eyes, servos, vision/identity, voice, memory, follow, live sensor readings, opt-in roaming, the phone app, and idle sleep/touch wake. Activation and cue transitions require an ESP32 normal-STOP acknowledgement; activation does not start motion. Follow and roaming remain separate, explicit commands using their existing safety checks. Rehearse cue recognition, servo ACK failure handling, follow/roam entry and STOP, live sensor reporting, and the touch-wake explanation on the target robot before competition use. The app and sleep cues are operator-guided rather than remotely actuated.

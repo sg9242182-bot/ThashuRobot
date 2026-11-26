@@ -59,9 +59,11 @@ Command IDs and retry records are stored in SQLite for 24 hours at
 persistent storage. To choose another location, set `THASHU_API_STATE_DB` in
 the robot process environment before starting it.
 
-Stop the robot and API together with `Ctrl+C`. The API invalidates any active
-movement lease and sends normal STOP during graceful shutdown. The startup STOP
-and lease timeout preserve the selected mode; they do not perform a reset.
+Stop the robot and API together with `Ctrl+C` during a manual run. When running
+as a systemd service, use `sudo systemctl stop thashu@tharun.service`; the unit
+sends SIGINT so the robot runs the same cleanup. Shutdown invalidates any active
+movement lease and sends normal STOP. The startup STOP and lease timeout
+preserve the selected mode; they do not perform a reset.
 
 ## Recovery checks (development only)
 
@@ -112,9 +114,38 @@ Settings are read and validated by `thashu/core/config.py`:
 
 Invalid ports, blank path overrides, a TLS trust confirmation other than `0`/`1`, or a face-match debug value other than `0`/`1` stop startup/use with a configuration error.
 
-## Automatic startup
+## Automatic startup on the Pi
 
-Do not enable an automatic-start service until Tharun confirms the Pi's install location, service account, serial-device permissions, and private-network setup. Store the token in a root-readable environment file outside the repository; never put it in a committed service file.
+The systemd unit starts `main.py` as the robot account after boot and starts the
+GPIO-17 BLE provisioning service with it. It does not create a second ESP32 or
+GPIO-17 owner. The unit loads the existing shell-format
+`~/.config/thashu/api.env` (including the private API token) and keeps that
+file outside the repository.
+
+First confirm the Pi checkout, virtual environment, audio libraries, and config
+are at the paths used by the unit: `/home/tharun/ThashuRobot`,
+`/home/tharun/.venvs/thashu`, and `/home/tharun/.config/thashu/api.env`. Then,
+from the repository root on the Pi, install and enable the service:
+
+```bash
+sudo install -m 644 thashu/deploy/systemd/thashu@.service /etc/systemd/system/thashu@.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now thashu@tharun.service
+sudo systemctl status thashu@tharun.service --no-pager
+```
+
+Follow startup output with:
+
+```bash
+sudo journalctl -u thashu@tharun.service -f -o cat
+```
+
+The unit sources the private `api.env` as the `tharun` account. Keep that file
+mode `600`; never copy its token into the unit or journal. To stop it for a
+manual foreground run, first run
+`sudo systemctl stop thashu@tharun.service`; do not run a second `main.py`
+while the service is active. The physical button still performs the existing
+graceful cleanup and Pi power-off.
 
 
 ## HTTPS setup and Android verification
