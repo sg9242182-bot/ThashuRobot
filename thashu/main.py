@@ -92,7 +92,7 @@ motors = MotorController()
 audio  = AudioManager(sample_rate=SAMPLE_RATE, blocksize=BLOCK_SIZE)
 wake = WakeWordEngine(
     model_path=model_path("openwakeword", "hey_jarvis_v0.1.onnx"),
-    threshold=0.5,
+    threshold=0.12,
     cooldown=4.0
 )
 vad    = VoiceActivityDetector()

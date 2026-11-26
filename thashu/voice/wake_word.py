@@ -155,7 +155,11 @@ class WakeWordEngine:
         self.last_detected = 0.0
         self.lock_event = threading.Event()
 
-        print(f"[WAKE] Initialized (model={self.model_name!r})")
+        print(
+            f"[WAKE] Initialized (model={self.model_name!r}, "
+            f"threshold={self.threshold:.2f}, "
+            f"consecutive_hits={self.consecutive_hits})"
+        )
 
     # ── Lock / cooldown control ─────────────────────────────────────────────
 
