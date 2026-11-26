@@ -70,7 +70,11 @@ void SafetyManager::update() {
         activeMotion = STOPPED;
         return;
     }
-    if (!requiredHardwareReady()) {
+    // A runtime failure in an OLED or servo must not permanently disable the
+    // drive controller. Movement safety is enforced below from live ToF data
+    // and the Pi watchdog; presentation peripherals are startup dependencies
+    // only. MotorManager readiness is stable after successful initialization.
+    if (!motors->isReady()) {
         motors->stop();
         activeMotion = STOPPED;
         initialized = false;
@@ -123,5 +127,5 @@ void SafetyManager::setActiveMotion(Motion motion, uint8_t speed) {
 }
 
 bool SafetyManager::ready() const {
-    return initialized && requiredHardwareReady();
+    return initialized && motors && motors->isReady();
 }
