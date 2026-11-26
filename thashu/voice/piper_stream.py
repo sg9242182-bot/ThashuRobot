@@ -124,10 +124,10 @@ class PiperStream:
             f"({self.library_path.name})"
         )
 
-    def _start_stream(self, text):
+    def _start_stream(self, text, length_scale=1.0):
         self.load()
         options = self._lib.piper_default_synthesize_options(self._synth)
-        options.length_scale = 1.0
+        options.length_scale = float(length_scale)
         result = self._lib.piper_synthesize_start(
             self._synth,
             text.encode("utf-8"),
@@ -153,14 +153,14 @@ class PiperStream:
             )
         return result, int(chunk.sample_rate), payload
 
-    def speak(self, text):
+    def speak(self, text, length_scale=1.0):
         """Stream each native decoder chunk directly to the configured speaker."""
         with self._lock:
             started = time.monotonic()
             player = None
             first_audio_at = None
             try:
-                self._start_stream(text.strip())
+                self._start_stream(text.strip(), length_scale=length_scale)
                 while True:
                     result, sample_rate, pcm = self._next_chunk()
                     if pcm:
@@ -218,10 +218,10 @@ class PiperStream:
                     except OSError:
                         pass
 
-    def write_wav(self, text, output_path):
+    def write_wav(self, text, output_path, length_scale=1.0):
         """Generate a cached WAV using the resident streamed voice."""
         with self._lock:
-            self._start_stream(text.strip())
+            self._start_stream(text.strip(), length_scale=length_scale)
             output_path = Path(output_path)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             wav_file = None
