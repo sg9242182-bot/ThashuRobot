@@ -23,8 +23,8 @@
 | GPIO | Function | Direction | Hardware |
 |---:|---|---|---|
 | 2 | Unassigned (boot-strap pin; avoid use) | — | ESP32 |
-| 4 | Unassigned (front-left ToF XSHUT no longer required with per-sensor mux channels) | — | ESP32 |
-| 5 | Camera PAN servo signal | OUT | MG90S |
+| 4 | Camera PAN servo signal (new assignment; wire move and validation pending) | OUT | MG90S |
+| 5 | Unassigned (previous PAN pin) | — | ESP32 |
 | 13 | TA6586 module 1 D0 (motor channel A input 1) | OUT | Motor driver |
 | 14 | Unassigned after M0 startup-twitch remap | — | ESP32 |
 | 15 | Encoder 1 DO (proposed; boot-log strap only) | IN/interrupt | HC-89 on motor 4 |
@@ -61,7 +61,7 @@ GPIO21/22 connect only to the TCA9548A upstream SDA/SCL bus. The mux address is 
 | 6 | Left OLED (own framebuffer and animation pose) |
 | 7 | Right OLED (own framebuffer and animation pose) |
 
-The front ToF XSHUT lines on GPIO4/16/17 are no longer used; unique per-sensor I²C address assignment is unnecessary while each device is isolated on its mux channel. Firmware switches channels sequentially on the shared bus. The OLEDs share address 0x3C but are selected separately so their frames can differ.
+The front ToF XSHUT lines are no longer used; GPIO4 is now assigned to the PAN servo, while GPIO16/17 remain unused. Unique per-sensor I²C address assignment is unnecessary while each device is isolated on its mux channel. Firmware switches channels sequentially on the shared bus. The OLEDs share address 0x3C but are selected separately so their frames can differ.
 
 ## TA6586 board interface and motor GPIO mapping — 2026-10-22
 
@@ -120,12 +120,14 @@ D0/D1 and D2/D3 are the two input pairs; the direction associated with each moto
 
 ## Camera pan/tilt
 
-- GPIO5 → PAN MG90S signal
+- GPIO4 → PAN MG90S signal (move signal lead from GPIO5; validation pending)
 - GPIO12 → TILT MG90S signal (provisional; cold-boot validation required)
 
 Servo power is separate from ESP32 GPIO power, with a common ground.
 
 Servo control will use ESP32 hardware PWM with software rate/position limiting for smooth movement.
+
+Pan reassignment (2026-11-28): GPIO5 was occupied by PAN and GPIO4 was unused after the ToF XSHUT lines were removed. PAN is reassigned in both servo-manager source trees to GPIO4. This is a code/wiring change, not a tested hardware result: move the PAN signal lead from ESP32 GPIO5 to GPIO4, upload the integrated controller, verify pan movement and repeated cold boots, then update the validation record. Raspberry Pi BCM GPIO27 for the touch wake sensor is a separate pin on a different board.
 
 ## HC-SR04
 
@@ -149,11 +151,12 @@ Servo control will use ESP32 hardware PWM with software rate/position limiting f
 
 The allocation avoids GPIO6–11 (flash-connected) and GPIO1/3 (primary serial/programming). GPIO34/35/36/39 are input-only; GPIO32 is HC-SR04 TRIG; GPIO34 carries the M0 encoder input and is not connected to the TA6586.
 
-GPIO5 is used for PAN after successful functional and cold-boot validation. GPIO12 is provisionally assigned to TILT only after reset-level and repeated cold-boot validation; do not use it for HC-SR04 ECHO. GPIO15 is provisionally assigned to encoder 1 (on motor 4); GPIO34 is assigned to encoder 4 (on motor 1). A low level on GPIO15 may suppress ROM boot text, so confirm normal application boot. GPIO32 is used for HC-SR04 TRIG; GPIO2 is unused by the current pin map. GPIO34/35/36/39 are input-only.
+GPIO4 is assigned to PAN pending validation after the 2026-11-28 reassignment; GPIO5 is now unassigned. GPIO12 is provisionally assigned to TILT only after reset-level and repeated cold-boot validation; do not use it for HC-SR04 ECHO. GPIO15 is provisionally assigned to encoder 1 (on motor 4); GPIO34 is assigned to encoder 4 (on motor 1). A low level on GPIO15 may suppress ROM boot text, so confirm normal application boot. GPIO32 is used for HC-SR04 TRIG; GPIO2 is unused by the current pin map. GPIO34/35/36/39 are input-only.
 
 ## Servo validation record
 
-### PAN — GPIO5
+### PAN — previous GPIO5 assignment
+GPIO5 is the previous, historically tested PAN output. Those test results do not validate the new GPIO4 assignment.
 - [x] Movement test passed on GPIO5
 - [x] Slow movement passed
 - [x] Fixed-position test stable
