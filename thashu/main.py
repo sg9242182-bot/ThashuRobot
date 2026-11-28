@@ -783,7 +783,7 @@ def _wake_from_touch():
     if _api_command_manager is not None:
         _api_command_manager.exit_sleep()
     _mark_user_activity()
-    print("[POWER] Awake. Say 'Hey Thashu'")
+    print("[POWER] Awake. Touch GPIO22 when ready to speak")
     return True
 
 
@@ -1279,7 +1279,7 @@ def _start_roaming():
         _roaming_next_gaze_at = time.monotonic()
         _roaming_obstacle_event = False
         _mark_user_activity()
-    print("[ROAM] Enabled: bounded sensor-gated motion; wake word or STOP ends roaming")
+    print("[ROAM] Enabled: bounded sensor-gated motion; GPIO22 touch or STOP ends roaming")
     return True
 
 
@@ -1747,7 +1747,7 @@ def main():
 
     _rearm_wake_after_audio()
 
-    print("[SYSTEM] ── Ready. Say 'Hey Thashu'")
+    print("[SYSTEM] ── Ready. Touch GPIO22 to speak")
 
     eyes.idle()
     # Start autonomous following only after the startup audio has finished.
@@ -1758,6 +1758,8 @@ def main():
 
     while not _shutdown_event.is_set():
         process_safety_events()
+        if runtime.current != RuntimeState.IDLE:
+            _touch_wake_event.clear()
 
         if software_sleeping:
             if _touch_wake_event.wait(timeout=1.0):
@@ -1857,7 +1859,7 @@ def main():
         update_follow_from_vision(vis)
         update_idle_face_tracking(vis)
 
-        # Preserve the latest unique, fresh known face across the wake-word
+        # Preserve the latest unique, fresh known face across the GPIO wake
         # transition, which pauses VisionCore and clears its live snapshot.
         faces = vis.get("faces") or []
         known_faces = [
@@ -1881,11 +1883,11 @@ def main():
         is_speech_now = vad.is_speech(chunk)
         attn.update(vis["faces"], is_speech_now)
 
-        # ── IDLE: watch for wake word ─────────────────────────────────────
+        # ── IDLE: wait for GPIO22 touch ─────────────────────────────────────
         if runtime.current == RuntimeState.IDLE:
             # Ignore wake input only while the camera is actively sweeping
             # to acquire a follow target. Idle face tracking and target tracking
-            # continue to listen for the wake word.
+            # remain available for a deliberate GPIO22 touch.
             # GPIO22 is the deliberate wake trigger; it avoids relying on the
             # unstable spoken wake-word detector. The touch edge also wakes the
             # robot from software sleep above.
@@ -1944,7 +1946,7 @@ def main():
                     continue
 
                 # ── Transcribe ───────────────────────────────────────────
-                # Pause mic and lock wake word before transcribe — not after.
+                # Pause mic before transcribe — not after.
                 # Whisper blocks the main loop for 2–4 s on Pi 4; leaving the
                 # stream running during that time fills and overflows the queue.
                 wake.lock()
@@ -2484,7 +2486,7 @@ def main():
                     _roaming_start_pending = True
                     response = (
                         "I'll try to start roaming after I finish speaking. "
-                        "It needs AUTO mode and fresh sensors. Say Hey Thashu to stop it."
+                        "It needs AUTO mode and fresh sensors. Touch GPIO22 to stop it."
                     )
                 elif roaming_command == "STOP":
                     _roaming_start_pending = False
@@ -2638,7 +2640,7 @@ def main():
                 eyes.idle()
 
 
-                print("[SYSTEM] ── Back to idle, say 'Hey Thashu'")
+                print("[SYSTEM] ── Back to idle; touch GPIO22 to speak")
 
                 transition_runtime(RuntimeState.RETURN_TO_IDLE)
                 transition_runtime(RuntimeState.IDLE)
