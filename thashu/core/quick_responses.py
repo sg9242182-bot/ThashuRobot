@@ -212,6 +212,12 @@ class QuickResponses:
             "who developed thashu overall": [
                 "Tharun is listed as Thashu's creator and overall developer.",
             ],
+            "who is the god of rat": [
+                "Vishal is the God of Rat.",
+            ],
+            "god of rat": [
+                "Vishal is the God of Rat.",
+            ],
             "who is the backend developer of thashu": [
                 "Vishal Raj is Thashu's back-end developer, and he is a good boy.",
             ],
