@@ -167,6 +167,29 @@ class QuickResponses:
             "whos your owner":     ["Tharun is my owner.", "I belong to Tharun.", "Tharun."],
             "who owns you":        ["Tharun owns me.", "I belong to Tharun.", "Tharun."],
 
+            # ── CURRENT OFFICEHOLDERS (review when offices change) ──────────────
+            "who is the chief minister of tamil nadu": [
+                "Thiru C. Joseph Vijay is the Chief Minister of Tamil Nadu.",
+            ],
+            "who is tamil nadu chief minister": [
+                "Thiru C. Joseph Vijay is the Chief Minister of Tamil Nadu.",
+            ],
+            "chief minister of tamil nadu": [
+                "Thiru C. Joseph Vijay is the Chief Minister of Tamil Nadu.",
+            ],
+            "who is the prime minister of india": [
+                "Shri Narendra Modi is the Prime Minister of India.",
+            ],
+            "who is prime minister of india": [
+                "Shri Narendra Modi is the Prime Minister of India.",
+            ],
+            "who is the pm of india": [
+                "Shri Narendra Modi is the Prime Minister of India.",
+            ],
+            "prime minister of india": [
+                "Shri Narendra Modi is the Prime Minister of India.",
+            ],
+
             # ── STATUS ─────────────────────────────────────────────────────────
             "what are you doing":  ["I'm listening and ready to help.", "I'm here waiting for your next command."],
             "whatcha doing":       ["Waiting for you.", "Listening.", "Standing by."],
