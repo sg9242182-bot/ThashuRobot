@@ -67,6 +67,7 @@ FACE_ENROLLMENT_TIMEOUT_SECONDS = 180.0
 
 # ── Idle Power Save / Touch Wake ──────────────────────────────────────────────
 TOUCH_WAKE_PIN = 22  # Raspberry Pi BCM GPIO22, physical pin 15; active-high TTP223 output.
+_touch_wake_event = threading.Event()
 IDLE_REDUCE_AFTER_SECONDS = 5 * 60
 IDLE_SLEEP_AFTER_SECONDS = 10 * 60
 WAKE_CAMERA_READY_TIMEOUT_SECONDS = 12.0
@@ -165,6 +166,12 @@ def setup_touch_wake_input():
     GPIO.setmode(GPIO.BCM)
     # TTP223 touch modules powered from 3.3 V output HIGH on touch.
     GPIO.setup(TOUCH_WAKE_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+    GPIO.add_event_detect(
+        TOUCH_WAKE_PIN,
+        GPIO.RISING,
+        callback=lambda _channel: _touch_wake_event.set(),
+        bouncetime=250,
+    )
     print(
         f"[SYSTEM] Touch wake input ready on BCM GPIO{TOUCH_WAKE_PIN}; "
         "GPIO17 is managed by the BLE setup service"
@@ -1753,12 +1760,9 @@ def main():
         process_safety_events()
 
         if software_sleeping:
-            touch = GPIO.wait_for_edge(
-                TOUCH_WAKE_PIN,
-                GPIO.RISING,
-                timeout=1000,
-            )
-            if touch is not None and _wake_from_touch():
+            if _touch_wake_event.wait(timeout=1.0):
+                _touch_wake_event.clear()
+                if _wake_from_touch():
                 software_sleeping = False
                 idle_reduced = False
             continue
@@ -1882,7 +1886,13 @@ def main():
             # Ignore wake input only while the camera is actively sweeping
             # to acquire a follow target. Idle face tracking and target tracking
             # continue to listen for the wake word.
-            wake_triggered = not _follow_search_active and wake.process(chunk)
+            # GPIO22 is the deliberate wake trigger; it avoids relying on the
+            # unstable spoken wake-word detector. The touch edge also wakes the
+            # robot from software sleep above.
+            gpio_triggered = _touch_wake_event.is_set()
+            if gpio_triggered:
+                _touch_wake_event.clear()
+            wake_triggered = not _follow_search_active and gpio_triggered
             if wake_triggered:
                 _mark_user_activity()
                 if idle_reduced:
@@ -1890,14 +1900,14 @@ def main():
                     eyes.idle()
                     idle_reduced = False
                 if _roaming_active:
-                    _stop_roaming("wake word")
+                    _stop_roaming("GPIO22 touch")
                 _roaming_start_pending = False
                 # Snapshot identity before the interaction pauses vision and STT delays dispatch.
                 recognized_person_at_wake = _recently_recognized_person()
                 transition_runtime(RuntimeState.WAKE_DETECTED)
 
                 print("[SYSTEM] ═══════════════════════════")
-                print("[SYSTEM] 👂  LISTENING...")
+                print("[SYSTEM] 👂  LISTENING (GPIO22 trigger)...")
                 print("[SYSTEM] ═══════════════════════════")
 
                 # ── Play yes.wav ──────────────────────────────────────────
