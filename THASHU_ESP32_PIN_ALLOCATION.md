@@ -127,7 +127,7 @@ Servo power is separate from ESP32 GPIO power, with a common ground.
 
 Servo control will use ESP32 hardware PWM with software rate/position limiting for smooth movement.
 
-Pan reassignment (2026-11-28): GPIO5 was occupied by PAN and GPIO4 was unused after the ToF XSHUT lines were removed. PAN is reassigned in both servo-manager source trees to GPIO4. This is a code/wiring change, not a tested hardware result: move the PAN signal lead from ESP32 GPIO5 to GPIO4, upload the integrated controller, verify pan movement and repeated cold boots, then update the validation record. Raspberry Pi BCM GPIO27 for the touch wake sensor is a separate pin on a different board.
+Pan reassignment (2026-11-28): GPIO5 was occupied by PAN and GPIO4 was unused after the ToF XSHUT lines were removed. PAN is reassigned in both servo-manager source trees to GPIO4. This is a code/wiring change, not a tested hardware result: move the PAN signal lead from ESP32 GPIO5 to GPIO4, upload the integrated controller, verify pan movement and repeated cold boots, then update the validation record. Raspberry Pi BCM GPIO22 for the touch wake sensor is a separate pin on a different board.
 
 ## HC-SR04
 

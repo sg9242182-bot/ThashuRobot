@@ -66,7 +66,7 @@ FACE_ENROLLMENT_SAMPLE_COUNT = 15
 FACE_ENROLLMENT_TIMEOUT_SECONDS = 180.0
 
 # ── Idle Power Save / Touch Wake ──────────────────────────────────────────────
-TOUCH_WAKE_PIN = 27  # Raspberry Pi BCM GPIO27, physical pin 13; active-high TTP223 output.
+TOUCH_WAKE_PIN = 22  # Raspberry Pi BCM GPIO22, physical pin 15; active-high TTP223 output.
 IDLE_REDUCE_AFTER_SECONDS = 5 * 60
 IDLE_SLEEP_AFTER_SECONDS = 10 * 60
 WAKE_CAMERA_READY_TIMEOUT_SECONDS = 12.0
