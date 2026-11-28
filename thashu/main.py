@@ -2485,7 +2485,11 @@ def main():
                     and _memory_pending is None
                     and _memory_delete_pending is None
                 ):
-                    self_intro_demo = True
+                    # "Explain yourself" is a concise fast reply. Keep the
+                    # motion and camera showcase for the other intro requests.
+                    self_intro_demo = (
+                        text.strip().casefold().strip(" .!?") != "explain yourself"
+                    )
                     response = brain.quick.get_response(text) or "I'm Thashu, a student-built robot."
                 elif is_recognition_query(text):
                     recently_recognized = (
