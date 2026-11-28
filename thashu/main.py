@@ -1782,8 +1782,8 @@ def main():
             if _touch_wake_event.wait(timeout=1.0):
                 _touch_wake_event.clear()
                 if _wake_from_touch():
-                software_sleeping = False
-                idle_reduced = False
+                    software_sleeping = False
+                    idle_reduced = False
             continue
 
         manager_auto_active = False
