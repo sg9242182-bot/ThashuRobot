@@ -167,7 +167,9 @@ def _handle_touch_wake_edge(_channel):
     if _touch_wake_idle_level is None:
         return
     try:
-        if GPIO.input(TOUCH_WAKE_PIN) != _touch_wake_idle_level:
+        level = GPIO.input(TOUCH_WAKE_PIN)
+        if level != _touch_wake_idle_level:
+            print(f"[GPIO] GPIO{TOUCH_WAKE_PIN} press edge detected (level={level})")
             _touch_wake_event.set()
     except RuntimeError:
         # GPIO may already be shutting down.
@@ -1911,6 +1913,7 @@ def main():
             gpio_triggered = _touch_wake_event.is_set()
             if gpio_triggered:
                 _touch_wake_event.clear()
+                print("[SYSTEM] GPIO22 trigger received; starting voice interaction")
             wake_triggered = not _follow_search_active and gpio_triggered
             if wake_triggered:
                 _mark_user_activity()
