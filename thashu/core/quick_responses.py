@@ -250,8 +250,22 @@ class QuickResponses:
                 "I'm Thashu. I combine local AI, voice interaction, face recognition, person tracking, expressive eyes, distance sensing, and phone-app control. My Pi handles perception and decisions; my ESP32 handles real-time hardware. I can follow or roam when asked, using short moves guarded by fresh sensor readings. I also have idle power saving and touch wake.",
             ],
             "explain yourself": [
-                "I'm Thashu, a student-built robot that combines onboard vision, voice, local AI, expressive eyes, distance sensors, and phone control. My Raspberry Pi handles perception and conversation; my ESP32 handles real-time motors, sensors, and displays. I can recognize enrolled people, track or follow a selected person, and roam only when asked and when safety readings are fresh.",
-                "I am Thashu. I listen for a wake phrase, understand speech, answer questions, recognize enrolled faces, and move using a separate ESP32 controller. I report distance readings, animate my eyes, and connect to my phone app for diagnostics and manual control. Follow and roaming are opt-in and rely on sensor checks; I do not begin autonomous movement on startup.",
+                "I'm Thashu, a student-built robot. My Raspberry Pi runs my camera, speech, and local AI; my ESP32 controls my motors, sensors, and OLED eyes. I can answer questions, recognize enrolled people, and follow or roam only when asked and when sensor checks allow it. Touch GPIO22 to start listening.",
+            ],
+            "who is the private deo of kanchipuram": [
+                "I have Smt. D. Komathi listed as the Private DEO of Kanchipuram.",
+            ],
+            "who is private deo in kanchipuram": [
+                "I have Smt. D. Komathi listed as the Private DEO of Kanchipuram.",
+            ],
+            "private deo of kanchipuram": [
+                "I have Smt. D. Komathi listed as the Private DEO of Kanchipuram.",
+            ],
+            "name of private deo of kanchipuram": [
+                "I have Smt. D. Komathi listed as the Private DEO of Kanchipuram.",
+            ],
+            "who is the private district educational officer of kanchipuram": [
+                "I have Smt. D. Komathi listed as the Private DEO of Kanchipuram.",
             ],
             "introduce yourself": [
                 "Hello, I'm Thashu. I bring together a Raspberry Pi for local AI, speech, and vision with an ESP32 for real-time motors, sensors, and animated eyes. I can recognize enrolled people, follow a selected person, report sensor readings, and connect to my phone app. My autonomous roaming is opt-in and sensor-gated.",
