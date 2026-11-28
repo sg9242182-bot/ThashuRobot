@@ -212,6 +212,12 @@ class QuickResponses:
             "who developed thashu overall": [
                 "Tharun is listed as Thashu's creator and overall developer.",
             ],
+            "who took more holidays in school": [
+                "Jerush took more holidays in school.",
+            ],
+            "who took the most holidays in school": [
+                "Jerush took more holidays in school.",
+            ],
             "who is the god of rat": [
                 "Vishal is the God of Rat.",
             ],
