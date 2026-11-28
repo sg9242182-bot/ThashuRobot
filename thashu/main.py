@@ -68,6 +68,7 @@ FACE_ENROLLMENT_TIMEOUT_SECONDS = 180.0
 # ── Idle Power Save / Touch Wake ──────────────────────────────────────────────
 TOUCH_WAKE_PIN = 22  # Raspberry Pi BCM GPIO22, physical pin 15; active-high TTP223 output.
 _touch_wake_event = threading.Event()
+_touch_wake_idle_level = None
 IDLE_REDUCE_AFTER_SECONDS = 5 * 60
 IDLE_SLEEP_AFTER_SECONDS = 10 * 60
 WAKE_CAMERA_READY_TIMEOUT_SECONDS = 12.0
@@ -161,19 +162,35 @@ def _idle_duration():
 
 
 # ── Touch Wake Input ──────────────────────────────────────────────────────────
+def _handle_touch_wake_edge(_channel):
+    """Latch only the press edge, whether the input is active high or low."""
+    if _touch_wake_idle_level is None:
+        return
+    try:
+        if GPIO.input(TOUCH_WAKE_PIN) != _touch_wake_idle_level:
+            _touch_wake_event.set()
+    except RuntimeError:
+        # GPIO may already be shutting down.
+        return
+
+
 def setup_touch_wake_input():
-    """Claim the touch input; GPIO17 belongs to the separate BLE service."""
+    """Claim GPIO22 for a button or TTP223; GPIO17 belongs to BLE setup."""
+    global _touch_wake_idle_level
     GPIO.setmode(GPIO.BCM)
-    # TTP223 touch modules powered from 3.3 V output HIGH on touch.
-    GPIO.setup(TOUCH_WAKE_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+    # Pull-up supports a common button wired between GPIO22 and GND. TTP223
+    # modules actively drive LOW at rest and HIGH on touch, so they still work.
+    GPIO.setup(TOUCH_WAKE_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    time.sleep(0.05)
+    _touch_wake_idle_level = GPIO.input(TOUCH_WAKE_PIN)
     GPIO.add_event_detect(
         TOUCH_WAKE_PIN,
-        GPIO.RISING,
-        callback=lambda _channel: _touch_wake_event.set(),
-        bouncetime=250,
+        GPIO.BOTH,
+        callback=_handle_touch_wake_edge,
+        bouncetime=100,
     )
     print(
-        f"[SYSTEM] Touch wake input ready on BCM GPIO{TOUCH_WAKE_PIN}; "
+        f"[SYSTEM] GPIO{TOUCH_WAKE_PIN} wake input ready (idle level {_touch_wake_idle_level}); "
         "GPIO17 is managed by the BLE setup service"
     )
 
