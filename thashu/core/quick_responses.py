@@ -190,6 +190,35 @@ class QuickResponses:
                 "Shri Narendra Modi is the Prime Minister of India.",
             ],
 
+            # ── DEVELOPER CREDITS ─────────────────────────────────────────────
+            "who is the front end developer of the thashu app": [
+                "Niteshvar is the front-end developer of the Thashu app. He is the Poop God and the Don of Kanchipuram.",
+            ],
+            "who is the frontend developer of the thashu app": [
+                "Niteshvar is the front-end developer of the Thashu app. He is the Poop God and the Don of Kanchipuram.",
+            ],
+            "who is the front end developer": [
+                "Niteshvar is the front-end developer of the Thashu app. He is the Poop God and the Don of Kanchipuram.",
+            ],
+            "who is the poop god": [
+                "That is Niteshvar, the front-end developer of the Thashu app and the Don of Kanchipuram.",
+            ],
+            "who is the don of kanchipuram": [
+                "That is Niteshvar, the front-end developer of the Thashu app, also known as the Poop God.",
+            ],
+            "who is the overall developer of thashu": [
+                "Tharun is listed as Thashu's creator and overall developer.",
+            ],
+            "who developed thashu overall": [
+                "Tharun is listed as Thashu's creator and overall developer.",
+            ],
+            "who is the backend developer of thashu": [
+                "Vishal Raj is Thashu's back-end developer, and he is a good boy.",
+            ],
+            "who is the back end developer of thashu": [
+                "Vishal Raj is Thashu's back-end developer, and he is a good boy.",
+            ],
+
             # ── STATUS ─────────────────────────────────────────────────────────
             "what are you doing":  ["I'm listening and ready to help.", "I'm here waiting for your next command."],
             "whatcha doing":       ["Waiting for you.", "Listening.", "Standing by."],
